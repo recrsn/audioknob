@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp32s3/rom/tjpgd.h"
 
@@ -55,13 +56,11 @@ static UINT write_cb(JDEC *jd, void *bitmap, JRECT *rect) {
     return 1;
 }
 
-bool artwork_decode(const uint8_t *jpeg, size_t len, uint16_t out[ARTWORK_SIZE * ARTWORK_SIZE]) {
-    static uint8_t pool[POOL_SIZE];
-    static decode_ctx_t ctx;
+static bool decode(const uint8_t *jpeg, size_t len, uint16_t *out, uint8_t *pool, decode_ctx_t *ctx) {
     JDEC jd;
 
-    ctx = (decode_ctx_t){.data = jpeg, .len = len, .out = out};
-    JRESULT res = jd_prepare(&jd, read_cb, pool, sizeof(pool), &ctx);
+    *ctx = (decode_ctx_t){.data = jpeg, .len = len, .out = out};
+    JRESULT res = jd_prepare(&jd, read_cb, pool, POOL_SIZE, ctx);
     if (res != JDR_OK) {
         ESP_LOGW(TAG, "unsupported JPEG (%d)", res);
         return false;
@@ -74,8 +73,8 @@ bool artwork_decode(const uint8_t *jpeg, size_t len, uint16_t out[ARTWORK_SIZE *
     }
     unsigned sw = jd.width >> scale, sh = jd.height >> scale;
     for (int i = 0; i < ARTWORK_SIZE; i++) {
-        ctx.src_x[i] = (i * sw + sw / 2) / ARTWORK_SIZE;
-        ctx.src_y[i] = (i * sh + sh / 2) / ARTWORK_SIZE;
+        ctx->src_x[i] = (i * sw + sw / 2) / ARTWORK_SIZE;
+        ctx->src_y[i] = (i * sh + sh / 2) / ARTWORK_SIZE;
     }
 
     res = jd_decomp(&jd, write_cb, scale);
@@ -84,4 +83,14 @@ bool artwork_decode(const uint8_t *jpeg, size_t len, uint16_t out[ARTWORK_SIZE *
         return false;
     }
     return true;
+}
+
+bool artwork_decode(const uint8_t *jpeg, size_t len, uint16_t out[ARTWORK_SIZE * ARTWORK_SIZE]) {
+    // Kept out of internal RAM, which AirPlay's RTP task needs.
+    uint8_t *pool = heap_caps_malloc(POOL_SIZE, MALLOC_CAP_SPIRAM);
+    decode_ctx_t *ctx = heap_caps_calloc(1, sizeof(*ctx), MALLOC_CAP_SPIRAM);
+    bool ok = pool && ctx && decode(jpeg, len, out, pool, ctx);
+    heap_caps_free(pool);
+    heap_caps_free(ctx);
+    return ok;
 }

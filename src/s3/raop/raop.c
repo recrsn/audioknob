@@ -367,6 +367,7 @@ static void handle_set_parameter(raop_ctx_t *ctx, const key_data_t *headers, con
     if (!body) {
         return;
     }
+    ESP_LOGI(TAG, "SET_PARAMETER %s, %d bytes", ctype ? ctype : "(no type)", len);
 
     if (ctype && !strcasecmp(ctype, "application/x-dmap-tagged")) {
         dmap_track_t track = {0};

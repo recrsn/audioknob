@@ -444,6 +444,14 @@ static void idle_blob_create(lv_obj_t *parent, int idx, lv_align_t align, int32_
     lv_obj_align(blob, align, ofs_x, ofs_y);
 }
 
+// The state poll pushes every 33 ms; lv_label_set_text() frees and reallocates
+// the string and redraws even when it's unchanged, churning LVGL's heap.
+static void label_set_text(lv_obj_t *label, const char *text) {
+    if (strcmp(lv_label_get_text(label), text) != 0) {
+        lv_label_set_text(label, text);
+    }
+}
+
 static void set_visible(lv_obj_t *obj, bool visible) {
     if (visible) {
         lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
@@ -470,13 +478,13 @@ static void glance_update(bool show, const char *source, lv_color_t tint, const 
         upper[i] = (source[i] >= 'a' && source[i] <= 'z') ? source[i] - 'a' + 'A' : source[i];
     }
     upper[i] = '\0';
-    lv_label_set_text(idle_screen.source_label, upper);
+    label_set_text(idle_screen.source_label, upper);
     lv_obj_set_style_image_recolor(idle_screen.source_icon, tint, 0);
     if (has_title) {
-        lv_label_set_text(idle_screen.track_title, title);
+        label_set_text(idle_screen.track_title, title);
     }
     if (has_subtitle) {
-        lv_label_set_text(idle_screen.track_subtitle, subtitle);
+        label_set_text(idle_screen.track_subtitle, subtitle);
     }
 }
 
@@ -577,11 +585,17 @@ static void wireless_screen_build(void) {
 
     // -- connected / now-playing state --
     wireless_screen.tile = art_tile_create(wireless_screen.screen, lv_color_hex(0x4ea1ff), WIRELESS_TILE_Y);
-    lv_obj_t *tile_icon = lv_image_create(wireless_screen.tile);
-    lv_image_set_src(tile_icon, &icon_music_note);
-    lv_obj_set_style_image_recolor(tile_icon, lv_color_white(), 0);
-    lv_obj_set_style_image_recolor_opa(tile_icon, LV_OPA_COVER, 0);
-    lv_obj_center(tile_icon);
+    wireless_screen.tile_icon = lv_image_create(wireless_screen.tile);
+    lv_image_set_src(wireless_screen.tile_icon, &icon_music_note);
+    lv_obj_set_style_image_recolor(wireless_screen.tile_icon, lv_color_white(), 0);
+    lv_obj_set_style_image_recolor_opa(wireless_screen.tile_icon, LV_OPA_COVER, 0);
+    lv_obj_center(wireless_screen.tile_icon);
+
+    lv_obj_set_style_clip_corner(wireless_screen.tile, true, 0);
+    lv_obj_set_style_pad_all(wireless_screen.tile, 0, 0);
+    wireless_screen.art = lv_image_create(wireless_screen.tile);
+    lv_obj_center(wireless_screen.art);
+    lv_obj_add_flag(wireless_screen.art, LV_OBJ_FLAG_HIDDEN);
 
     wireless_screen.transport = flex_row_create(wireless_screen.screen, TRANSPORT_GAP, WIRELESS_TRANSPORT_Y);
     wireless_screen.prev_icon = transport_button_create(wireless_screen.transport, LV_SYMBOL_PREV,
@@ -590,6 +604,16 @@ static void wireless_screen_build(void) {
                                                           TRANSPORT_PRIMARY_SIZE, &lv_font_montserrat_22, false);
     wireless_screen.next_icon = transport_button_create(wireless_screen.transport, LV_SYMBOL_NEXT,
                                                           TRANSPORT_SECONDARY_SIZE, &lv_font_montserrat_16, true);
+
+    static const ui_transport_t buttons[] = {UI_TRANSPORT_PREV, UI_TRANSPORT_PLAY_PAUSE, UI_TRANSPORT_NEXT};
+    lv_obj_t *labels[] = {wireless_screen.prev_icon, wireless_screen.play_icon, wireless_screen.next_icon};
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *btn = lv_obj_get_parent(labels[i]);
+        lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_ext_click_area(btn, 8);
+        lv_obj_set_style_opa(btn, LV_OPA_COVER, 0);
+        lv_obj_add_event_cb(btn, transport_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)buttons[i]);
+    }
 
     wireless_screen.title_label = marquee_label_create(wireless_screen.screen, &inter_semi_16, lv_color_white());
     lv_obj_align(wireless_screen.title_label, LV_ALIGN_CENTER, 0, WIRELESS_TITLE_Y);
@@ -809,7 +833,7 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     ring_set_volume(wireless_screen.ring, state->volume);
     lv_image_set_src(wireless_screen.source_icon, airplay ? &icon_airplay : &icon_bluetooth);
     lv_obj_set_style_image_recolor(wireless_screen.source_icon, tint, 0);
-    lv_label_set_text(wireless_screen.source_label, airplay ? "AirPlay" : "Bluetooth");
+    label_set_text(wireless_screen.source_label, airplay ? "AirPlay" : "Bluetooth");
     lv_obj_set_style_arc_color(wireless_screen.ring, tint, LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(wireless_screen.tile, tint, 0);
     lv_obj_set_style_bg_color(wireless_screen.backdrop, tint, 0);
@@ -840,16 +864,17 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
 
     if (waiting) {
         lv_image_set_src(wireless_screen.wait_icon, airplay ? &icon_airplay : &icon_bluetooth);
-        lv_label_set_text(wireless_screen.wait_title, airplay ? "Waiting for AirPlay" : "Ready to pair");
-        lv_label_set_text(wireless_screen.wait_subtitle,
+        label_set_text(wireless_screen.wait_title, airplay ? "Waiting for AirPlay" : "Ready to pair");
+        label_set_text(wireless_screen.wait_subtitle,
                            airplay ? "Select this speaker from Control Center" : "Discoverable over Bluetooth");
     } else {
-        lv_label_set_text(wireless_screen.play_icon,
+        label_set_text(wireless_screen.play_icon,
                            state->muted ? LV_SYMBOL_MUTE : (state->playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));
         lv_obj_set_style_text_color(wireless_screen.play_icon, state->muted ? lv_color_hex(0xff5a5a) : lv_color_white(),
                                      0);
-        lv_label_set_text(wireless_screen.title_label, has_track ? track->title : source_name);
-        lv_label_set_text(wireless_screen.subtitle_label, subtitle);
+        label_set_text(wireless_screen.title_label, has_track ? track->title : source_name);
+        label_set_text(wireless_screen.subtitle_label, subtitle);
+        update_artwork(track);
     }
 
     surface_source(wireless_screen.screen, state->playing, &was_playing);
@@ -864,7 +889,7 @@ void ui_update_usb(uint8_t volume, bool muted, bool playing) {
     static bool was_playing;
     ring_set_volume(usb_screen.ring, volume);
 
-    lv_label_set_text(usb_screen.play_icon, muted ? LV_SYMBOL_MUTE : (playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));
+    label_set_text(usb_screen.play_icon, muted ? LV_SYMBOL_MUTE : (playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));
     lv_obj_set_style_text_color(usb_screen.play_icon, muted ? lv_color_hex(0xff5a5a) : lv_color_white(), 0);
 
     surface_source(usb_screen.screen, playing, &was_playing);
@@ -877,21 +902,21 @@ void ui_update_usb(uint8_t volume, bool muted, bool playing) {
 
 void ui_update_clock(bool synced, const struct tm *local_time) {
     if (!synced || !local_time) {
-        lv_label_set_text(idle_screen.time_label, "--:--");
-        lv_label_set_text(idle_screen.date_label, "Waiting for time sync");
+        label_set_text(idle_screen.time_label, "--:--");
+        label_set_text(idle_screen.date_label, "Waiting for time sync");
         return;
     }
 
     char buf[32];
     strftime(buf, sizeof(buf), "%H:%M", local_time);
-    lv_label_set_text(idle_screen.time_label, buf);
+    label_set_text(idle_screen.time_label, buf);
 
     // "Sun 4 Oct" like the mock; %d would zero-pad and %-d isn't portable.
     char weekday[8], month[8];
     strftime(weekday, sizeof(weekday), "%a", local_time);
     strftime(month, sizeof(month), "%b", local_time);
     snprintf(buf, sizeof(buf), "%s %d %s", weekday, local_time->tm_mday, month);
-    lv_label_set_text(idle_screen.date_label, buf);
+    label_set_text(idle_screen.date_label, buf);
 }
 
 // Layout for the round panel: title at the top, QR in the middle, status and

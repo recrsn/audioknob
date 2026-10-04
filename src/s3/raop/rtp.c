@@ -227,12 +227,21 @@ rtp_resp_t rtp_init(struct in_addr host, const uint8_t *aeskey, const uint8_t *a
         ctx->frame_size = fmtp_vals[1];
         ctx->alac = alac_dec_create(fmtp_vals);
         ok &= ctx->alac != NULL;
-        ok &= buffers_alloc(ctx);
+        if (!ctx->alac) {
+            ESP_LOGE(TAG, "ALAC decoder create failed");
+        }
+        if (!buffers_alloc(ctx)) {
+            ESP_LOGE(TAG, "audio buffer alloc failed");
+            ok = false;
+        }
     }
 
     for (int i = 0; ok && i < 3; i++) {
         ctx->sockets[i].sock = bind_socket(&ctx->sockets[i].lport, SOCK_DGRAM);
         ok &= ctx->sockets[i].sock >= 0;
+        if (ctx->sockets[i].sock < 0) {
+            ESP_LOGE(TAG, "bind socket %d failed: errno %d", i, errno);
+        }
     }
 
     if (ok) {
@@ -240,6 +249,9 @@ rtp_resp_t rtp_init(struct in_addr host, const uint8_t *aeskey, const uint8_t *a
         ok = xTaskCreatePinnedToCore(rtp_thread_func, "rtp", RTP_STACK_SIZE, ctx, RTP_TASK_PRIO, &ctx->thread,
                                      RTP_TASK_CORE) == pdPASS;
         ctx->running = ok;
+        if (!ok) {
+            ESP_LOGE(TAG, "rtp task create failed, free internal %u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+        }
     }
 
     if (!ok) {

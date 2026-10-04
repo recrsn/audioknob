@@ -72,6 +72,7 @@ static void set_artwork(const uint8_t *jpeg, size_t len) {
     if (!s_art[back] || !artwork_decode(jpeg, len, s_art[back])) {
         return;
     }
+    ESP_LOGI(TAG, "artwork decoded from %u bytes", (unsigned)len);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_art_front = back;
     s_art_version++;
