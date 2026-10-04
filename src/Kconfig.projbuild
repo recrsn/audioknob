@@ -1,0 +1,22 @@
+menu "AudioKnob"
+
+    config AK_WIFI_SSID
+        string "Fallback WiFi SSID (s3 target)"
+        default ""
+        help
+            Optional, for development. Normally WiFi is set up on-device: with
+            no saved network the S3 shows a QR code for its setup hotspot and
+            captive portal, and stores what the user picks in NVS. These
+            values are only used when NVS holds no network yet.
+
+    config AK_WIFI_PASSWORD
+        string "Fallback WiFi password (s3 target)"
+        default ""
+
+    config AK_AIRPLAY_NAME
+        string "AirPlay speaker name"
+        default "AudioKnob"
+        help
+            Shown in the sender's AirPlay picker (e.g. iOS Control Center).
+
+endmenu

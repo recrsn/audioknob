@@ -1,0 +1,11 @@
+# Managed (component-registry) dependencies for the single component
+# registered in CMakeLists.txt in this directory. Deliberately does NOT
+# include lvgl/lvgl -- that's brought in as a plain PlatformIO lib (see
+# platformio.ini / CLAUDE.md), and pulling a second, separately-configured
+# copy through the component manager would fight that setup's lv_conf.h
+# wiring rather than share it.
+dependencies:
+  espressif/esp_lcd_st77916: "^1.0.1"
+  espressif/esp_lcd_touch_cst816s: "^1.1.0"
+  # AirPlay (_raop._tcp) advertisement and DACP remote discovery on the S3.
+  espressif/mdns: "^1.14.0"

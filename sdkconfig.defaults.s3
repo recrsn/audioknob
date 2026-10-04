@@ -1,0 +1,27 @@
+# ESP32-S3R8 on this board: 16MB flash, 8MB octal PSRAM (spec.md §6). Wired
+# in via board_build.cmake_extra_args in platformio.ini's [env:s3], same as
+# sdkconfig.defaults.esp32.
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_s3.csv"
+
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+# Keep WiFi/lwIP buffers out of internal RAM; the LCD/I2S DMA needs it.
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# 1 ms ticks so the AirPlay player can wake close to a frame's playtime.
+CONFIG_FREERTOS_HZ=1000
+
+# RTSP listener + session, 3 RTP sockets, DACP, mDNS, SNTP.
+CONFIG_LWIP_MAX_SOCKETS=16
+
+# ntp.c takes NTP servers from DHCP when the router offers them.
+CONFIG_LWIP_DHCP_GET_NTP_SRV=y
+
+# AirPlay sends a packet every 8 ms and WiFi delivers them in A-MPDU bursts;
+# the default 6-slot UDP queue drops audio, which snowballs into resend storms.
+CONFIG_LWIP_UDP_RECVMBOX_SIZE=64

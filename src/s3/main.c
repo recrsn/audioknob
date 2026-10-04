@@ -1,0 +1,102 @@
+#include <string.h>
+#include <time.h>
+
+#include "airplay.h"
+#include "audio_out.h"
+#include "audio_source.h"
+#include "esp_log.h"
+#include "knob.h"
+#include "lcd_driver.h"
+#include "lvgl.h"
+#include "ntp.h"
+#include "uart_link.h"
+#include "ui.h"
+#include "wifi.h"
+
+static const char *TAG = "s3";
+
+// AirPlay is "in front" -- its state on screen, the S3 knob driving it --
+// while it holds the DAC, or while it has a session open and A2DP is idle.
+// Otherwise the ESP32 owns wireless controls and this MCU only displays.
+static bool airplay_in_front(void) {
+    if (audio_source_active() == AUDIO_SOURCE_AIRPLAY) {
+        return true;
+    }
+    wireless_state_t esp32;
+    return airplay_is_connected() && !(uart_link_get_latest(&esp32) && esp32.playing);
+}
+
+// Polls, rather than being pushed to, per spec.md's State Sync Protocol:
+// producers (UART RX task, AirPlay) only write their own shared state and
+// never touch ui.c. Runs on the LVGL task's own timer (lcd_driver_init()
+// already holds the LVGL lock for the whole lv_timer_handler() call this
+// fires inside of), at the same ~33ms cadence the ESP32 side rate-limits
+// its outgoing STATE_UPDATE frames to.
+static void state_poll_timer_cb(lv_timer_t *timer) {
+    (void)timer;
+
+    wireless_state_t state;
+    track_info_t wire_track = {0};
+    bool has_state = true;
+
+    if (airplay_in_front()) {
+        airplay_get_state(&state, &wire_track);
+    } else if ((has_state = uart_link_get_latest(&state))) {
+        // Fine if this comes back false (nothing has played since boot, or
+        // the BT side has no metadata source wired up yet) -- wire_track
+        // just stays zeroed, which ui_update_wireless() renders as "Not playing".
+        uart_link_get_latest_track(&wire_track);
+    }
+
+    wifi_setup_info_t setup;
+    if (wifi_get_setup_info(&setup)) {
+        ui_show_wifi_setup(setup.qr_payload, setup.ap_ssid, setup.ap_password, setup.status);
+    }
+
+    if (has_state) {
+        ui_track_info_t track;
+        memcpy(track.title, wire_track.title, sizeof(track.title));
+        memcpy(track.artist, wire_track.artist, sizeof(track.artist));
+        memcpy(track.album, wire_track.album, sizeof(track.album));
+        ui_update_wireless(&state, &track);
+    }
+
+    time_t now = time(NULL);
+    struct tm local_time;
+    localtime_r(&now, &local_time);
+    ui_update_clock(ntp_is_synced(), &local_time);
+}
+
+static void on_knob_rotate(int steps) {
+    if (airplay_in_front()) {
+        airplay_adjust_volume(steps);
+    }
+}
+
+static void on_knob_press(void) {
+    if (airplay_in_front()) {
+        airplay_toggle_play_pause();
+    }
+}
+
+void app_main(void) {
+    ESP_LOGI(TAG, "ESP32-S3 target boot");
+
+    uart_link_start();
+
+    audio_out_init();
+    airplay_init();
+    // Past boot strapping, so GPIO0 (CH445P select) is safe to drive now.
+    audio_source_init(airplay_preempt);
+
+    lcd_driver_init();
+    lcd_driver_lvgl_lock();
+    ui_init();
+    lv_timer_create(state_poll_timer_cb, 33, NULL);
+    lcd_driver_lvgl_unlock();
+
+    knob_start(on_knob_rotate, on_knob_press);
+
+    wifi_start(airplay_network_up);
+    ntp_start();
+}

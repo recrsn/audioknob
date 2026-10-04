@@ -1,0 +1,231 @@
+/*
+ * RTSP/HTTP helpers for the RAOP receiver.
+ *
+ * Ported from philippe44's AirConnect / squeezelite-esp32 util.c
+ * (c) Philippe 2016-2017, philippe_44@outlook.com -- MIT License,
+ * https://opensource.org/licenses/MIT
+ */
+
+#include "http_util.h"
+
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+
+#include "esp_log.h"
+#include "lwip/sockets.h"
+
+#define LINE_TIMEOUT_MS 100
+
+static const char *TAG = "http_util";
+
+// Returns the line length, 0 on timeout/peer close, -1 on socket error.
+static int read_line(int sock, char *line, int maxlen) {
+    struct pollfd pfd = {.fd = sock, .events = POLLIN};
+    int count = 0;
+
+    while (count < maxlen - 1) {
+        if (poll(&pfd, 1, LINE_TIMEOUT_MS) <= 0) {
+            break;
+        }
+
+        char ch;
+        int n = recv(sock, &ch, 1, 0);
+        if (n < 0) {
+            if (errno == EAGAIN) {
+                break;
+            }
+            ESP_LOGE(TAG, "socket %d read error: %s", sock, strerror(errno));
+            line[count] = '\0';
+            return -1;
+        }
+        if (n == 0) {
+            break;
+        }
+        if (ch == '\n') {
+            line[count] = '\0';
+            return count;
+        }
+        if (ch != '\r') {
+            line[count++] = ch;
+        }
+    }
+
+    line[count] = '\0';
+    return count;
+}
+
+static char *ltrim(char *s) {
+    while (isspace((unsigned char)*s)) {
+        s++;
+    }
+    return s;
+}
+
+bool http_parse(int sock, char *method, size_t method_size, key_data_t *kd, int max_headers, char **body, int *body_len) {
+    char line[256];
+    int i = 0;
+
+    kd[0].key = NULL;
+    *body = NULL;
+    *body_len = 0;
+
+    if (read_line(sock, line, sizeof(line)) <= 0) {
+        return false;
+    }
+
+    char fmt[16];
+    snprintf(fmt, sizeof(fmt), "%%%us", (unsigned)(method_size - 1));
+    if (sscanf(line, fmt, method) != 1) {
+        ESP_LOGE(TAG, "missing method");
+        return false;
+    }
+
+    while (read_line(sock, line, sizeof(line)) > 0) {
+        // Obsolete line folding: append to the previous header's value.
+        if (i && (line[0] == ' ' || line[0] == '\t')) {
+            char *cont = ltrim(line);
+            char *joined = realloc(kd[i - 1].data, strlen(kd[i - 1].data) + strlen(cont) + 1);
+            if (joined) {
+                strcat(joined, cont);
+                kd[i - 1].data = joined;
+            }
+            continue;
+        }
+
+        char *colon = strchr(line, ':');
+        if (!colon) {
+            ESP_LOGE(TAG, "bad header line");
+            kd_free(kd);
+            return false;
+        }
+        if (i == max_headers) {
+            ESP_LOGW(TAG, "dropping header beyond %d: %s", max_headers, line);
+            continue;
+        }
+
+        *colon = '\0';
+        kd[i].key = strdup(line);
+        kd[i].data = strdup(ltrim(colon + 1));
+        if (!strcasecmp(kd[i].key, "Content-Length")) {
+            *body_len = atoi(kd[i].data);
+        }
+        kd[++i].key = NULL;
+    }
+
+    if (*body_len > 0) {
+        *body = malloc(*body_len + 1);
+        int received = 0;
+        while (*body && received < *body_len) {
+            int n = recv(sock, *body + received, *body_len - received, 0);
+            if (n <= 0) {
+                break;
+            }
+            received += n;
+        }
+        if (!*body || received != *body_len) {
+            ESP_LOGE(TAG, "body receive error %d/%d", received, *body_len);
+            free(*body);
+            *body = NULL;
+            *body_len = 0;
+        } else {
+            (*body)[*body_len] = '\0';
+        }
+    }
+
+    return true;
+}
+
+bool http_send(int sock, const char *start_line, const key_data_t *kd) {
+    size_t len = strlen(start_line) + 4 + 1;
+    for (int i = 0; kd && kd[i].key; i++) {
+        len += strlen(kd[i].key) + 2 + strlen(kd[i].data) + 2;
+    }
+
+    char *buf = malloc(len);
+    if (!buf) {
+        return false;
+    }
+
+    size_t pos = snprintf(buf, len, "%s\r\n", start_line);
+    for (int i = 0; kd && kd[i].key; i++) {
+        pos += snprintf(buf + pos, len - pos, "%s: %s\r\n", kd[i].key, kd[i].data);
+    }
+    pos += snprintf(buf + pos, len - pos, "\r\n");
+
+    bool ok = send(sock, buf, pos, 0) == (ssize_t)pos;
+    if (!ok) {
+        ESP_LOGE(TAG, "send failed: %s", strerror(errno));
+    }
+    free(buf);
+    return ok;
+}
+
+const char *kd_lookup(const key_data_t *kd, const char *key) {
+    for (int i = 0; kd && kd[i].key; i++) {
+        if (!strcasecmp(kd[i].key, key)) {
+            return kd[i].data;
+        }
+    }
+    return NULL;
+}
+
+void kd_add(key_data_t *kd, const char *key, const char *data) {
+    int i = 0;
+    while (kd[i].key) {
+        i++;
+    }
+    kd[i].key = strdup(key);
+    kd[i].data = strdup(data);
+    kd[i + 1].key = NULL;
+}
+
+void kd_free(key_data_t *kd) {
+    for (int i = 0; kd && kd[i].key; i++) {
+        free(kd[i].key);
+        free(kd[i].data);
+    }
+    kd[0].key = NULL;
+}
+
+char *strextract(const char *s1, const char *beg, const char *end) {
+    const char *p1 = strcasestr(s1, beg);
+    if (!p1) {
+        return NULL;
+    }
+    p1 += strlen(beg);
+
+    const char *p2 = strcasestr(p1, end);
+    if (!p2) {
+        return strdup(p1);
+    }
+    return strndup(p1, p2 - p1);
+}
+
+int bind_socket(uint16_t *port, int type) {
+    int sock = socket(AF_INET, type, 0);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "cannot create socket");
+        return -1;
+    }
+
+    struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+        .sin_port = htons(*port),
+    };
+    if (bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        ESP_LOGE(TAG, "cannot bind socket: %s", strerror(errno));
+        close(sock);
+        return -1;
+    }
+
+    if (!*port) {
+        socklen_t len = sizeof(addr);
+        getsockname(sock, (struct sockaddr *)&addr, &len);
+        *port = ntohs(addr.sin_port);
+    }
+    return sock;
+}
