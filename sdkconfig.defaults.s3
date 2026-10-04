@@ -25,3 +25,8 @@ CONFIG_LWIP_DHCP_GET_NTP_SRV=y
 # AirPlay sends a packet every 8 ms and WiFi delivers them in A-MPDU bursts;
 # the default 6-slot UDP queue drops audio, which snowballs into resend storms.
 CONFIG_LWIP_UDP_RECVMBOX_SIZE=64
+
+# Internal RAM is for what needs speed (DMA, task stacks); the rest goes to
+# PSRAM. AirPlay's RSA handshake (once per session) and mDNS data don't.
+CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y

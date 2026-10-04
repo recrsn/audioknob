@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -18,7 +19,7 @@
 #define DNS_TTL_S 60
 
 #define MAX_NETWORKS 20
-#define PAGE_SIZE 8192
+#define PAGE_SIZE 8192  // PSRAM: setup pages aren't speed-critical
 #define FORM_MAX 512
 
 static const char *TAG = "wifi_portal";
@@ -168,7 +169,7 @@ static esp_err_t root_handler(httpd_req_t *req) {
     bool refresh = httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK && strstr(query, "rescan");
 
     wifi_network_t *networks = calloc(MAX_NETWORKS, sizeof(wifi_network_t));
-    page_t page = {.buf = malloc(PAGE_SIZE)};
+    page_t page = {.buf = heap_caps_malloc(PAGE_SIZE, MALLOC_CAP_SPIRAM)};
     if (!networks || !page.buf) {
         free(networks);
         free(page.buf);
@@ -233,7 +234,7 @@ static esp_err_t connect_handler(httpd_req_t *req) {
 }
 
 static esp_err_t status_handler(httpd_req_t *req) {
-    page_t page = {.buf = malloc(PAGE_SIZE)};
+    page_t page = {.buf = heap_caps_malloc(PAGE_SIZE, MALLOC_CAP_SPIRAM)};
     if (!page.buf) {
         return httpd_resp_send_500(req);
     }

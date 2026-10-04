@@ -14,10 +14,14 @@
 #include <string.h>
 #include <strings.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "lwip/sockets.h"
 
 #define LINE_TIMEOUT_MS 100
+// Artwork JPEGs are the largest bodies a sender sends; anything bigger is
+// drained rather than letting a peer pick the allocation size.
+#define MAX_BODY_LEN (1024 * 1024)
 
 static const char *TAG = "http_util";
 
@@ -57,6 +61,32 @@ static int read_line(int sock, char *line, int maxlen) {
     return count;
 }
 
+static bool recv_exact(int sock, char *buf, int len) {
+    int received = 0;
+    while (received < len) {
+        int n = recv(sock, buf + received, len - received, 0);
+        if (n <= 0) {
+            ESP_LOGE(TAG, "body receive error %d/%d", received, len);
+            return false;
+        }
+        received += n;
+    }
+    return true;
+}
+
+// Keeps the connection in sync past a body we won't store.
+static bool drain(int sock, long len) {
+    char scratch[256];
+    while (len > 0) {
+        int chunk = len < (long)sizeof(scratch) ? (int)len : (int)sizeof(scratch);
+        if (!recv_exact(sock, scratch, chunk)) {
+            return false;
+        }
+        len -= chunk;
+    }
+    return true;
+}
+
 static char *ltrim(char *s) {
     while (isspace((unsigned char)*s)) {
         s++;
@@ -67,6 +97,7 @@ static char *ltrim(char *s) {
 bool http_parse(int sock, char *method, size_t method_size, key_data_t *kd, int max_headers, char **body, int *body_len) {
     char line[256];
     int i = 0;
+    long content_len = 0;
 
     kd[0].key = NULL;
     *body = NULL;
@@ -110,29 +141,28 @@ bool http_parse(int sock, char *method, size_t method_size, key_data_t *kd, int 
         kd[i].key = strdup(line);
         kd[i].data = strdup(ltrim(colon + 1));
         if (!strcasecmp(kd[i].key, "Content-Length")) {
-            *body_len = atoi(kd[i].data);
+            content_len = strtol(kd[i].data, NULL, 10);
         }
         kd[++i].key = NULL;
     }
 
-    if (*body_len > 0) {
-        *body = malloc(*body_len + 1);
-        int received = 0;
-        while (*body && received < *body_len) {
-            int n = recv(sock, *body + received, *body_len - received, 0);
-            if (n <= 0) {
-                break;
-            }
-            received += n;
+    if (content_len > MAX_BODY_LEN) {
+        ESP_LOGW(TAG, "dropping %ld-byte body", content_len);
+        if (!drain(sock, content_len)) {
+            kd_free(kd);
+            return false;
         }
-        if (!*body || received != *body_len) {
-            ESP_LOGE(TAG, "body receive error %d/%d", received, *body_len);
+    } else if (content_len > 0) {
+        // PSRAM: bodies are parsed once, never on a hot path.
+        *body = heap_caps_malloc(content_len + 1, MALLOC_CAP_SPIRAM);
+        if (!*body || !recv_exact(sock, *body, (int)content_len)) {
             free(*body);
             *body = NULL;
-            *body_len = 0;
-        } else {
-            (*body)[*body_len] = '\0';
+            kd_free(kd);
+            return false;
         }
+        (*body)[content_len] = '\0';
+        *body_len = (int)content_len;
     }
 
     return true;

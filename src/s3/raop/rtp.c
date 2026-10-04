@@ -51,7 +51,8 @@
 #define MAX_PACKET 1408
 // ALAC's bit reader peeks past the end of the payload.
 #define PACKET_SLACK 16
-#define MAX_FRAME_SIZE 4096
+// Every AirPlay 1 sender uses 352-frame packets; the player is fixed at it too.
+#define MAX_FRAME_SIZE 352
 #define MIN_LATENCY 11025
 #define MAX_LATENCY ((120 * RAOP_SAMPLE_RATE * 2) / 100)
 #define RESEND_TO_MS 250
@@ -102,8 +103,6 @@ struct rtp_s {
     int latency;  // rtp hold depth in samples
     uint32_t resent_req, resent_rec, silent_frames, discarded, in_frames, out_frames;
     abuf_t *audio_buffer;
-    int16_t *pcm_pool;
-    int16_t *silence;
     seq_t ab_read, ab_write;
     SemaphoreHandle_t ab_mutex;
     TaskHandle_t thread, joiner;
@@ -167,16 +166,28 @@ static bool parse_fmtp(const char *fmtp, int out[12]) {
     return n == 12;
 }
 
-static bool buffers_alloc(rtp_t *ctx) {
-    ctx->audio_buffer = calloc(BUFFER_FRAMES, sizeof(abuf_t));
-    ctx->pcm_pool = heap_caps_malloc((size_t)BUFFER_FRAMES * ctx->frame_size * 2 * sizeof(int16_t), MALLOC_CAP_SPIRAM);
-    ctx->silence = calloc(ctx->frame_size * 2, sizeof(int16_t));
-    if (!ctx->audio_buffer || !ctx->pcm_pool || !ctx->silence) {
+static const int16_t s_silence[MAX_FRAME_SIZE * 2];
+
+// Allocated on the first session and kept: re-allocating ~720 KB of
+// contiguous PSRAM per SETUP can fail once the heap fragments. Only one RTP
+// session exists at a time (raop ends the old one before starting the next).
+static abuf_t *s_audio_buffer;  // internal: touched on every packet
+static int16_t *s_pcm_pool;
+
+static bool buffers_get(rtp_t *ctx) {
+    if (!s_audio_buffer) {
+        s_audio_buffer = malloc(BUFFER_FRAMES * sizeof(abuf_t));
+    }
+    if (!s_pcm_pool) {
+        s_pcm_pool = heap_caps_malloc((size_t)BUFFER_FRAMES * MAX_FRAME_SIZE * 2 * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    }
+    if (!s_audio_buffer || !s_pcm_pool) {
         return false;
     }
     for (int i = 0; i < BUFFER_FRAMES; i++) {
-        ctx->audio_buffer[i].data = ctx->pcm_pool + (size_t)i * ctx->frame_size * 2;
+        s_audio_buffer[i] = (abuf_t){.data = s_pcm_pool + (size_t)i * MAX_FRAME_SIZE * 2};
     }
+    ctx->audio_buffer = s_audio_buffer;
     return true;
 }
 
@@ -230,7 +241,7 @@ rtp_resp_t rtp_init(struct in_addr host, const uint8_t *aeskey, const uint8_t *a
         if (!ctx->alac) {
             ESP_LOGE(TAG, "ALAC decoder create failed");
         }
-        if (!buffers_alloc(ctx)) {
+        if (!buffers_get(ctx)) {
             ESP_LOGE(TAG, "audio buffer alloc failed");
             ok = false;
         }
@@ -259,6 +270,9 @@ rtp_resp_t rtp_init(struct in_addr host, const uint8_t *aeskey, const uint8_t *a
         rtp_end(ctx);
         return resp;
     }
+    // Internal RAM headroom is what decides whether the next SETUP's task create succeeds.
+    ESP_LOGI(TAG, "started; internal free %u, largest %u", (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 
     resp.cport = ctx->sockets[CONTROL].lport;
     resp.tport = ctx->sockets[TIMING].lport;
@@ -294,9 +308,6 @@ void rtp_end(rtp_t *ctx) {
     }
     free(ctx->decrypt_buf);
     free(ctx->packet);
-    free(ctx->audio_buffer);
-    heap_caps_free(ctx->pcm_pool);
-    free(ctx->silence);
     free(ctx);
 }
 
@@ -381,7 +392,7 @@ static void buffer_push_packet(rtp_t *ctx) {
                 ctx->pcm_cb(frame->data, frame->frames, playtime);
                 frame->ready = false;
             } else {
-                ctx->pcm_cb(ctx->silence, ctx->frame_size, playtime);
+                ctx->pcm_cb(s_silence, ctx->frame_size, playtime);
                 ctx->silent_frames++;
                 frame->missed = true;
             }

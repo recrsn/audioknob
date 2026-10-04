@@ -13,3 +13,9 @@ CONFIG_BT_A2DP_ENABLE=y
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_esp32.csv"
+
+# The controller runs BR/EDR-only; Bluedroid's BLE host (GATT, BLE SMP) would
+# still be built and initialised, costing DRAM on a chip with no PSRAM.
+CONFIG_BT_BLE_ENABLED=n
+# Controller allows 2 ACL links (BTDM_CTRL_BR_EDR_MAX_ACL_CONN); default host pool is 4.
+CONFIG_BT_ACL_CONNECTIONS=2
