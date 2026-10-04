@@ -44,6 +44,11 @@ static void pcnt_init(void) {
     ESP_ERROR_CHECK(pcnt_channel_set_edge_action(chan_b, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE));
     ESP_ERROR_CHECK(pcnt_channel_set_level_action(chan_b, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
 
+    // PCNT only routes the pins as inputs; without pull-ups a mechanical
+    // encoder's open contacts float and no edges are counted.
+    ESP_ERROR_CHECK(gpio_set_pull_mode(ENC_A_GPIO, GPIO_PULLUP_ONLY));
+    ESP_ERROR_CHECK(gpio_set_pull_mode(ENC_B_GPIO, GPIO_PULLUP_ONLY));
+
     ESP_ERROR_CHECK(pcnt_unit_enable(s_pcnt_unit));
     ESP_ERROR_CHECK(pcnt_unit_clear_count(s_pcnt_unit));
     ESP_ERROR_CHECK(pcnt_unit_start(s_pcnt_unit));

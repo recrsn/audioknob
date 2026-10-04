@@ -10,7 +10,7 @@
 #include "freertos/task.h"
 #include "protocol.h"
 
-// ESP32S3_TX/RX — see repo spec's pin reference table (matches S3's GPIO48/38).
+// Pin directions are the reverse of the schematic net names; see uart_link.c.
 #define UART_PORT UART_NUM_1
 #define UART_TX_GPIO 18
 #define UART_RX_GPIO 23

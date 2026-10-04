@@ -16,7 +16,7 @@ AirPlay and USB share the S3's I2S output path and CH445P selection state (both 
 
 **AirPlay scope**: AirPlay 1 (RAOP) only — ALAC 44.1 kHz/16-bit/stereo, RSA/AES-encrypted or clear, text metadata (title/artist/album) via DMAP, DACP back-channel for volume and play/pause. AirPlay 2 needs HomeKit pairing and PTP timing and is out of reach on this hardware; iOS still streams to AirPlay 1 receivers.
 **Source switch**: ESP32-S3 GPIO0 drives CH445P select (`I2S_SWITCH_IN`): high = S3 side, low = ESP32 side (see §7). The S3 has firmware-level authority over which MCU's I2S reaches the DAC, regardless of which MCU owns local business logic for that mode (see Control Ownership below). *Caveat: GPIO0 is a boot-strap pin — do not drive it until app init is complete, past power-on bootloader sampling.*
-**Inter-MCU link**: dedicated UART, S3 GPIO38(TX)/GPIO48(RX) ↔ ESP32 IO18(TX)/IO23(RX). Full duplex, confirmed on both schematic sheets. Carries control/metadata only (now-playing info, volume state, connection status, mode-switch requests, touch-originated commands). Not used for audio — I2S/CH445P handles that with zero CPU cost and no UART bandwidth concern.
+**Inter-MCU link**: dedicated UART, S3 GPIO48(TX)/GPIO38(RX) ↔ ESP32 IO23(RX)/IO18(TX). Full duplex. The schematic net names (`ESP32S3_TX`/`ESP32S3_RX`) read the opposite way round; direction verified on hardware. Carries control/metadata only (now-playing info, volume state, connection status, mode-switch requests, touch-originated commands). Not used for audio — I2S/CH445P handles that with zero CPU cost and no UART bandwidth concern.
 **Control ownership rule**: whichever MCU owns the currently active audio path also owns local input (its own encoder) and volume state for that path. The other MCU is a pure display + touch-passthrough peripheral for that mode.
 - **A2DP**: ESP32 is authoritative. It reads its own encoder (`EC2_A`/`EC2_B`) directly, applies volume locally, translates to/from A2DP/AVRCP absolute-volume messages, and pushes state (title/artist, volume level, connection status) to the S3 over UART for display only. The S3's own encoder is inactive in this mode; touch input on the S3 (e.g. play/pause tap) is forwarded to the ESP32 as a command, not executed locally.
 - **AirPlay**: S3 is authoritative. It reads its own encoder (`EC1_A`/`EC1_B`) and `SW2`, applies volume as software gain on its own PCM, pushes knob changes to the sender over DACP (`dmcp.device-volume`), applies the sender's slider (RTSP `SET_PARAMETER volume`) locally, and sends play/pause over DACP. The S3 knob drives AirPlay while AirPlay holds the DAC, or has a session open while A2DP is idle; otherwise the ESP32's knob owns wireless volume.
@@ -138,7 +138,7 @@ Both sub-sources are always available; there is no manual sub-source toggle. **L
 | GPIO19 | `USB_DN` — native USB D− |
 | GPIO20 | `USB_DP` — native USB D+ |
 | GPIO21 | `LCD_RST` |
-| GPIO38 | `ESP32S3_TX` — inter-MCU UART |
+| GPIO38 | `ESP32S3_TX` — inter-MCU UART (S3 RX, from ESP32 IO18) |
 | GPIO39 | `S3_I2S_DAC_BCK` |
 | GPIO40 | `S3_I2S_DAC_LRCK/WS` |
 | GPIO41 | `S3_I2S_DAC_DIN` |
@@ -146,14 +146,14 @@ Both sub-sources are always available; there is no manual sub-source toggle. **L
 | GPIO45 | `PDM_MIC_SCK` |
 | GPIO46 | `PDM_MIC_DATA` |
 | GPIO47 | `LCD_BLK` (backlight, via Q1 A03400A MOSFET) |
-| GPIO48 | `ESP32S3_RX` — inter-MCU UART |
+| GPIO48 | `ESP32S3_RX` — inter-MCU UART (S3 TX, to ESP32 IO23) |
 ### ESP32-U4WDH (U14) — confirmed nets
 | GPIO (IOxx) | Net / Function |
 |---|---|
-| IO18 | `ESP32S3_TX` — inter-MCU UART (matches S3's GPIO48 RX) |
+| IO18 | `ESP32S3_TX` — inter-MCU UART (ESP32 TX → S3 GPIO38 RX) |
 | IO19 | `EC2_A` (ESP32-side encoder) |
 | IO22 | `EC2_B` (ESP32-side encoder) |
-| IO23 | `ESP32S3_RX` — inter-MCU UART (matches S3's GPIO38 TX) |
+| IO23 | `ESP32S3_RX` — inter-MCU UART (ESP32 RX ← S3 GPIO48 TX) |
 | IO25 | `ESP32_I2S_DAC_BCK` |
 | IO26 | `ESP32_I2S_DAC_DIN` |
 | IO27 | `ESP32_I2S_DAC_LRCK/WS` |

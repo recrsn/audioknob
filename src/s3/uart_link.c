@@ -9,10 +9,11 @@
 #include "freertos/task.h"
 #include "protocol.h"
 
-// ESP32S3_TX/RX — see repo spec's pin reference table (matches ESP32's IO23/18).
+// Verified on hardware: S3 RX is GPIO38 (fed by ESP32 IO18), S3 TX is GPIO48
+// (feeds ESP32 IO23) -- the schematic net names read the other way round.
 #define UART_PORT UART_NUM_1
-#define UART_TX_GPIO 38
-#define UART_RX_GPIO 48
+#define UART_TX_GPIO 48
+#define UART_RX_GPIO 38
 
 static const char *TAG = "uart_link";
 
