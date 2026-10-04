@@ -23,6 +23,7 @@ typedef enum {
     RAOP_EVENT_STALLED,        // no RTP traffic for 30 s
     RAOP_EVENT_VOLUME,
     RAOP_EVENT_METADATA,
+    RAOP_EVENT_ARTWORK,        // JPEG cover art for the current track
 } raop_event_type_t;
 
 typedef struct {
@@ -33,6 +34,11 @@ typedef struct {
         struct {
             const char *title, *artist, *album;
         } metadata;
+        // Only valid during the callback.
+        struct {
+            const uint8_t *data;
+            size_t len;
+        } artwork;
     };
 } raop_event_t;
 

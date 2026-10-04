@@ -59,6 +59,18 @@ void avrcp_controller_toggle_play_pause(void) {
     send_passthrough(key_code);
 }
 
+void avrcp_controller_next(void) {
+    if (s_connected) {
+        send_passthrough(ESP_AVRC_PT_CMD_FORWARD);
+    }
+}
+
+void avrcp_controller_prev(void) {
+    if (s_connected) {
+        send_passthrough(ESP_AVRC_PT_CMD_BACKWARD);
+    }
+}
+
 bool avrcp_controller_pause(void) {
     if (!s_connected) {
         return false;

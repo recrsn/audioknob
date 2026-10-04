@@ -31,7 +31,7 @@ Only two resources in the system need an explicit cross-chip ownership rule. Aud
 ## 2. Inter-MCU State Sync Protocol
 Governs how A2DP state (volume, mute, connection, playback, track) reaches the S3's display over the inter-MCU UART. AirPlay state never crosses the UART — it originates on the S3. (An earlier NTP relay frame, type 0x02, was retired when NTP moved to the S3.)
 
-The reverse direction carries commands: `MSG_COMMAND` (0x04, S3→ESP32) with a one-byte `cmd` payload, same framing. Fire-and-forget — no ACK; the ESP32's next `STATE_UPDATE` shows the effect. Defined commands: `CMD_PAUSE` (0x01, stop A2DP playback). Touch-originated A2DP commands should extend this enum rather than add frame types.
+The reverse direction carries commands: `MSG_COMMAND` (0x04, S3→ESP32) with a one-byte `cmd` payload, same framing. Fire-and-forget — no ACK; the ESP32's next `STATE_UPDATE` shows the effect. Defined commands: `CMD_PAUSE` (0x01, stop A2DP playback), `CMD_PLAY_PAUSE` (0x02), `CMD_NEXT` (0x03), `CMD_PREV` (0x04) (touch transport buttons, sent as AVRCP passthrough). Touch-originated A2DP commands should extend this enum rather than add frame types.
 ### Framing
 Fixed format, no escaping needed — this is a short on-board trace, not a noisy long cable run:
 ```

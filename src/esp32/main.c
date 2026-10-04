@@ -22,6 +22,15 @@ static void on_command(protocol_cmd_t cmd) {
             a2dp_sink_disconnect();
         }
         break;
+    case CMD_PLAY_PAUSE:
+        avrcp_controller_toggle_play_pause();
+        break;
+    case CMD_NEXT:
+        avrcp_controller_next();
+        break;
+    case CMD_PREV:
+        avrcp_controller_prev();
+        break;
     default:
         ESP_LOGW(TAG, "unknown command 0x%02x", cmd);
         break;

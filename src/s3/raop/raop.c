@@ -377,6 +377,9 @@ static void handle_set_parameter(raop_ctx_t *ctx, const key_data_t *headers, con
             };
             ctx->event_cb(&event);
         }
+    } else if (ctype && !strcasecmp(ctype, "image/jpeg")) {
+        raop_event_t event = {.type = RAOP_EVENT_ARTWORK, .artwork = {.data = (const uint8_t *)body, .len = len}};
+        ctx->event_cb(&event);
     } else if ((p = strcasestr(body, "volume:"))) {
         float db;
         if (sscanf(p + 7, "%f", &db) == 1) {
@@ -523,11 +526,11 @@ raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], raop_event_cb_t 
     }
 
     // Advertised capabilities: ALAC only (no raw PCM decoder here) at
-    // 44.1k/16/stereo over UDP, RSA-encrypted or clear, text metadata only
-    // (no artwork/progress).
+    // 44.1k/16/stereo over UDP, RSA-encrypted or clear, text metadata and
+    // JPEG artwork (no progress).
     const mdns_txt_item_t txt[] = {
         {"txtvers", "1"}, {"am", "AudioKnob"}, {"tp", "UDP"},  {"sm", "false"}, {"sv", "false"},
-        {"ek", "1"},      {"et", "0,1"},       {"md", "0"},    {"cn", "1"},   {"ch", "2"},
+        {"ek", "1"},      {"et", "0,1"},       {"md", "0,1"},    {"cn", "1"},   {"ch", "2"},
         {"ss", "16"},     {"sr", "44100"},     {"vn", "3"},
     };
     char instance[96];

@@ -15,10 +15,23 @@
 
 static const char *TAG = "s3";
 
+// Manual pick from the UI's switch screen. It holds only while the DAC
+// stays where the pick put it: if the other source then starts playing,
+// "last to start wins" takes over and the pick is dropped.
+typedef enum { PICK_NONE, PICK_AIRPLAY, PICK_BLUETOOTH } source_pick_t;
+static volatile source_pick_t s_pick = PICK_NONE;
+static audio_source_t s_pick_dac;
+
 // AirPlay is "in front" -- its state on screen, the S3 knob driving it --
 // while it holds the DAC, or while it has a session open and A2DP is idle.
 // Otherwise the ESP32 owns wireless controls and this MCU only displays.
 static bool airplay_in_front(void) {
+    if (s_pick != PICK_NONE) {
+        if (audio_source_active() == s_pick_dac) {
+            return s_pick == PICK_AIRPLAY;
+        }
+        s_pick = PICK_NONE;
+    }
     if (audio_source_active() == AUDIO_SOURCE_AIRPLAY) {
         return true;
     }
@@ -54,10 +67,13 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
     }
 
     if (has_state) {
-        ui_track_info_t track;
+        ui_track_info_t track = {0};
         memcpy(track.title, wire_track.title, sizeof(track.title));
         memcpy(track.artist, wire_track.artist, sizeof(track.artist));
         memcpy(track.album, wire_track.album, sizeof(track.album));
+        if (airplay_in_front()) {
+            track.art = airplay_get_artwork(&track.art_version);
+        }
         ui_update_wireless(&state, &track);
     }
 
@@ -79,6 +95,39 @@ static void on_knob_press(void) {
     }
 }
 
+static void on_transport(ui_transport_t button) {
+    if (airplay_in_front()) {
+        switch (button) {
+        case UI_TRANSPORT_PREV:
+            airplay_prev();
+            break;
+        case UI_TRANSPORT_PLAY_PAUSE:
+            airplay_toggle_play_pause();
+            break;
+        case UI_TRANSPORT_NEXT:
+            airplay_next();
+            break;
+        }
+        return;
+    }
+    static const protocol_cmd_t cmds[] = {[UI_TRANSPORT_PREV] = CMD_PREV,
+                                          [UI_TRANSPORT_PLAY_PAUSE] = CMD_PLAY_PAUSE,
+                                          [UI_TRANSPORT_NEXT] = CMD_NEXT};
+    uart_link_send_command(cmds[button]);
+}
+
+static void on_source_pick(ui_source_t source) {
+    if (source == UI_SOURCE_AIRPLAY) {
+        audio_source_claim_airplay();
+        s_pick = PICK_AIRPLAY;
+    } else {
+        airplay_preempt();
+        audio_source_release_airplay();
+        s_pick = PICK_BLUETOOTH;
+    }
+    s_pick_dac = audio_source_active();
+}
+
 void app_main(void) {
     ESP_LOGI(TAG, "ESP32-S3 target boot");
 
@@ -92,6 +141,8 @@ void app_main(void) {
     lcd_driver_init();
     lcd_driver_lvgl_lock();
     ui_init();
+    ui_set_transport_handler(on_transport);
+    ui_set_source_handler(on_source_pick);
     lv_timer_create(state_poll_timer_cb, 33, NULL);
     lcd_driver_lvgl_unlock();
 

@@ -23,9 +23,15 @@ bool airplay_is_connected(void);
 // screen can render either (source is always SOURCE_AIRPLAY).
 void airplay_get_state(wireless_state_t *state, track_info_t *track);
 
+// Current cover art as an ARTWORK_SIZE^2 RGB565 bitmap, or NULL if the
+// sender has provided none. version changes whenever the bitmap does.
+const uint16_t *airplay_get_artwork(uint32_t *version);
+
 // Local controls. Non-blocking: DACP requests go out on the control task.
 void airplay_adjust_volume(int steps);
 void airplay_toggle_play_pause(void);
+void airplay_next(void);
+void airplay_prev(void);
 
 // A2DP took the DAC: stop local output and pause the sender (or drop the
 // session if it has no DACP remote). Non-blocking.

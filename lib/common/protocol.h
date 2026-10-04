@@ -43,6 +43,10 @@ typedef struct __attribute__((packed)) {
 typedef enum {
     // Stop A2DP playback: AirPlay on the S3 has taken the DAC.
     CMD_PAUSE = 0x01,
+    // Touch transport buttons, forwarded over AVRCP.
+    CMD_PLAY_PAUSE = 0x02,
+    CMD_NEXT = 0x03,
+    CMD_PREV = 0x04,
 } protocol_cmd_t;
 
 typedef struct __attribute__((packed)) {
