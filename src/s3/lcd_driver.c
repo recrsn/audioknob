@@ -63,6 +63,7 @@ static const char *TAG = "lcd_driver";
 static SemaphoreHandle_t s_lvgl_mutex;
 static lv_indev_t *s_touch_indev;
 static esp_lcd_touch_handle_t s_touch_handle;
+static i2c_master_bus_handle_t s_i2c_bus;
 
 void lcd_driver_lvgl_lock(void) {
     xSemaphoreTake(s_lvgl_mutex, portMAX_DELAY);
@@ -198,11 +199,11 @@ static i2c_master_bus_handle_t touch_i2c_bus_init(void) {
 }
 
 static void touch_init(lv_display_t *disp) {
-    i2c_master_bus_handle_t i2c_bus = touch_i2c_bus_init();
+    s_i2c_bus = touch_i2c_bus_init();
 
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
     const esp_lcd_panel_io_i2c_config_t tp_io_cfg = ESP_LCD_TOUCH_IO_I2C_CST816S_CONFIG();
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(i2c_bus, &tp_io_cfg, &tp_io_handle));
+    ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(s_i2c_bus, &tp_io_cfg, &tp_io_handle));
 
     const esp_lcd_touch_config_t tp_cfg = {
         .x_max = LCD_H_RES,
@@ -271,4 +272,8 @@ void lcd_driver_init(void) {
     xTaskCreate(lvgl_task, "lvgl", 8192, NULL, 4, NULL);
 
     ESP_LOGI(TAG, "LCD + touch initialized (%dx%d, %d MHz QSPI)", LCD_H_RES, LCD_V_RES, CONFIG_AK_LCD_PCLK_MHZ);
+}
+
+i2c_master_bus_handle_t lcd_driver_i2c_bus(void) {
+    return s_i2c_bus;
 }

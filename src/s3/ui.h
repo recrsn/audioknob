@@ -49,6 +49,16 @@ typedef enum {
 // until a stream starts or the user swipes home.
 void ui_set_source_handler(void (*handler)(ui_source_t source));
 
+// Knob input for screens the UI owns outright (timer, stopwatch). Returns
+// false when the active screen has no use for it, leaving the caller to
+// apply it elsewhere (volume, play/pause). Call with the LVGL lock held.
+bool ui_knob_rotate(int steps);
+bool ui_knob_press(void);
+
+// Called on the LVGL task when the timer starts ringing (true) and when the
+// alert is dismissed (false), so hardware can add a buzz; must not block.
+void ui_set_timer_alert_handler(void (*handler)(bool ringing));
+
 // Pushes USB UAC2 volume/mute/playback state into the USB now-playing screen.
 void ui_update_usb(uint8_t volume, bool muted, bool playing);
 

@@ -1,7 +1,7 @@
 // Desktop entry point for the LVGL native emulator target (env:native).
 // Mirrors main.c's role on real hardware, but drives an SDL window instead
 // of the QSPI LCD, so the UI in ui.c can be iterated on without flashing.
-#include <stdio.h>
+#include <time.h>
 
 #include "lvgl.h"
 #include "ui.h"
@@ -9,40 +9,47 @@
 #define WINDOW_WIDTH  360
 #define WINDOW_HEIGHT 360
 
-// No real UART/USB backend exists yet on this desktop target, so feed the
-// screens fake state on a timer purely to make the UI demoable/iterable.
-// Cycles idle -> wireless -> idle -> USB -> idle to also demo ui.c's
-// auto-navigation (there's no mode-select menu; screens switch themselves
-// based on which source is actually playing).
-#define CYCLE_TICKS       80 // 250ms/tick -> 20s full loop
-#define WIRELESS_START    20
-#define WIRELESS_END      45
-#define USB_START         50
-#define USB_END           75
-
-static void demo_tick_cb(lv_timer_t *timer) {
+static void clock_tick_cb(lv_timer_t *timer) {
     (void)timer;
-    static uint32_t tick = 0;
-    tick++;
-    uint32_t phase = tick % CYCLE_TICKS;
+    time_t now = time(NULL);
+    struct tm local_time;
+    localtime_r(&now, &local_time);
+    ui_update_clock(true, &local_time);
+}
 
-    bool wireless_playing = phase >= WIRELESS_START && phase < WIRELESS_END;
-    bool usb_playing = phase >= USB_START && phase < USB_END;
+// Stands in for the hardware knob: Up/Down arrows turn it and Enter presses
+// it; the mouse wheel (turn + middle-click) works too. Everything lands here
+// through one focused, invisible object.
+static void knob_key_cb(lv_event_t *e) {
+    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+        ui_knob_press();
+        return;
+    }
+    // In edit mode the wheel's turns arrive as LEFT/RIGHT; on the keyboard
+    // those stay unmapped.
+    bool wheel = lv_indev_get_type(lv_indev_active()) == LV_INDEV_TYPE_ENCODER;
+    uint32_t key = lv_event_get_key(e);
+    if (key == LV_KEY_UP || (wheel && key == LV_KEY_RIGHT)) {
+        ui_knob_rotate(1);
+    } else if (key == LV_KEY_DOWN || (wheel && key == LV_KEY_LEFT)) {
+        ui_knob_rotate(-1);
+    }
+}
 
-    wireless_state_t wireless = {
-        .volume = (tick * 3) % 101,
-        .muted = 0,
-        .connected = 1,
-        .playing = wireless_playing,
-        .source = (tick / CYCLE_TICKS) % 2 == 0 ? SOURCE_AIRPLAY : SOURCE_A2DP,
-    };
-    ui_track_info_t track = {0};
-    snprintf(track.title, sizeof(track.title), "Demo Track %lu", (unsigned long)(tick / CYCLE_TICKS + 1));
-    snprintf(track.artist, sizeof(track.artist), "Native Emulator");
-    snprintf(track.album, sizeof(track.album), "env:native");
-    ui_update_wireless(&wireless, &track);
+static void knob_emulation_create(void) {
+    lv_group_t *group = lv_group_create();
+    lv_obj_t *sink = lv_obj_create(lv_layer_top());
+    lv_obj_remove_style_all(sink);
+    lv_obj_set_size(sink, 0, 0);
+    lv_obj_add_event_cb(sink, knob_key_cb, LV_EVENT_KEY, NULL);
+    lv_obj_add_event_cb(sink, knob_key_cb, LV_EVENT_CLICKED, NULL);
+    lv_group_add_obj(group, sink);
+    // Edit mode makes encoder turns arrive as LEFT/RIGHT keys instead of
+    // moving focus.
+    lv_group_set_editing(group, true);
 
-    ui_update_usb((tick * 5) % 101, false, usb_playing);
+    lv_indev_set_group(lv_sdl_mousewheel_create(), group);
+    lv_indev_set_group(lv_sdl_keyboard_create(), group);
 }
 
 int main(void) {
@@ -52,7 +59,8 @@ int main(void) {
     lv_sdl_mouse_create();
 
     ui_init();
-    lv_timer_create(demo_tick_cb, 250, NULL);
+    knob_emulation_create();
+    lv_timer_create(clock_tick_cb, 1000, NULL);
 
     while (1) {
         uint32_t idle_ms = lv_timer_handler();

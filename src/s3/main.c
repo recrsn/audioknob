@@ -5,6 +5,7 @@
 #include "audio_out.h"
 #include "audio_source.h"
 #include "esp_log.h"
+#include "haptic.h"
 #include "knob.h"
 #include "lcd_driver.h"
 #include "lvgl.h"
@@ -82,14 +83,22 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
     ui_update_clock(ntp_is_synced(), &local_time);
 }
 
+// The timer/stopwatch screens claim the knob first; otherwise it drives
+// AirPlay when that's in front. Runs on the knob task, hence the lock.
 static void on_knob_rotate(int steps) {
-    if (airplay_in_front()) {
+    lcd_driver_lvgl_lock();
+    bool used = ui_knob_rotate(steps);
+    lcd_driver_lvgl_unlock();
+    if (!used && airplay_in_front()) {
         airplay_adjust_volume(steps);
     }
 }
 
 static void on_knob_press(void) {
-    if (airplay_in_front()) {
+    lcd_driver_lvgl_lock();
+    bool used = ui_knob_press();
+    lcd_driver_lvgl_unlock();
+    if (!used && airplay_in_front()) {
         airplay_toggle_play_pause();
     }
 }
@@ -115,6 +124,14 @@ static void on_transport(ui_transport_t button) {
     uart_link_send_command(cmds[button]);
 }
 
+static void on_timer_alert(bool ringing) {
+    if (ringing) {
+        haptic_alarm_start();
+    } else {
+        haptic_alarm_stop();
+    }
+}
+
 static void on_source_pick(ui_source_t source) {
     if (source == UI_SOURCE_AIRPLAY) {
         audio_source_claim_airplay();
@@ -138,10 +155,12 @@ void app_main(void) {
     audio_source_init(airplay_preempt);
 
     lcd_driver_init();
+    haptic_init(lcd_driver_i2c_bus());
     lcd_driver_lvgl_lock();
     ui_init();
     ui_set_transport_handler(on_transport);
     ui_set_source_handler(on_source_pick);
+    ui_set_timer_alert_handler(on_timer_alert);
     lv_timer_create(state_poll_timer_cb, 33, NULL);
     lcd_driver_lvgl_unlock();
 
