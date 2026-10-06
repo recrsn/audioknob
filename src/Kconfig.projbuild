@@ -21,6 +21,7 @@ menu "AudioKnob"
 
     config AK_LCD_PCLK_MHZ
         int "LCD QSPI clock (MHz, s3 target)"
+        depends on IDF_TARGET_ESP32S3
         range 10 80
         default 80
         help
@@ -29,6 +30,7 @@ menu "AudioKnob"
 
     config AK_BACKLIGHT_DEFAULT_PCT
         int "Default backlight brightness (%, s3 target)"
+        depends on IDF_TARGET_ESP32S3
         range 5 100
         default 40
 
