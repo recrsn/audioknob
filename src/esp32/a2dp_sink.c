@@ -72,8 +72,7 @@ static void handle_event(uint16_t event, void *param) {
 }
 
 static void data_cb(const uint8_t *data, uint32_t len) {
-    // Runs on the Bluedroid stack's own task; write is a blocking DMA queue
-    // push, which is fine here since this is the only consumer of that data.
+    // Runs on the Bluedroid stack's own task, so it must not block.
     i2s_out_write(data, len);
 }
 

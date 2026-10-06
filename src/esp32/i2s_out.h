@@ -15,5 +15,7 @@ void i2s_out_configure(uint32_t sample_rate_hz, uint8_t channels);
 void i2s_out_start(void);
 void i2s_out_stop(void);
 
-// Blocks until the whole buffer is queued to the DMA.
+// Never blocks: queues PCM into a ring buffer that a dedicated task feeds to
+// the DMA. Safe to call from the Bluedroid data callback; drops data while
+// stopped or after an overflow.
 void i2s_out_write(const uint8_t *data, size_t len);
