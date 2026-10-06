@@ -15,6 +15,11 @@
 #define UART_TX_GPIO 48
 #define UART_RX_GPIO 38
 
+// ~45 ms of line time at 921600 baud, so the RX task can be preempted
+// briefly without the driver dropping bytes.
+#define RX_BUF_SIZE 4096
+#define RX_CHUNK 128
+
 static const char *TAG = "uart_link";
 
 static SemaphoreHandle_t s_state_mutex;
@@ -43,25 +48,41 @@ static void handle_frame(uint8_t type, const uint8_t *payload, uint8_t len) {
     ESP_LOGW(TAG, "unhandled frame: type=0x%02x len=%d", type, len);
 }
 
+// Blocks for the first byte, then takes whatever else is already buffered:
+// at 921600 baud a byte-per-call read spends more time in the driver than
+// in the parser.
+static int read_available(uint8_t buf[RX_CHUNK]) {
+    if (uart_read_bytes(UART_PORT, buf, 1, portMAX_DELAY) <= 0) {
+        return 0;
+    }
+    size_t buffered = 0;
+    uart_get_buffered_data_len(UART_PORT, &buffered);
+    if (buffered > RX_CHUNK - 1) {
+        buffered = RX_CHUNK - 1;
+    }
+    int more = buffered ? uart_read_bytes(UART_PORT, buf + 1, buffered, 0) : 0;
+    return 1 + (more > 0 ? more : 0);
+}
+
 static void uart_rx_task(void *arg) {
     (void)arg;
     protocol_parser_t parser;
     protocol_parser_init(&parser);
 
-    uint8_t byte;
+    uint8_t buf[RX_CHUNK];
     for (;;) {
-        if (uart_read_bytes(UART_PORT, &byte, 1, portMAX_DELAY) <= 0) {
-            continue;
-        }
-        switch (protocol_parser_feed(&parser, byte)) {
-        case PROTOCOL_FEED_FRAME:
-            handle_frame(parser.type, parser.payload, parser.len);
-            break;
-        case PROTOCOL_FEED_BAD_CRC:
-            ESP_LOGW(TAG, "CRC mismatch, frame type 0x%02x dropped", parser.type);
-            break;
-        case PROTOCOL_FEED_PENDING:
-            break;
+        int n = read_available(buf);
+        for (int i = 0; i < n; i++) {
+            switch (protocol_parser_feed(&parser, buf[i])) {
+            case PROTOCOL_FEED_FRAME:
+                handle_frame(parser.type, parser.payload, parser.len);
+                break;
+            case PROTOCOL_FEED_BAD_CRC:
+                ESP_LOGW(TAG, "CRC mismatch, frame type 0x%02x dropped", parser.type);
+                break;
+            case PROTOCOL_FEED_PENDING:
+                break;
+            }
         }
     }
 }
@@ -77,7 +98,7 @@ void uart_link_start(void) {
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    ESP_ERROR_CHECK(uart_driver_install(UART_PORT, 256, 256, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_driver_install(UART_PORT, RX_BUF_SIZE, 256, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_PORT, &cfg));
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT, UART_TX_GPIO, UART_RX_GPIO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 

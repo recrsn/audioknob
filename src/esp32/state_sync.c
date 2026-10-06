@@ -15,6 +15,8 @@
 #define UART_TX_GPIO 18
 #define UART_RX_GPIO 23
 
+#define RX_CHUNK 32
+
 #define TICK_MS 33
 #define RESYNC_TICKS (1000 / TICK_MS)
 
@@ -51,24 +53,40 @@ static void state_sync_task(void *arg) {
     }
 }
 
+// Blocks for the first byte, then takes whatever else is already buffered:
+// at 921600 baud a byte-per-call read spends more time in the driver than
+// in the parser.
+static int read_available(uint8_t buf[RX_CHUNK]) {
+    if (uart_read_bytes(UART_PORT, buf, 1, portMAX_DELAY) <= 0) {
+        return 0;
+    }
+    size_t buffered = 0;
+    uart_get_buffered_data_len(UART_PORT, &buffered);
+    if (buffered > RX_CHUNK - 1) {
+        buffered = RX_CHUNK - 1;
+    }
+    int more = buffered ? uart_read_bytes(UART_PORT, buf + 1, buffered, 0) : 0;
+    return 1 + (more > 0 ? more : 0);
+}
+
 static void command_rx_task(void *arg) {
     (void)arg;
     protocol_parser_t parser;
     protocol_parser_init(&parser);
 
-    uint8_t byte;
+    uint8_t buf[RX_CHUNK];
     for (;;) {
-        if (uart_read_bytes(UART_PORT, &byte, 1, portMAX_DELAY) <= 0) {
-            continue;
-        }
-        protocol_feed_result_t result = protocol_parser_feed(&parser, byte);
-        if (result == PROTOCOL_FEED_BAD_CRC) {
-            ESP_LOGW(TAG, "CRC mismatch, frame type 0x%02x dropped", parser.type);
-        } else if (result == PROTOCOL_FEED_FRAME) {
-            if (parser.type == MSG_COMMAND && parser.len == sizeof(command_t)) {
-                s_on_command((protocol_cmd_t)parser.payload[0]);
-            } else {
-                ESP_LOGW(TAG, "unhandled frame: type=0x%02x len=%d", parser.type, parser.len);
+        int n = read_available(buf);
+        for (int i = 0; i < n; i++) {
+            protocol_feed_result_t result = protocol_parser_feed(&parser, buf[i]);
+            if (result == PROTOCOL_FEED_BAD_CRC) {
+                ESP_LOGW(TAG, "CRC mismatch, frame type 0x%02x dropped", parser.type);
+            } else if (result == PROTOCOL_FEED_FRAME) {
+                if (parser.type == MSG_COMMAND && parser.len == sizeof(command_t)) {
+                    s_on_command((protocol_cmd_t)parser.payload[0]);
+                } else {
+                    ESP_LOGW(TAG, "unhandled frame: type=0x%02x len=%d", parser.type, parser.len);
+                }
             }
         }
     }

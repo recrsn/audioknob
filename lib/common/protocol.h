@@ -7,7 +7,9 @@
 // Inter-MCU UART framing: [SYNC 0x7E][TYPE][LEN][PAYLOAD...][CRC8]
 // CRC8 covers TYPE, LEN, and PAYLOAD (not SYNC — it's a fixed framing byte).
 #define PROTOCOL_SYNC_BYTE 0x7E
-#define PROTOCOL_UART_BAUD 115200
+// Same rate as Waveshare's stock firmware on this link; headroom for
+// bulk payloads like cover art.
+#define PROTOCOL_UART_BAUD 921600
 
 typedef enum {
     MSG_STATE_UPDATE = 0x01,
