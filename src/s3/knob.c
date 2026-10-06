@@ -13,7 +13,7 @@
 #define ENC_B_GPIO 7
 
 #define POLL_MS 20
-#define COUNTS_PER_STEP 4  // typical mechanical quadrature encoder detent
+#define COUNTS_PER_STEP 1
 #define BUTTON_DEBOUNCE_POLLS 3
 
 static const char *TAG = "knob";
@@ -29,17 +29,19 @@ static void pcnt_init(void) {
     pcnt_glitch_filter_config_t filter_cfg = {.max_glitch_ns = 1000};
     ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(s_pcnt_unit, &filter_cfg));
 
-    pcnt_chan_config_t chan_a_cfg = {.edge_gpio_num = ENC_A_GPIO, .level_gpio_num = ENC_B_GPIO};
+    // This knob isn't full quadrature: one detent pulses only A (one
+    // direction) or only B (the other), never both, so a decoder that
+    // needs the A/B sequence never completes a step. Count each line's
+    // falling edges instead.
+    pcnt_chan_config_t chan_a_cfg = {.edge_gpio_num = ENC_A_GPIO, .level_gpio_num = -1};
     pcnt_channel_handle_t chan_a;
     ESP_ERROR_CHECK(pcnt_new_channel(s_pcnt_unit, &chan_a_cfg, &chan_a));
-    ESP_ERROR_CHECK(pcnt_channel_set_edge_action(chan_a, PCNT_CHANNEL_EDGE_ACTION_DECREASE, PCNT_CHANNEL_EDGE_ACTION_INCREASE));
-    ESP_ERROR_CHECK(pcnt_channel_set_level_action(chan_a, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
+    ESP_ERROR_CHECK(pcnt_channel_set_edge_action(chan_a, PCNT_CHANNEL_EDGE_ACTION_HOLD, PCNT_CHANNEL_EDGE_ACTION_INCREASE));
 
-    pcnt_chan_config_t chan_b_cfg = {.edge_gpio_num = ENC_B_GPIO, .level_gpio_num = ENC_A_GPIO};
+    pcnt_chan_config_t chan_b_cfg = {.edge_gpio_num = ENC_B_GPIO, .level_gpio_num = -1};
     pcnt_channel_handle_t chan_b;
     ESP_ERROR_CHECK(pcnt_new_channel(s_pcnt_unit, &chan_b_cfg, &chan_b));
-    ESP_ERROR_CHECK(pcnt_channel_set_edge_action(chan_b, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_DECREASE));
-    ESP_ERROR_CHECK(pcnt_channel_set_level_action(chan_b, PCNT_CHANNEL_LEVEL_ACTION_KEEP, PCNT_CHANNEL_LEVEL_ACTION_INVERSE));
+    ESP_ERROR_CHECK(pcnt_channel_set_edge_action(chan_b, PCNT_CHANNEL_EDGE_ACTION_HOLD, PCNT_CHANNEL_EDGE_ACTION_DECREASE));
 
     // PCNT only routes the pins as inputs; without pull-ups a mechanical
     // encoder's open contacts float and no edges are counted.
