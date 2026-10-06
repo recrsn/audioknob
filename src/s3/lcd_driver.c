@@ -4,6 +4,7 @@
 
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
+#include "driver/ledc.h"
 #include "driver/spi_master.h"
 #include "esp_heap_caps.h"
 #include "esp_lcd_panel_io.h"
@@ -41,9 +42,22 @@
 #define LCD_SPI_HOST  SPI2_HOST
 #define LCD_BITS_PER_PIXEL 16
 
-// Partial-redraw buffers, a ninth of the screen each, in internal DMA RAM
-// like Waveshare's own demo: the QSPI DMA reads them directly.
-#define LVGL_DRAW_BUF_LINES 40
+// One partial-redraw buffer, a sixth of the screen, in internal DMA RAM like
+// Waveshare's own firmware: at 80 MHz a flush takes ~1 ms, too short for a
+// second buffer's render/flush overlap to be worth its internal RAM.
+#define LVGL_DRAW_BUF_LINES 60
+
+// lv_timer_handler()'s "next due" hint, clamped: the floor yields to
+// lower-priority tasks, the ceiling keeps touch polling responsive.
+#define LVGL_TASK_MIN_DELAY_MS 2
+#define LVGL_TASK_MAX_DELAY_MS 10
+
+// Waveshare's PWM: 25 kHz is above audible coil whine; 7 bits is plenty.
+#define BLK_LEDC_TIMER    LEDC_TIMER_0
+#define BLK_LEDC_CHANNEL  LEDC_CHANNEL_0
+#define BLK_LEDC_FREQ_HZ  25000
+#define BLK_LEDC_RES      LEDC_TIMER_7_BIT
+#define BLK_MIN_PCT       5
 
 static const char *TAG = "lcd_driver";
 static SemaphoreHandle_t s_lvgl_mutex;
@@ -94,7 +108,12 @@ static void lvgl_task(void *arg) {
         lcd_driver_lvgl_lock();
         uint32_t idle_ms = lv_timer_handler();
         lcd_driver_lvgl_unlock();
-        vTaskDelay(pdMS_TO_TICKS(idle_ms ? idle_ms : 1));
+        if (idle_ms < LVGL_TASK_MIN_DELAY_MS) {
+            idle_ms = LVGL_TASK_MIN_DELAY_MS;
+        } else if (idle_ms > LVGL_TASK_MAX_DELAY_MS) {
+            idle_ms = LVGL_TASK_MAX_DELAY_MS;
+        }
+        vTaskDelay(pdMS_TO_TICKS(idle_ms));
     }
 }
 
@@ -122,10 +141,9 @@ static lv_display_t *lvgl_display_init(esp_lcd_panel_handle_t panel_handle, esp_
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
 
     size_t buf_px = (size_t)LCD_H_RES * LVGL_DRAW_BUF_LINES;
-    void *buf1 = heap_caps_malloc(buf_px * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    void *buf2 = heap_caps_malloc(buf_px * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
-    ESP_ERROR_CHECK(buf1 && buf2 ? ESP_OK : ESP_ERR_NO_MEM);
-    lv_display_set_buffers(disp, buf1, buf2, buf_px * sizeof(uint16_t), LV_DISPLAY_RENDER_MODE_PARTIAL);
+    void *buf = heap_caps_malloc(buf_px * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
+    ESP_ERROR_CHECK(buf ? ESP_OK : ESP_ERR_NO_MEM);
+    lv_display_set_buffers(disp, buf, NULL, buf_px * sizeof(uint16_t), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_add_event_cb(disp, lvgl_rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
 
     const esp_lcd_panel_io_callbacks_t cbs = {.on_color_trans_done = notify_flush_ready};
@@ -134,13 +152,35 @@ static lv_display_t *lvgl_display_init(esp_lcd_panel_handle_t panel_handle, esp_
     return disp;
 }
 
+void lcd_driver_set_brightness(uint8_t pct) {
+    if (pct > 100) {
+        pct = 100;
+    } else if (pct < BLK_MIN_PCT) {
+        pct = BLK_MIN_PCT;
+    }
+    uint32_t duty = (uint32_t)pct * ((1u << BLK_LEDC_RES) - 1) / 100;
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, BLK_LEDC_CHANNEL, duty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, BLK_LEDC_CHANNEL);
+}
+
 static void backlight_init(void) {
-    gpio_config_t cfg = {
-        .pin_bit_mask = 1ULL << PIN_LCD_BLK,
-        .mode = GPIO_MODE_OUTPUT,
+    const ledc_timer_config_t timer_cfg = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .duty_resolution = BLK_LEDC_RES,
+        .timer_num = BLK_LEDC_TIMER,
+        .freq_hz = BLK_LEDC_FREQ_HZ,
+        .clk_cfg = LEDC_AUTO_CLK,
     };
-    ESP_ERROR_CHECK(gpio_config(&cfg));
-    gpio_set_level(PIN_LCD_BLK, 1);
+    ESP_ERROR_CHECK(ledc_timer_config(&timer_cfg));
+    const ledc_channel_config_t chan_cfg = {
+        .gpio_num = PIN_LCD_BLK,
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = BLK_LEDC_CHANNEL,
+        .timer_sel = BLK_LEDC_TIMER,
+        .duty = 0,
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&chan_cfg));
+    lcd_driver_set_brightness(CONFIG_AK_BACKLIGHT_DEFAULT_PCT);
 }
 
 static i2c_master_bus_handle_t touch_i2c_bus_init(void) {
@@ -193,9 +233,10 @@ void lcd_driver_init(void) {
 
     esp_lcd_panel_io_handle_t io_handle = NULL;
     esp_lcd_panel_io_spi_config_t io_cfg = ST77916_PANEL_IO_QSPI_CONFIG(PIN_LCD_QSPI_CS, NULL, NULL);
-    // The driver's 40 MHz default shows pixel noise on this board; 20 MHz
-    // (next clean divider of the 80 MHz APB) still moves a full frame in ~26 ms.
-    io_cfg.pclk_hz = 20 * 1000 * 1000;
+    // Waveshare's own firmware runs this panel at 80 MHz (a full frame in
+    // ~7 ms). We once saw pixel noise at 40 MHz; if it comes back, drop
+    // CONFIG_AK_LCD_PCLK_MHZ to 20.
+    io_cfg.pclk_hz = CONFIG_AK_LCD_PCLK_MHZ * 1000 * 1000;
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_SPI_HOST, &io_cfg, &io_handle));
 
     const st77916_vendor_config_t vendor_cfg = {
@@ -229,5 +270,5 @@ void lcd_driver_init(void) {
 
     xTaskCreate(lvgl_task, "lvgl", 8192, NULL, 4, NULL);
 
-    ESP_LOGI(TAG, "LCD + touch initialized (%dx%d)", LCD_H_RES, LCD_V_RES);
+    ESP_LOGI(TAG, "LCD + touch initialized (%dx%d, %d MHz QSPI)", LCD_H_RES, LCD_V_RES, CONFIG_AK_LCD_PCLK_MHZ);
 }

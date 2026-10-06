@@ -19,4 +19,17 @@ menu "AudioKnob"
         help
             Shown in the sender's AirPlay picker (e.g. iOS Control Center).
 
+    config AK_LCD_PCLK_MHZ
+        int "LCD QSPI clock (MHz, s3 target)"
+        range 10 80
+        default 80
+        help
+            Waveshare's firmware drives the ST77916 at 80 MHz. Drop to 40 or
+            20 if the panel shows pixel noise.
+
+    config AK_BACKLIGHT_DEFAULT_PCT
+        int "Default backlight brightness (%, s3 target)"
+        range 5 100
+        default 40
+
 endmenu
