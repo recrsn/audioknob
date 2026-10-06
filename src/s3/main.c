@@ -55,9 +55,9 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
     if (airplay_in_front()) {
         airplay_get_state(&state, &wire_track);
     } else if ((has_state = uart_link_get_latest(&state))) {
-        // Fine if this comes back false (nothing has played since boot, or
-        // the BT side has no metadata source wired up yet) -- wire_track
-        // just stays zeroed, which ui_update_wireless() renders as "Not playing".
+        // Fine if this comes back false (nothing has played since boot) --
+        // wire_track just stays zeroed, which ui_update_wireless() renders
+        // as "Not playing".
         uart_link_get_latest_track(&wire_track);
     }
 
@@ -71,9 +71,8 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
         memcpy(track.title, wire_track.title, sizeof(track.title));
         memcpy(track.artist, wire_track.artist, sizeof(track.artist));
         memcpy(track.album, wire_track.album, sizeof(track.album));
-        if (airplay_in_front()) {
-            track.art = airplay_get_artwork(&track.art_version);
-        }
+        track.art = airplay_in_front() ? airplay_get_artwork(&track.art_version)
+                                       : uart_link_get_artwork(&track.art_version);
         ui_update_wireless(&state, &track);
     }
 

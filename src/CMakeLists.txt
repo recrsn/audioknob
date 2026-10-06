@@ -13,6 +13,7 @@ set(AK_REQUIRES
     esp_lcd
     esp_lcd_st77916
     esp_lcd_touch_cst816s
+    esp_new_jpeg
     esp_timer
     bt
     nvs_flash

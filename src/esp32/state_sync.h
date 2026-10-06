@@ -17,6 +17,9 @@ void state_sync_start(state_sync_command_cb_t on_command);
 // Sends a one-off MSG_TRACK_INFO frame. Call on a genuine track change
 // (AVRCP GetElementAttributes / MPRIS metadata event), not on a timer —
 // unlike wireless_state_t there's no polling cadence or resync for this.
-// Not yet called anywhere: no metadata source is wired up on the BT side
-// yet (see avrcp_controller.c's "no metadata/registration" note).
 void state_sync_send_track(const track_info_t *track);
+
+// Cover art frames (see art_chunk_t in protocol.h). len <= ART_CHUNK_MAX_DATA.
+// total_len 0 tells the S3 to clear its art.
+void state_sync_send_art_chunk(uint8_t id, uint32_t offset, const uint8_t *data, uint8_t len);
+void state_sync_send_art_end(uint8_t id, uint32_t total_len);

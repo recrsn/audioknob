@@ -16,6 +16,8 @@ typedef enum {
     // 0x02 was MSG_NTP_SYNC, retired when NTP moved to the S3's own WiFi.
     MSG_TRACK_INFO = 0x03,
     MSG_COMMAND = 0x04,  // S3 -> ESP32; every other type flows ESP32 -> S3
+    MSG_ART_CHUNK = 0x05,
+    MSG_ART_END = 0x06,
 } protocol_msg_type_t;
 
 typedef enum {
@@ -54,6 +56,25 @@ typedef enum {
 typedef struct __attribute__((packed)) {
     uint8_t cmd;  // protocol_cmd_t
 } command_t;
+
+// Cover art (an AVRCP linked thumbnail, a baseline JPEG) streams as
+// MSG_ART_CHUNKs in order, then one MSG_ART_END. A chunk at offset 0 starts
+// a new image; the receiver drops the image on any gap or id mismatch
+// rather than asking for a resend. MSG_ART_END with total_len 0 means the
+// track has no artwork (or the transfer failed): clear it.
+#define ART_CHUNK_HEADER 5
+#define ART_CHUNK_MAX_DATA (UINT8_MAX - ART_CHUNK_HEADER)
+
+typedef struct __attribute__((packed)) {
+    uint8_t id;       // changes per image, so late chunks of an old one are ignored
+    uint32_t offset;
+    uint8_t data[ART_CHUNK_MAX_DATA];  // only LEN - ART_CHUNK_HEADER bytes are sent
+} art_chunk_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t id;
+    uint32_t total_len;
+} art_end_t;
 
 uint8_t protocol_crc8(const uint8_t *data, uint8_t len);
 

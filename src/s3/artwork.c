@@ -1,96 +1,153 @@
 #include "artwork.h"
 
-#include <string.h>
+#include <stdatomic.h>
+#include <stdlib.h>
 
 #include "esp_heap_caps.h"
+#include "esp_jpeg_dec.h"
 #include "esp_log.h"
-#include "esp32s3/rom/tjpgd.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
-// ROM tjpgd's documented minimum work area is 3100 bytes.
-#define POOL_SIZE 4096
+// esp_new_jpeg's hardware-friendly scaler only takes multiples of 8, down to
+// 1/8; it does the heavy shrink and nearest-neighbour finishes at 132.
+#define SCALE_ALIGN 8
+#define SCALE_MAX_RATIO 8
+#define SCALE_TARGET ((ARTWORK_SIZE + SCALE_ALIGN - 1) / SCALE_ALIGN * SCALE_ALIGN)
 
 static const char *TAG = "artwork";
 
-typedef struct {
-    const uint8_t *data;
-    size_t len, pos;
-    uint16_t *out;
-    // Source pixel feeding each output column/row, after JPEG descaling.
-    uint16_t src_x[ARTWORK_SIZE], src_y[ARTWORK_SIZE];
-} decode_ctx_t;
+struct artwork_slot {
+    SemaphoreHandle_t lock;
+    uint16_t *buf[2];
+    int front;
+    uint32_t version; // 0 = empty
+};
 
-static UINT read_cb(JDEC *jd, BYTE *buf, UINT n) {
-    decode_ctx_t *ctx = jd->device;
-    size_t avail = ctx->len - ctx->pos;
-    if (n > avail) {
-        n = avail;
-    }
-    if (buf) {
-        memcpy(buf, ctx->data + ctx->pos, n);
-    }
-    ctx->pos += n;
-    return n;
+static atomic_uint_fast32_t s_next_version = 1;
+
+static uint16_t round_up(uint16_t v, uint16_t align) {
+    return (v + align - 1) / align * align;
 }
 
-// Nearest-neighbour: copy only the source pixels some output pixel samples.
-static UINT write_cb(JDEC *jd, void *bitmap, JRECT *rect) {
-    decode_ctx_t *ctx = jd->device;
-    const uint8_t *rgb = bitmap;
-    int stride = rect->right - rect->left + 1;
+// Scaled size for one axis: as small as the scaler allows while staying at
+// least SCALE_TARGET, or 0 to leave the axis unscaled.
+static uint16_t scaled_dim(uint16_t dim) {
+    if (dim <= SCALE_TARGET) {
+        return 0;
+    }
+    uint16_t min_allowed = round_up((dim + SCALE_MAX_RATIO - 1) / SCALE_MAX_RATIO, SCALE_ALIGN);
+    return min_allowed > SCALE_TARGET ? min_allowed : SCALE_TARGET;
+}
 
+static bool read_header(const uint8_t *jpeg, size_t len, jpeg_dec_header_info_t *info) {
+    jpeg_dec_config_t cfg = DEFAULT_JPEG_DEC_CONFIG();
+    jpeg_dec_handle_t dec;
+    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) {
+        return false;
+    }
+    jpeg_dec_io_t io = {.inbuf = (uint8_t *)jpeg, .inbuf_len = len};
+    bool ok = jpeg_dec_parse_header(dec, &io, info) == JPEG_ERR_OK;
+    jpeg_dec_close(dec);
+    return ok;
+}
+
+// Decodes at (roughly) the output size; returns the bitmap and its size.
+static uint16_t *decode_scaled(const uint8_t *jpeg, size_t len, int *w, int *h) {
+    jpeg_dec_header_info_t info;
+    if (!read_header(jpeg, len, &info)) {
+        ESP_LOGW(TAG, "unsupported JPEG header");
+        return NULL;
+    }
+
+    jpeg_dec_config_t cfg = DEFAULT_JPEG_DEC_CONFIG();
+    cfg.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;
+    uint16_t sw = scaled_dim(info.width), sh = scaled_dim(info.height);
+    if (sw || sh) {
+        // The scaler needs both axes; keep a small one at its own size.
+        cfg.scale.width = sw ? sw : info.width / SCALE_ALIGN * SCALE_ALIGN;
+        cfg.scale.height = sh ? sh : info.height / SCALE_ALIGN * SCALE_ALIGN;
+    }
+
+    jpeg_dec_handle_t dec;
+    if (jpeg_dec_open(&cfg, &dec) != JPEG_ERR_OK) {
+        return NULL;
+    }
+    uint16_t *pixels = NULL;
+    jpeg_dec_io_t io = {.inbuf = (uint8_t *)jpeg, .inbuf_len = len};
+    int out_len = 0;
+    if (jpeg_dec_parse_header(dec, &io, &info) == JPEG_ERR_OK && jpeg_dec_get_outbuf_len(dec, &out_len) == JPEG_ERR_OK) {
+        // PSRAM, not internal RAM: AirPlay's RTP task needs the latter.
+        pixels = heap_caps_aligned_alloc(16, out_len, MALLOC_CAP_SPIRAM);
+        io.outbuf = (uint8_t *)pixels;
+        jpeg_error_t err = pixels ? jpeg_dec_process(dec, &io) : JPEG_ERR_NO_MEM;
+        if (err != JPEG_ERR_OK) {
+            ESP_LOGW(TAG, "decode failed (%d)", err);
+            heap_caps_free(pixels);
+            pixels = NULL;
+        }
+    }
+    jpeg_dec_close(dec);
+
+    *w = cfg.scale.width ? cfg.scale.width : info.width;
+    *h = cfg.scale.height ? cfg.scale.height : info.height;
+    return pixels;
+}
+
+static void resample(const uint16_t *src, int sw, int sh, uint16_t *out) {
     for (int dy = 0; dy < ARTWORK_SIZE; dy++) {
-        int sy = ctx->src_y[dy];
-        if (sy < rect->top || sy > rect->bottom) {
-            continue;
-        }
-        const uint8_t *row = rgb + (sy - rect->top) * stride * 3;
+        const uint16_t *row = src + ((dy * sh + sh / 2) / ARTWORK_SIZE) * sw;
         for (int dx = 0; dx < ARTWORK_SIZE; dx++) {
-            int sx = ctx->src_x[dx];
-            if (sx < rect->left || sx > rect->right) {
-                continue;
-            }
-            const uint8_t *p = row + (sx - rect->left) * 3;
-            ctx->out[dy * ARTWORK_SIZE + dx] = ((p[0] & 0xF8) << 8) | ((p[1] & 0xFC) << 3) | (p[2] >> 3);
+            out[dy * ARTWORK_SIZE + dx] = row[(dx * sw + sw / 2) / ARTWORK_SIZE];
         }
     }
-    return 1;
 }
 
-static bool decode(const uint8_t *jpeg, size_t len, uint16_t *out, uint8_t *pool, decode_ctx_t *ctx) {
-    JDEC jd;
+artwork_slot_t *artwork_slot_create(void) {
+    artwork_slot_t *slot = calloc(1, sizeof(*slot));
+    if (!slot) {
+        return NULL;
+    }
+    slot->lock = xSemaphoreCreateMutex();
+    for (int i = 0; i < 2; i++) {
+        slot->buf[i] = heap_caps_malloc(ARTWORK_SIZE * ARTWORK_SIZE * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
+    }
+    return slot;
+}
 
-    *ctx = (decode_ctx_t){.data = jpeg, .len = len, .out = out};
-    JRESULT res = jd_prepare(&jd, read_cb, pool, POOL_SIZE, ctx);
-    if (res != JDR_OK) {
-        ESP_LOGW(TAG, "unsupported JPEG (%d)", res);
+bool artwork_slot_set(artwork_slot_t *slot, const uint8_t *jpeg, size_t len) {
+    if (!len) {
+        artwork_slot_clear(slot);
+        return true;
+    }
+
+    int w, h;
+    uint16_t *pixels = decode_scaled(jpeg, len, &w, &h);
+    if (!pixels) {
         return false;
     }
+    int back = !slot->front;
+    resample(pixels, w, h, slot->buf[back]);
+    heap_caps_free(pixels);
 
-    // Descale as far as possible while staying at least as large as the output.
-    int scale = 0;
-    while (scale < 3 && (jd.width >> (scale + 1)) >= ARTWORK_SIZE && (jd.height >> (scale + 1)) >= ARTWORK_SIZE) {
-        scale++;
-    }
-    unsigned sw = jd.width >> scale, sh = jd.height >> scale;
-    for (int i = 0; i < ARTWORK_SIZE; i++) {
-        ctx->src_x[i] = (i * sw + sw / 2) / ARTWORK_SIZE;
-        ctx->src_y[i] = (i * sh + sh / 2) / ARTWORK_SIZE;
-    }
-
-    res = jd_decomp(&jd, write_cb, scale);
-    if (res != JDR_OK) {
-        ESP_LOGW(TAG, "decode failed (%d)", res);
-        return false;
-    }
+    xSemaphoreTake(slot->lock, portMAX_DELAY);
+    slot->front = back;
+    slot->version = atomic_fetch_add(&s_next_version, 1);
+    xSemaphoreGive(slot->lock);
+    ESP_LOGI(TAG, "decoded %dx%d from %u bytes", w, h, (unsigned)len);
     return true;
 }
 
-bool artwork_decode(const uint8_t *jpeg, size_t len, uint16_t out[ARTWORK_SIZE * ARTWORK_SIZE]) {
-    // Kept out of internal RAM, which AirPlay's RTP task needs.
-    uint8_t *pool = heap_caps_malloc(POOL_SIZE, MALLOC_CAP_SPIRAM);
-    decode_ctx_t *ctx = heap_caps_calloc(1, sizeof(*ctx), MALLOC_CAP_SPIRAM);
-    bool ok = pool && ctx && decode(jpeg, len, out, pool, ctx);
-    heap_caps_free(pool);
-    heap_caps_free(ctx);
-    return ok;
+void artwork_slot_clear(artwork_slot_t *slot) {
+    xSemaphoreTake(slot->lock, portMAX_DELAY);
+    slot->version = 0;
+    xSemaphoreGive(slot->lock);
+}
+
+const uint16_t *artwork_slot_get(artwork_slot_t *slot, uint32_t *version) {
+    xSemaphoreTake(slot->lock, portMAX_DELAY);
+    *version = slot->version;
+    const uint16_t *art = slot->version ? slot->buf[slot->front] : NULL;
+    xSemaphoreGive(slot->lock);
+    return art;
 }

@@ -6,7 +6,6 @@
 #include "airplay_player.h"
 #include "artwork.h"
 #include "audio_source.h"
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -32,11 +31,7 @@ static const char *TAG = "airplay";
 static SemaphoreHandle_t s_lock;
 static wireless_state_t s_state = {.volume = 50, .source = SOURCE_AIRPLAY};
 static track_info_t s_track;
-// Double-buffered so a new decode never overwrites a bitmap the UI is still
-// drawing from.
-static uint16_t *s_art[2];
-static int s_art_front;
-static uint32_t s_art_version;  // 0 = no artwork
+static artwork_slot_t *s_art;
 static raop_ctx_t *s_raop;
 static uint8_t s_mac[6];
 static TaskHandle_t s_ctrl_task;
@@ -57,36 +52,14 @@ static void set_volume(uint8_t volume) {
     airplay_player_set_volume(volume);
 }
 
-static void clear_artwork(void) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_art_version = 0;
-    xSemaphoreGive(s_lock);
-}
-
-static void set_artwork(const uint8_t *jpeg, size_t len) {
-    if (!len) {
-        clear_artwork();
-        return;
-    }
-    int back = !s_art_front;
-    if (!s_art[back] || !artwork_decode(jpeg, len, s_art[back])) {
-        return;
-    }
-    ESP_LOGI(TAG, "artwork decoded from %u bytes", (unsigned)len);
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_art_front = back;
-    s_art_version++;
-    xSemaphoreGive(s_lock);
-}
-
 static void end_session(void) {
     airplay_player_flush();
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_state.connected = false;
     s_state.playing = false;
     memset(&s_track, 0, sizeof(s_track));
-    s_art_version = 0;
     xSemaphoreGive(s_lock);
+    artwork_slot_clear(s_art);
     audio_source_release_airplay();
 }
 
@@ -98,8 +71,8 @@ static bool on_raop_event(const raop_event_t *event) {
         s_state.connected = true;
         s_state.playing = false;
         memset(&s_track, 0, sizeof(s_track));
-        s_art_version = 0;
         xSemaphoreGive(s_lock);
+        artwork_slot_clear(s_art);
         break;
 
     case RAOP_EVENT_PLAY:
@@ -139,7 +112,7 @@ static bool on_raop_event(const raop_event_t *event) {
         break;
 
     case RAOP_EVENT_ARTWORK:
-        set_artwork(event->artwork.data, event->artwork.len);
+        artwork_slot_set(s_art, event->artwork.data, event->artwork.len);
         break;
     }
     return true;
@@ -191,15 +164,13 @@ static void ctrl_task(void *arg) {
 
 void airplay_init(void) {
     s_lock = xSemaphoreCreateMutex();
-    for (int i = 0; i < 2; i++) {
-        s_art[i] = heap_caps_malloc(ARTWORK_SIZE * ARTWORK_SIZE * sizeof(uint16_t), MALLOC_CAP_SPIRAM);
-    }
+    s_art = artwork_slot_create();
     airplay_player_init();
     airplay_player_set_volume(s_state.volume);
 
     BaseType_t ok =
         xTaskCreatePinnedToCore(ctrl_task, "airplay_ctrl", CTRL_STACK_SIZE, NULL, CTRL_TASK_PRIO, &s_ctrl_task, 0);
-    ESP_ERROR_CHECK(s_lock && ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+    ESP_ERROR_CHECK(s_lock && s_art && ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }
 
 void airplay_network_up(const uint8_t mac[6]) {
@@ -222,11 +193,7 @@ void airplay_get_state(wireless_state_t *state, track_info_t *track) {
 }
 
 const uint16_t *airplay_get_artwork(uint32_t *version) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    *version = s_art_version;
-    const uint16_t *art = s_art_version ? s_art[s_art_front] : NULL;
-    xSemaphoreGive(s_lock);
-    return art;
+    return artwork_slot_get(s_art, version);
 }
 
 void airplay_adjust_volume(int steps) {

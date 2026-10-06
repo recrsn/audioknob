@@ -18,10 +18,13 @@ void uart_link_start(void);
 bool uart_link_get_latest(wireless_state_t *out);
 
 // Copies the most recently received MSG_TRACK_INFO frame into *out. Returns
-// false (and leaves *out untouched) if no track frame has arrived yet --
-// e.g. the ESP32 side has no metadata source wired up, or nothing has
-// played since boot.
+// false (and leaves *out untouched) if no track frame has arrived yet,
+// e.g. nothing has played since boot.
 bool uart_link_get_latest_track(track_info_t *out);
+
+// The ESP32's current Bluetooth cover art as an ARTWORK_SIZE^2 RGB565
+// bitmap, or NULL if there is none. version changes whenever it does.
+const uint16_t *uart_link_get_artwork(uint32_t *version);
 
 // Sends a MSG_COMMAND frame to the ESP32. Fire-and-forget: there is no
 // ACK; the effect shows up in the next STATE_UPDATE. Safe from any task.

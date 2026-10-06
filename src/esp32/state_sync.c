@@ -16,6 +16,9 @@
 #define UART_RX_GPIO 23
 
 #define RX_CHUNK 32
+// Holds a whole cover-art thumbnail, so streaming one never blocks the
+// bt_app task for longer than a frame.
+#define TX_BUF_SIZE (16 * 1024)
 
 #define TICK_MS 33
 #define RESYNC_TICKS (1000 / TICK_MS)
@@ -31,6 +34,17 @@ static void send_frame(uint8_t type, const void *payload, uint8_t len) {
 
 void state_sync_send_track(const track_info_t *track) {
     send_frame(MSG_TRACK_INFO, track, sizeof(*track));
+}
+
+void state_sync_send_art_chunk(uint8_t id, uint32_t offset, const uint8_t *data, uint8_t len) {
+    art_chunk_t chunk = {.id = id, .offset = offset};
+    memcpy(chunk.data, data, len);
+    send_frame(MSG_ART_CHUNK, &chunk, ART_CHUNK_HEADER + len);
+}
+
+void state_sync_send_art_end(uint8_t id, uint32_t total_len) {
+    art_end_t end = {.id = id, .total_len = total_len};
+    send_frame(MSG_ART_END, &end, sizeof(end));
 }
 
 static void state_sync_task(void *arg) {
@@ -103,7 +117,7 @@ void state_sync_start(state_sync_command_cb_t on_command) {
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    ESP_ERROR_CHECK(uart_driver_install(UART_PORT, 256, 256, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_driver_install(UART_PORT, 256, TX_BUF_SIZE, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_PORT, &cfg));
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT, UART_TX_GPIO, UART_RX_GPIO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 

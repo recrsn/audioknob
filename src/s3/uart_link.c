@@ -7,6 +7,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "artwork.h"
+#include "esp_heap_caps.h"
 #include "protocol.h"
 
 // Verified on hardware: S3 RX is GPIO38 (fed by ESP32 IO18), S3 TX is GPIO48
@@ -19,6 +21,10 @@
 // briefly without the driver dropping bytes.
 #define RX_BUF_SIZE 4096
 #define RX_CHUNK 128
+// Linked thumbnails are 200x200 baseline JPEGs, typically 10-30 KB.
+#define ART_BUF_SIZE (128 * 1024)
+// The JPEG decode runs on this task when an image completes.
+#define RX_TASK_STACK 6144
 
 static const char *TAG = "uart_link";
 
@@ -27,6 +33,46 @@ static wireless_state_t s_latest_state;
 static bool s_has_state;
 static track_info_t s_latest_track;
 static bool s_has_track;
+
+// Bluetooth cover art being received, in PSRAM. Only the RX task touches it.
+static artwork_slot_t *s_art;
+static uint8_t *s_art_buf;
+static uint8_t s_art_id;
+static uint32_t s_art_len;
+static bool s_art_valid;
+
+static void handle_art_chunk(const art_chunk_t *chunk, uint8_t len) {
+    uint32_t n = len - ART_CHUNK_HEADER;
+    if (chunk->offset == 0) {
+        s_art_id = chunk->id;
+        s_art_len = 0;
+        s_art_valid = true;
+    }
+    if (!s_art_valid || chunk->id != s_art_id) {
+        return;
+    }
+    if (chunk->offset != s_art_len || s_art_len + n > ART_BUF_SIZE) {
+        ESP_LOGW(TAG, "cover art chunk at %u, expected %u; dropping image", (unsigned)chunk->offset,
+                 (unsigned)s_art_len);
+        s_art_valid = false;
+        return;
+    }
+    memcpy(s_art_buf + s_art_len, chunk->data, n);
+    s_art_len += n;
+}
+
+static void handle_art_end(const art_end_t *end) {
+    // Anything short of a complete image clears the art: the previous
+    // track's cover would be wrong for this one.
+    bool complete = end->total_len && s_art_valid && end->id == s_art_id && end->total_len == s_art_len;
+    if (end->total_len && !complete) {
+        ESP_LOGW(TAG, "cover art incomplete (%u of %u bytes)", (unsigned)s_art_len, (unsigned)end->total_len);
+    }
+    if (!complete || !artwork_slot_set(s_art, s_art_buf, s_art_len)) {
+        artwork_slot_clear(s_art);
+    }
+    s_art_valid = false;
+}
 
 static void handle_frame(uint8_t type, const uint8_t *payload, uint8_t len) {
     if (type == MSG_STATE_UPDATE && len == sizeof(wireless_state_t)) {
@@ -42,6 +88,16 @@ static void handle_frame(uint8_t type, const uint8_t *payload, uint8_t len) {
         memcpy(&s_latest_track, payload, sizeof(s_latest_track));
         s_has_track = true;
         xSemaphoreGive(s_state_mutex);
+        return;
+    }
+
+    if (type == MSG_ART_CHUNK && len > ART_CHUNK_HEADER) {
+        handle_art_chunk((const art_chunk_t *)payload, len);
+        return;
+    }
+
+    if (type == MSG_ART_END && len == sizeof(art_end_t)) {
+        handle_art_end((const art_end_t *)payload);
         return;
     }
 
@@ -89,6 +145,9 @@ static void uart_rx_task(void *arg) {
 
 void uart_link_start(void) {
     s_state_mutex = xSemaphoreCreateMutex();
+    s_art = artwork_slot_create();
+    s_art_buf = heap_caps_malloc(ART_BUF_SIZE, MALLOC_CAP_SPIRAM);
+    ESP_ERROR_CHECK(s_art && s_art_buf ? ESP_OK : ESP_ERR_NO_MEM);
 
     uart_config_t cfg = {
         .baud_rate = PROTOCOL_UART_BAUD,
@@ -103,7 +162,7 @@ void uart_link_start(void) {
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT, UART_TX_GPIO, UART_RX_GPIO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
     ESP_LOGI(TAG, "inter-MCU UART ready (TX=%d RX=%d)", UART_TX_GPIO, UART_RX_GPIO);
-    xTaskCreate(uart_rx_task, "uart_rx", 3072, NULL, 4, NULL);
+    xTaskCreate(uart_rx_task, "uart_rx", RX_TASK_STACK, NULL, 4, NULL);
 }
 
 bool uart_link_get_latest(wireless_state_t *out) {
@@ -126,6 +185,10 @@ bool uart_link_get_latest_track(track_info_t *out) {
     }
     xSemaphoreGive(s_state_mutex);
     return has_track;
+}
+
+const uint16_t *uart_link_get_artwork(uint32_t *version) {
+    return artwork_slot_get(s_art, version);
 }
 
 void uart_link_send_command(protocol_cmd_t cmd) {
