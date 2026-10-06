@@ -1,7 +1,7 @@
 #pragma once
 
-// Shared between ui.c (screens, navigation) and ui_tools.c (timer and
-// stopwatch content). Not part of the public UI API in ui.h.
+// Shared between ui.c (screens, navigation), ui_tools.c (timer and
+// stopwatch content) and ui_wallpaper.c. Not part of the public UI API in ui.h.
 
 #include <stdbool.h>
 
@@ -14,6 +14,9 @@ void ui_set_visible(lv_obj_t *obj, bool visible);
 // Callers make the chip (the label's parent) clickable if it should be.
 lv_obj_t *ui_round_button_create(lv_obj_t *parent, const char *symbol, int32_t size,
                                  const lv_font_t *font, bool dim);
+
+// The idle screen's pre-dithered ambient glow, covering the whole display.
+lv_obj_t *ui_wallpaper_create(lv_obj_t *parent);
 
 // Fills both screens, which ui.c owns along with their navigation chrome.
 // on_alert(true) runs when the countdown reaches zero, so ui.c can bring the

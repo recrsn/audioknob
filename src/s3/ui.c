@@ -419,38 +419,6 @@ static lv_obj_t *backdrop_create(lv_obj_t *parent) {
     return bd;
 }
 
-// Ambient wallpaper glow (mock-react's .idle-art): the mock layers several
-// blurred `radial-gradient(circle at X% Y%, hsla(...), transparent 40%)`
-// blobs. LVGL has no blur filter, but LV_USE_DRAW_SW_COMPLEX_GRADIENTS gives
-// a real radial gradient, which reads close enough to a blurred glow -- style
-// and grad descriptors must be static, since LVGL keeps pointers into them
-// for the object's lifetime.
-static lv_style_t s_idle_blob_style[4];
-static lv_grad_dsc_t s_idle_blob_grad[4];
-
-static void idle_blob_create(lv_obj_t *parent, int idx, lv_align_t align, int32_t ofs_x, int32_t ofs_y,
-                              int32_t size, lv_color_t color, lv_opa_t peak_opa) {
-    lv_grad_dsc_t *grad = &s_idle_blob_grad[idx];
-    lv_color_t colors[2] = {color, color};
-    lv_opa_t opas[2] = {peak_opa, LV_OPA_TRANSP};
-    lv_grad_init_stops(grad, colors, opas, NULL, 2);
-    int32_t r = size / 2;
-    lv_grad_radial_init(grad, r, r, size, r, LV_GRAD_EXTEND_PAD);
-
-    lv_style_t *style = &s_idle_blob_style[idx];
-    lv_style_init(style);
-    lv_style_set_bg_opa(style, LV_OPA_COVER);
-    lv_style_set_bg_grad(style, grad);
-    lv_style_set_border_width(style, 0);
-    lv_style_set_radius(style, LV_RADIUS_CIRCLE);
-
-    lv_obj_t *blob = lv_obj_create(parent);
-    lv_obj_remove_flag(blob, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_style(blob, style, 0);
-    lv_obj_set_size(blob, size, size);
-    lv_obj_align(blob, align, ofs_x, ofs_y);
-}
-
 // The state poll pushes every 33 ms; lv_label_set_text() frees and reallocates
 // the string and redraws even when it's unchanged, churning LVGL's heap.
 void ui_label_set_text(lv_obj_t *label, const char *text) {
@@ -510,20 +478,7 @@ static void idle_screen_build(void) {
     idle_screen.screen = screen_create();
     lv_obj_add_event_cb(idle_screen.screen, return_to_source_cb, LV_EVENT_CLICKED, NULL);
 
-    idle_blob_create(idle_screen.screen, 0, LV_ALIGN_TOP_LEFT, -100, -100, 320, lv_color_hex(0x4ea1ff), LV_OPA_70);
-    idle_blob_create(idle_screen.screen, 1, LV_ALIGN_BOTTOM_RIGHT, 80, 80, 300, lv_color_hex(0x7c6cff), LV_OPA_60);
-    idle_blob_create(idle_screen.screen, 2, LV_ALIGN_TOP_RIGHT, 70, -70, 260, lv_color_hex(0xd946a8), LV_OPA_60);
-    idle_blob_create(idle_screen.screen, 3, LV_ALIGN_BOTTOM_LEFT, -70, 70, 260, lv_color_hex(0x2dd4a0), LV_OPA_50);
-
-    // .idle-scrim: darkens the blobs so the clock stays readable. Mock uses a
-    // radial vignette; LVGL has no radial-opacity gradient, so this is a flat
-    // dark layer instead.
-    lv_obj_t *scrim = lv_obj_create(idle_screen.screen);
-    lv_obj_remove_style_all(scrim);
-    lv_obj_remove_flag(scrim, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(scrim, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_bg_color(scrim, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(scrim, LV_OPA_50, 0);
+    ui_wallpaper_create(idle_screen.screen);
 
     // Everything stacks in one centered column (mock's .clock-idle), so the
     // glance rows can show or hide without re-pinning the clock.
