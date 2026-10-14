@@ -32,6 +32,9 @@ CONFIG_LWIP_UDP_RECVMBOX_SIZE=64
 # PSRAM. AirPlay's RSA handshake (once per session) and mDNS data don't.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y
+# Its task only answers queries and sends adverts: nothing timing-critical,
+# and it never writes flash.
+CONFIG_MDNS_TASK_CREATE_FROM_SPIRAM=y
 
 # -Og left LVGL's software renderer ~1.5x slower; page swipes redraw the
 # whole screen every frame.

@@ -8,10 +8,7 @@
 #include "decoder/impl/esp_alac_dec.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "raop.h"
-
-#define STATS_EVERY 1000
 
 typedef enum {
     CODEC_AAC,
@@ -25,8 +22,6 @@ struct decoder {
     // kb, numChannels, maxRun, maxFrameBytes, avgBitRate, sampleRate
     // (big-endian).
     uint8_t cookie[24];
-    uint32_t count;
-    int64_t total_us, max_us;
 };
 
 static const char *TAG = "airplay_dec";
@@ -56,13 +51,28 @@ static void add_adts(uint8_t *p, size_t total_len) {
     p[6] = 0xFC;
 }
 
+// esp_audio_codec allocates through these weak hooks, which default to
+// malloc(): its AAC state (~15 KB) would land in internal RAM, already
+// short while a buffered stream plays.
+void *media_lib_module_malloc(const char *module, size_t size) {
+    (void)module;
+    return heap_caps_malloc_prefer(size, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_8BIT);
+}
+
+void *media_lib_module_calloc(const char *module, size_t n, size_t size) {
+    (void)module;
+    return heap_caps_calloc_prefer(n, size, 2, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT, MALLOC_CAP_8BIT);
+}
+
+void media_lib_free(void *buf) {
+    heap_caps_free(buf);
+}
+
 static const char *codec_name(const decoder_t *dec) {
     return dec->codec == CODEC_AAC ? "AAC" : "ALAC";
 }
 
 static bool open_handle(decoder_t *dec) {
-    size_t internal_before = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
-    size_t psram_before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
     esp_audio_err_t err;
     if (dec->codec == CODEC_AAC) {
         esp_aac_dec_cfg_t cfg = ESP_AAC_DEC_CONFIG_DEFAULT();
@@ -80,9 +90,6 @@ static bool open_handle(decoder_t *dec) {
         dec->handle = NULL;
         return false;
     }
-    ESP_LOGI(TAG, "%s decoder: %d bytes internal, %d bytes PSRAM", codec_name(dec),
-             (int)(internal_before - heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
-             (int)(psram_before - heap_caps_get_free_size(MALLOC_CAP_SPIRAM)));
     return true;
 }
 
@@ -145,18 +152,6 @@ void decoder_close(decoder_t *dec) {
     }
 }
 
-static void record_time(decoder_t *dec, int64_t took) {
-    dec->total_us += took;
-    dec->max_us = took > dec->max_us ? took : dec->max_us;
-    if (++dec->count == STATS_EVERY) {
-        ESP_LOGI(TAG, "%s decode: %lld us avg, %lld us max over %d packets", codec_name(dec),
-                 (long long)(dec->total_us / STATS_EVERY), (long long)dec->max_us, STATS_EVERY);
-        dec->count = 0;
-        dec->total_us = 0;
-        dec->max_us = 0;
-    }
-}
-
 int decoder_decode(decoder_t *dec, uint8_t *in, size_t len, int16_t *out, size_t max_frames) {
     if (!dec->handle && !open_handle(dec)) {
         return -1;
@@ -172,10 +167,8 @@ int decoder_decode(decoder_t *dec, uint8_t *in, size_t len, int16_t *out, size_t
         .len = (uint32_t)(max_frames * 2 * sizeof(int16_t)),
     };
     esp_audio_dec_info_t info = {0};
-    int64_t start = esp_timer_get_time();
     esp_audio_err_t err = dec->codec == CODEC_AAC ? esp_aac_dec_decode(dec->handle, &raw, &frame, &info)
                                                   : esp_alac_dec_decode(dec->handle, &raw, &frame, &info);
-    record_time(dec, esp_timer_get_time() - start);
     if (err != ESP_AUDIO_ERR_OK) {
         ESP_LOGW(TAG, "%s decode error %d, resetting", codec_name(dec), err);
         close_handle(dec);
