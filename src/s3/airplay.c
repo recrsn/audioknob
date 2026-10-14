@@ -45,6 +45,10 @@ static TaskHandle_t s_art_task;
 static uint8_t *s_art_pending;
 static size_t s_art_pending_len;
 static bool s_art_has_pending;
+// The last cover posted, so a sender repeating it (Music sends each one
+// several times per track) doesn't decode it again.
+static uint32_t s_art_hash;
+static size_t s_art_len;
 // Latest knob volume not yet pushed to the sender; coalesces fast spins.
 static volatile uint8_t s_pending_volume;
 
@@ -62,9 +66,27 @@ static void set_volume(uint8_t volume) {
     airplay_player_set_volume(volume);
 }
 
+static uint32_t fnv1a(const uint8_t *data, size_t len) {
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < len; i++) {
+        h = (h ^ data[i]) * 16777619u;
+    }
+    return h;
+}
+
 // Decoding on the RTSP thread would hold up its replies and starve CPU
 // idle into the task watchdog, so covers go to the art task.
 static void post_artwork(const uint8_t *data, size_t len) {
+    uint32_t hash = fnv1a(data, len);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool repeat = len == s_art_len && hash == s_art_hash;
+    s_art_len = len;
+    s_art_hash = hash;
+    xSemaphoreGive(s_lock);
+    if (repeat) {
+        return;
+    }
+
     uint8_t *copy = NULL;
     if (len) {
         copy = heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
@@ -152,14 +174,26 @@ static bool on_raop_event(const raop_event_t *event) {
         set_volume((uint8_t)(event->volume * 100.0f + 0.5f));
         break;
 
-    case RAOP_EVENT_METADATA:
+    case RAOP_EVENT_METADATA: {
+        track_info_t track = {0};
+        snprintf(track.title, sizeof(track.title), "%s", event->metadata.title);
+        snprintf(track.artist, sizeof(track.artist), "%s", event->metadata.artist);
+        snprintf(track.album, sizeof(track.album), "%s", event->metadata.album);
         xSemaphoreTake(s_lock, portMAX_DELAY);
-        snprintf(s_track.title, sizeof(s_track.title), "%s", event->metadata.title);
-        snprintf(s_track.artist, sizeof(s_track.artist), "%s", event->metadata.artist);
-        snprintf(s_track.album, sizeof(s_track.album), "%s", event->metadata.album);
+        // Senders repeat it several times per track.
+        bool changed = strcmp(track.title, s_track.title) || strcmp(track.artist, s_track.artist) ||
+                       strcmp(track.album, s_track.album);
+        if (changed) {
+            strcpy(s_track.title, track.title);
+            strcpy(s_track.artist, track.artist);
+            strcpy(s_track.album, track.album);
+        }
         xSemaphoreGive(s_lock);
-        ESP_LOGI(TAG, "now playing: %s - %s", event->metadata.artist, event->metadata.title);
+        if (changed) {
+            ESP_LOGI(TAG, "now playing: %s - %s", track.artist, track.title);
+        }
         break;
+    }
 
     case RAOP_EVENT_ARTWORK:
         post_artwork(event->artwork.data, event->artwork.len);
