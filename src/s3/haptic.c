@@ -1,6 +1,7 @@
 #include "haptic.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "esp_log.h"
@@ -25,9 +26,12 @@
 #define LIBRARY_LRA           6
 #define FEEDBACK_LRA          0x80
 
-// ROM library effect 47 is "Buzz 1 - 100%"; a sequencer byte with bit 7 set
-// is a wait of (value & 0x7F) * 10 ms.
-#define EFFECT_BUZZ     47
+// ROM library effect numbers (DRV2605 datasheet, table 11.2); a sequencer
+// byte with bit 7 set is a wait of (value & 0x7F) * 10 ms.
+#define EFFECT_STRONG_CLICK 1
+#define EFFECT_DOUBLE_CLICK 10
+#define EFFECT_SHARP_TICK   24
+#define EFFECT_BUZZ         47
 #define SEQ_WAIT(ms)    (0x80 | ((ms) / 10))
 #define ALARM_PERIOD_MS 1000
 
@@ -45,15 +49,19 @@ static esp_err_t reg_read(uint8_t reg, uint8_t *value) {
     return i2c_master_transmit_receive(s_dev, &reg, 1, value, 1, I2C_TIMEOUT_MS);
 }
 
+// seq starts with REG_WAVESEQ1 and ends with a 0 terminator; registers
+// auto-increment, so the whole sequence goes in one write.
+static void play_sequence(const uint8_t *seq, size_t len) {
+    if (i2c_master_transmit(s_dev, seq, len, I2C_TIMEOUT_MS) != ESP_OK || reg_write(REG_GO, 1) != ESP_OK) {
+        ESP_LOGW(TAG, "sequence write failed");
+    }
+}
+
 // Buzz, pause, buzz: reads as an alarm rather than a single notification.
 static void alarm_fire(void *arg) {
     (void)arg;
-    // Registers auto-increment, so the whole sequence goes in one write.
     static const uint8_t seq[] = {REG_WAVESEQ1, EFFECT_BUZZ, SEQ_WAIT(100), EFFECT_BUZZ, 0};
-    if (i2c_master_transmit(s_dev, seq, sizeof(seq), I2C_TIMEOUT_MS) != ESP_OK ||
-        reg_write(REG_GO, 1) != ESP_OK) {
-        ESP_LOGW(TAG, "alarm write failed");
-    }
+    play_sequence(seq, sizeof(seq));
 }
 
 static bool configure(void) {
@@ -94,6 +102,19 @@ void haptic_init(i2c_master_bus_handle_t bus) {
     const esp_timer_create_args_t timer_args = {.callback = alarm_fire, .name = "haptic_alarm"};
     ESP_ERROR_CHECK(esp_timer_create(&timer_args, &s_alarm_timer));
     ESP_LOGI(TAG, "DRV2605 ready (LRA)");
+}
+
+void haptic_play(haptic_effect_t effect) {
+    static const uint8_t effects[] = {
+        [HAPTIC_TICK] = EFFECT_SHARP_TICK,
+        [HAPTIC_CLICK] = EFFECT_STRONG_CLICK,
+        [HAPTIC_LONG] = EFFECT_DOUBLE_CLICK,
+    };
+    if (!s_alarm_timer || esp_timer_is_active(s_alarm_timer)) {
+        return;
+    }
+    const uint8_t seq[] = {REG_WAVESEQ1, effects[effect], 0};
+    play_sequence(seq, sizeof(seq));
 }
 
 void haptic_alarm_start(void) {

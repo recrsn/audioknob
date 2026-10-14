@@ -3,6 +3,7 @@
 #include <stdint.h>
 
 #include "driver/i2c_master.h"
+#include "lvgl.h"
 
 // Brings up the ST77916 QSPI LCD, CST816 touch, and backlight (see spec.md
 // §7 for the pin table this is wired against), and registers both with
@@ -18,6 +19,9 @@ void lcd_driver_set_brightness(uint8_t pct);
 // task) must be wrapped in these to stay off that task's toes.
 void lcd_driver_lvgl_lock(void);
 void lcd_driver_lvgl_unlock(void);
+
+// The CST816 touch input device. Valid after lcd_driver_init().
+lv_indev_t *lcd_driver_touch_indev(void);
 
 // The touch I2C bus (GPIO11/12), which the DRV2605 haptic driver shares.
 // Valid after lcd_driver_init().

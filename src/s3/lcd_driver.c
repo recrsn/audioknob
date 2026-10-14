@@ -415,3 +415,7 @@ void lcd_driver_init(void) {
 i2c_master_bus_handle_t lcd_driver_i2c_bus(void) {
     return s_i2c_bus;
 }
+
+lv_indev_t *lcd_driver_touch_indev(void) {
+    return s_touch_indev;
+}

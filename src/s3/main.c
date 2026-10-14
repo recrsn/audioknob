@@ -96,6 +96,12 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
     ui_update_clock(ntp_is_synced(), &local_time);
 }
 
+static void feedback(haptic_effect_t effect) {
+    if (settings_ui_haptics()) {
+        haptic_play(effect);
+    }
+}
+
 // The app pages (lights, timers, settings) claim the knob first; otherwise
 // it drives the volume of whichever source is in front. Runs on the knob
 // task, hence the lock.
@@ -104,14 +110,17 @@ static void on_knob_rotate(int steps) {
     bool used = ui_knob_rotate(steps);
     lcd_driver_lvgl_unlock();
     if (used) {
+        feedback(HAPTIC_TICK);
         return;
     }
     if (airplay_in_front()) {
+        feedback(HAPTIC_TICK);
         airplay_adjust_volume(steps);
         return;
     }
     wireless_state_t esp32;
     if (uart_link_get_latest(&esp32) && esp32.connected) {
+        feedback(HAPTIC_TICK);
         // A detent at a time, so Bluetooth moves 1% per step just like AirPlay.
         protocol_cmd_t cmd = steps > 0 ? CMD_VOLUME_UP : CMD_VOLUME_DOWN;
         for (int i = steps > 0 ? steps : -steps; i > 0; i--) {
@@ -126,6 +135,10 @@ static void on_knob_press(void) {
     lcd_driver_lvgl_unlock();
     if (!used && airplay_in_front()) {
         airplay_toggle_play_pause();
+        used = true;
+    }
+    if (used) {
+        feedback(HAPTIC_CLICK);
     }
 }
 
@@ -134,6 +147,16 @@ static void on_knob_long_press(void) {
     lcd_driver_lvgl_lock();
     ui_knob_long_press();
     lcd_driver_lvgl_unlock();
+    feedback(HAPTIC_LONG);
+}
+
+// Taps on bare screens do nothing, so they get no click either. Runs on the
+// LVGL task.
+static void on_touch_clicked(lv_event_t *e) {
+    lv_obj_t *obj = lv_event_get_param(e);
+    if (obj && lv_obj_get_parent(obj)) {
+        feedback(HAPTIC_CLICK);
+    }
 }
 
 static void on_transport(ui_transport_t button) {
@@ -210,6 +233,7 @@ void app_main(void) {
     ui_set_transport_handler(on_transport);
     ui_set_source_handler(on_source_pick);
     ui_set_alert_handler(on_alert);
+    lv_indev_add_event_cb(lcd_driver_touch_indev(), on_touch_clicked, LV_EVENT_CLICKED, NULL);
     settings_ui_start();
     lights_ui_start();
     lv_timer_create(state_poll_timer_cb, 33, NULL);
