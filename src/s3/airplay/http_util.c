@@ -220,20 +220,6 @@ void kd_free(key_data_t *kd) {
     kd[0].key = NULL;
 }
 
-char *strextract(const char *s1, const char *beg, const char *end) {
-    const char *p1 = strcasestr(s1, beg);
-    if (!p1) {
-        return NULL;
-    }
-    p1 += strlen(beg);
-
-    const char *p2 = strcasestr(p1, end);
-    if (!p2) {
-        return strdup(p1);
-    }
-    return strndup(p1, p2 - p1);
-}
-
 int bind_socket(uint16_t *port, int type) {
     int sock = socket(AF_INET, type, 0);
     if (sock < 0) {

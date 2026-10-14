@@ -32,13 +32,11 @@ bp_obj bplist_root(const bplist_t *pl);
 
 // BP_NONE if obj is not a dict or has no such key.
 bp_obj bplist_dict_get(const bplist_t *pl, bp_obj dict, const char *key);
-size_t bplist_array_count(const bplist_t *pl, bp_obj array);
 bp_obj bplist_array_get(const bplist_t *pl, bp_obj array, size_t index);
 
 // Each is false if obj is missing or of another type.
 bool bplist_get_uint(const bplist_t *pl, bp_obj obj, uint64_t *out);
 bool bplist_get_bool(const bplist_t *pl, bp_obj obj, bool *out);
-bool bplist_get_real(const bplist_t *pl, bp_obj obj, double *out);
 // Points into the plist's buffer.
 bool bplist_get_data(const bplist_t *pl, bp_obj obj, const uint8_t **data, size_t *len);
 // ASCII or UTF-16 string as NUL-terminated UTF-8, truncated to cap.

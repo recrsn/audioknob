@@ -31,10 +31,6 @@ const char *kd_lookup(const key_data_t *kd, const char *key);
 void kd_add(key_data_t *kd, const char *key, const char *data);
 void kd_free(key_data_t *kd);
 
-// Heap copy of the text between the first `beg` and the following `end`
-// (case-insensitive), or to the end of s1 if `end` is absent.
-char *strextract(const char *s1, const char *beg, const char *end);
-
 // Binds a socket of `type` on INADDR_ANY. *port of 0 picks an ephemeral
 // port and writes it back. Returns the socket or -1.
 int bind_socket(uint16_t *port, int type);

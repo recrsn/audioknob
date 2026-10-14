@@ -146,17 +146,6 @@ bp_obj bplist_dict_get(const bplist_t *pl, bp_obj dict, const char *key) {
     return BP_NONE;
 }
 
-size_t bplist_array_count(const bplist_t *pl, bp_obj array) {
-    uint8_t type;
-    uint64_t count;
-    size_t body;
-    if (!object_header(pl, array, &type, &count, &body) || type != T_ARRAY ||
-        !span_ok(pl, body, count * pl->ref_size)) {
-        return 0;
-    }
-    return (size_t)count;
-}
-
 bp_obj bplist_array_get(const bplist_t *pl, bp_obj array, size_t index) {
     uint8_t type;
     uint64_t count;
@@ -194,31 +183,6 @@ bool bplist_get_bool(const bplist_t *pl, bp_obj obj, bool *out) {
         return false;
     }
     *out = marker == SIMPLE_TRUE;
-    return true;
-}
-
-bool bplist_get_real(const bplist_t *pl, bp_obj obj, double *out) {
-    uint8_t type;
-    uint64_t count;
-    size_t body;
-    if (!object_header(pl, obj, &type, &count, &body) || type != T_REAL) {
-        return false;
-    }
-    size_t n = (size_t)1 << count;
-    if (!span_ok(pl, body, n)) {
-        return false;
-    }
-    uint64_t bits = read_be(pl->data + body, n);
-    if (n == 4) {
-        uint32_t b32 = (uint32_t)bits;
-        float f;
-        memcpy(&f, &b32, sizeof(f));
-        *out = f;
-    } else if (n == 8) {
-        memcpy(out, &bits, sizeof(*out));
-    } else {
-        return false;
-    }
     return true;
 }
 
