@@ -105,17 +105,13 @@ static void knob_task(void *arg) {
         TickType_t now = xTaskGetTickCount();
 
         for (int i = 0; i < 2; i++) {
-            bool pulsed = channel_pulsed(channels[i]);
-            bool near_press = now - last_both_low < pdMS_TO_TICKS(PRESS_SETTLE_MS);
-            if (pulsed) ESP_LOGI(TAG, "DBG t=%u ch=%d near_press=%d", (unsigned)now, i, near_press);
-            if (!pulsed || near_press) {
+            if (!channel_pulsed(channels[i]) || now - last_both_low < pdMS_TO_TICKS(PRESS_SETTLE_MS)) {
                 continue;
             }
             int dir = channels[i]->dir;
             bool reversal_too_soon =
                 dir != last_dir && now - last_step < pdMS_TO_TICKS(REVERSE_LOCKOUT_MS);
             if (reversal_too_soon) {
-                ESP_LOGI(TAG, "DBG t=%u reversal dropped", (unsigned)now);
                 continue;
             }
             last_dir = dir;
