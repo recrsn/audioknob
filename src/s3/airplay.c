@@ -7,6 +7,7 @@
 #include "artwork.h"
 #include "audio_source.h"
 #include "device_name.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -26,6 +27,10 @@
 #define CTRL_STACK_SIZE 6144
 #define CTRL_TASK_PRIO 3
 
+// Below everything audio: a large PNG cover takes seconds to decode.
+#define ART_STACK_SIZE 6144
+#define ART_TASK_PRIO 1
+
 static const char *TAG = "airplay";
 
 static SemaphoreHandle_t s_lock;
@@ -35,6 +40,11 @@ static artwork_slot_t *s_art;
 static raop_ctx_t *s_raop;
 static uint8_t s_mac[6];
 static TaskHandle_t s_ctrl_task;
+static TaskHandle_t s_art_task;
+// Latest cover not yet decoded (len 0 = clear); newer ones replace it.
+static uint8_t *s_art_pending;
+static size_t s_art_pending_len;
+static bool s_art_has_pending;
 // Latest knob volume not yet pushed to the sender; coalesces fast spins.
 static volatile uint8_t s_pending_volume;
 
@@ -52,6 +62,46 @@ static void set_volume(uint8_t volume) {
     airplay_player_set_volume(volume);
 }
 
+// Decoding on the RTSP thread would hold up its replies and starve CPU
+// idle into the task watchdog, so covers go to the art task.
+static void post_artwork(const uint8_t *data, size_t len) {
+    uint8_t *copy = NULL;
+    if (len) {
+        copy = heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
+        if (!copy) {
+            ESP_LOGW(TAG, "no memory for %u byte cover", (unsigned)len);
+            len = 0;
+        } else {
+            memcpy(copy, data, len);
+        }
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    heap_caps_free(s_art_pending);
+    s_art_pending = copy;
+    s_art_pending_len = len;
+    s_art_has_pending = true;
+    xSemaphoreGive(s_lock);
+    xTaskNotifyGive(s_art_task);
+}
+
+static void art_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        bool has = s_art_has_pending;
+        uint8_t *data = s_art_pending;
+        size_t len = s_art_pending_len;
+        s_art_pending = NULL;
+        s_art_has_pending = false;
+        xSemaphoreGive(s_lock);
+        if (has) {
+            artwork_slot_set(s_art, data, len);
+            heap_caps_free(data);
+        }
+    }
+}
+
 static void end_session(void) {
     airplay_player_flush();
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -59,7 +109,7 @@ static void end_session(void) {
     s_state.playing = false;
     memset(&s_track, 0, sizeof(s_track));
     xSemaphoreGive(s_lock);
-    artwork_slot_clear(s_art);
+    post_artwork(NULL, 0);
     audio_source_release_airplay();
 }
 
@@ -72,7 +122,7 @@ static bool on_raop_event(const raop_event_t *event) {
         s_state.playing = false;
         memset(&s_track, 0, sizeof(s_track));
         xSemaphoreGive(s_lock);
-        artwork_slot_clear(s_art);
+        post_artwork(NULL, 0);
         break;
 
     case RAOP_EVENT_PLAY:
@@ -112,7 +162,7 @@ static bool on_raop_event(const raop_event_t *event) {
         break;
 
     case RAOP_EVENT_ARTWORK:
-        artwork_slot_set(s_art, event->artwork.data, event->artwork.len);
+        post_artwork(event->artwork.data, event->artwork.len);
         break;
     }
     return true;
@@ -186,7 +236,9 @@ void airplay_init(void) {
 
     BaseType_t ok =
         xTaskCreatePinnedToCore(ctrl_task, "airplay_ctrl", CTRL_STACK_SIZE, NULL, CTRL_TASK_PRIO, &s_ctrl_task, 0);
-    ESP_ERROR_CHECK(s_lock && s_art && ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+    BaseType_t art_ok = xTaskCreatePinnedToCore(art_task, "airplay_art", ART_STACK_SIZE, NULL, ART_TASK_PRIO,
+                                                &s_art_task, tskNO_AFFINITY);
+    ESP_ERROR_CHECK(s_lock && s_art && ok == pdPASS && art_ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }
 
 void airplay_network_up(const uint8_t mac[6]) {

@@ -5,6 +5,9 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "artwork_png";
 
@@ -80,8 +83,15 @@ static void emit_rows(box_t *box, uint32_t row_bin, uint16_t *out) {
     memset(box->count, 0, sizeof(box->count));
 }
 
+// Rows between yields: a big cover decodes for seconds, and the CPU's idle
+// task must still run or the task watchdog fires.
+#define ROWS_PER_YIELD 16
+
 static void read_scaled(png_structp png, uint32_t w, uint32_t h, uint8_t *row, box_t *box, uint16_t *out) {
     for (uint32_t y = 0; y < h; y++) {
+        if (y % ROWS_PER_YIELD == ROWS_PER_YIELD - 1) {
+            vTaskDelay(1);
+        }
         png_read_row(png, row, NULL);
         for (uint32_t x = 0; x < w; x++) {
             uint32_t bin = box->bin_of[x];
@@ -99,6 +109,7 @@ static void read_scaled(png_structp png, uint32_t w, uint32_t h, uint8_t *row, b
 
 bool artwork_png_decode(const uint8_t *data, size_t len, uint16_t *out) {
     png_source_t src = {.data = data, .len = len};
+    int64_t start = esp_timer_get_time();
     png_structp png = png_create_read_struct_2(PNG_LIBPNG_VER_STRING, NULL, error_cb, warning_cb, NULL, malloc_cb,
                                                free_cb);
     png_infop info = png ? png_create_info_struct(png) : NULL;
@@ -143,7 +154,8 @@ bool artwork_png_decode(const uint8_t *data, size_t len, uint16_t *out) {
         }
         read_scaled(png, w, h, row, box, out);
         ok = true;
-        ESP_LOGI(TAG, "decoded %ux%u from %u bytes", (unsigned)w, (unsigned)h, (unsigned)len);
+        ESP_LOGI(TAG, "decoded %ux%u from %u bytes in %lld ms", (unsigned)w, (unsigned)h, (unsigned)len,
+                 (esp_timer_get_time() - start) / 1000);
     }
 
     if (box) {
