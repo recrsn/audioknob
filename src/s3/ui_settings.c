@@ -35,6 +35,8 @@ typedef enum {
     ROW_TIMEZONE,
     ROW_HAPTICS,
     ROW_BLUETOOTH,
+    ROW_BT_PAIR,
+    ROW_BT_FORGET,
     ROW_AIRPLAY,
     ROW_NAME,
     ROW_WIFI,
@@ -46,6 +48,7 @@ typedef enum {
 static const char *const k_row_names[ROW_COUNT] = {
     [ROW_BRIGHTNESS] = "Brightness", [ROW_CLOCK] = "Clock",   [ROW_UNITS] = "Units",
     [ROW_TIMEZONE] = "Timezone",     [ROW_HAPTICS] = "Haptics", [ROW_BLUETOOTH] = "Bluetooth",
+    [ROW_BT_PAIR] = "Pair a device", [ROW_BT_FORGET] = "Forget paired devices",
     [ROW_AIRPLAY] = "AirPlay",       [ROW_NAME] = "Name",       [ROW_WIFI] = "WiFi",
     [ROW_FORGET] = "Forget network", [ROW_ABOUT] = "About",
 };
@@ -65,7 +68,7 @@ static struct {
     lv_obj_t *values[ROW_COUNT];
     int selected;
     bool editing;
-    bool forget_armed;
+    bool forget_armed; // the selected row is a Forget one, pressed once
     lv_obj_t *rename;    // QR overlay, while open
     lv_obj_t *rename_qr;
     lv_obj_t *rename_url;
@@ -150,6 +153,33 @@ static uint8_t airplay_next(const ui_settings_t *s) {
     }
 }
 
+// NULL while Bluetooth is off or the ESP32 isn't answering.
+static const pairing_status_t *bluetooth_status(void) {
+    return s_settings.bluetooth ? ui_pairing_status() : NULL;
+}
+
+static void bt_pair_text(char *buf, size_t len) {
+    const pairing_status_t *bt = bluetooth_status();
+    if (!s_settings.bluetooth) {
+        snprintf(buf, len, "Bluetooth is off");
+    } else if (!bt) {
+        snprintf(buf, len, "Starting\xE2\x80\xA6");
+    } else if (bt->bonded) {
+        snprintf(buf, len, "%u paired \xC2\xB7 add another", bt->bonded);
+    } else {
+        snprintf(buf, len, "Nothing paired yet");
+    }
+}
+
+static void bt_forget_text(char *buf, size_t len) {
+    const pairing_status_t *bt = bluetooth_status();
+    if (!bt || !bt->bonded) {
+        snprintf(buf, len, "%s", s_settings.bluetooth ? "Nothing to forget" : "Bluetooth is off");
+    } else {
+        snprintf(buf, len, "%s", st.forget_armed ? "Press again to forget" : "They'll need to pair again");
+    }
+}
+
 static void render(void) {
     const ui_settings_t *s = &s_settings;
     char buf[64];
@@ -174,6 +204,12 @@ static void render(void) {
             break;
         case ROW_BLUETOOTH:
             snprintf(buf, sizeof(buf), "%s", s->bluetooth ? "On" : "Off");
+            break;
+        case ROW_BT_PAIR:
+            bt_pair_text(buf, sizeof(buf));
+            break;
+        case ROW_BT_FORGET:
+            bt_forget_text(buf, sizeof(buf));
             break;
         case ROW_AIRPLAY:
             snprintf(buf, sizeof(buf), "%s", airplay_text(s));
@@ -261,6 +297,12 @@ static void screen_unloaded_cb(lv_event_t *e) {
     rename_close();
 }
 
+void ui_settings_refresh(void) {
+    if (st.list) {
+        render();
+    }
+}
+
 void ui_update_settings(const ui_settings_t *settings) {
     if (!memcmp(settings, &s_settings, sizeof(s_settings))) {
         return;
@@ -324,6 +366,21 @@ static void activate(void) {
     case ROW_BLUETOOTH:
         emit(UI_SETTING_BLUETOOTH, !s->bluetooth, NULL);
         break;
+    case ROW_BT_PAIR:
+        if (bluetooth_status()) {
+            ui_pairing_request(UI_PAIRING_OPEN);
+        }
+        break;
+    case ROW_BT_FORGET: {
+        const pairing_status_t *bt = bluetooth_status();
+        if (bt && bt->bonded) {
+            if (st.forget_armed) {
+                ui_pairing_request(UI_PAIRING_FORGET);
+            }
+            st.forget_armed = !st.forget_armed;
+        }
+        break;
+    }
     case ROW_AIRPLAY:
         emit(UI_SETTING_AIRPLAY, airplay_next(s), NULL);
         break;

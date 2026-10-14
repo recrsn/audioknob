@@ -43,6 +43,24 @@ typedef enum {
     UI_SOURCE_BLUETOOTH,
 } ui_source_t;
 
+// Pushes the ESP32's Bluetooth pairing status, or NULL while there is none
+// (Bluetooth off, ESP32 not answering). Cheap to call every poll. Anything
+// past PAIRING_IDLE shows a prompt over whatever screen is up.
+void ui_update_pairing(const pairing_status_t *status);
+
+typedef enum {
+    UI_PAIRING_OPEN,   // start the pairing window
+    UI_PAIRING_CLOSE,  // end it early
+    UI_PAIRING_ACCEPT, // the code matches the phone's
+    UI_PAIRING_REJECT,
+    UI_PAIRING_FORGET, // remove every paired device
+} ui_pairing_action_t;
+
+// Called on the LVGL task for the pairing prompt's buttons and the
+// Bluetooth settings rows; must not block. The result shows in a later
+// ui_update_pairing().
+void ui_set_pairing_handler(void (*handler)(ui_pairing_action_t action));
+
 // Called on the LVGL task when the user picks a source on the switch screen
 // (tap the status row of the wireless screen); must not block. The UI then
 // shows that source's screen -- its waiting state if nothing is connected --

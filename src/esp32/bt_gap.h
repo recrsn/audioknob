@@ -8,12 +8,14 @@
 // happens as soon as it sees this MCU on the link.
 #define AK_BT_DEVICE_NAME "AudioKnob"
 
-// Brings up the BT controller (Classic-only) and Bluedroid host, and sets
-// Secure Simple Pairing to Just Works (no display/keyboard on this device).
+// Brings up the BT controller (Classic-only) and Bluedroid host, with Secure
+// Simple Pairing by numeric comparison on the S3's screen (bt_pairing.h)
+// and full-length encryption keys.
 // NVS must already be up (bt_power_enabled() does that).
 esp_err_t bt_gap_init(void);
 
-// Makes the device discoverable and connectable so a phone can pair/reconnect.
+// Always connectable, so bonded phones reconnect; discoverable only while
+// bt_pairing has its window open.
 void bt_gap_set_discoverable(bool discoverable);
 
 // Renames the device for inquiry and remote-name requests. Phones that

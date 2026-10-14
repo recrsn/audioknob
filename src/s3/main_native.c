@@ -88,6 +88,56 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
     ui_update_settings(&s_settings);
 }
 
+// Stands in for the ESP32's pairing state machine so the prompt can be laid
+// out: a "phone" asks to pair 3 s into the window with a fixed code.
+#define SIM_WINDOW_S 120
+static pairing_status_t s_pairing = {.bonded = 1};
+static int s_pairing_hold;
+
+static void pairing_tick_cb(lv_timer_t *timer) {
+    (void)timer;
+    if (s_pairing_hold && --s_pairing_hold == 0) {
+        s_pairing.state = s_pairing.seconds_left ? PAIRING_OPEN : PAIRING_IDLE;
+    }
+    if (s_pairing.seconds_left && --s_pairing.seconds_left == 0) {
+        s_pairing.state = PAIRING_IDLE;
+    }
+    if (s_pairing.state == PAIRING_OPEN && s_pairing.seconds_left == SIM_WINDOW_S - 3) {
+        s_pairing.state = PAIRING_CONFIRM;
+        s_pairing.code = 42917;
+    }
+    if (s_pairing.state == PAIRING_BUSY && !s_pairing_hold) {
+        s_pairing.state = PAIRING_DONE;
+        s_pairing.seconds_left = 0;
+        s_pairing.bonded++;
+        snprintf(s_pairing.peer, sizeof(s_pairing.peer), "Sample Phone");
+        s_pairing_hold = 3;
+    }
+    ui_update_pairing(s_settings.bluetooth ? &s_pairing : NULL);
+}
+
+static void on_pairing(ui_pairing_action_t action) {
+    switch (action) {
+    case UI_PAIRING_OPEN:
+        s_pairing.state = PAIRING_OPEN;
+        s_pairing.seconds_left = SIM_WINDOW_S;
+        break;
+    case UI_PAIRING_CLOSE:
+    case UI_PAIRING_REJECT:
+        s_pairing.state = PAIRING_IDLE;
+        s_pairing.seconds_left = 0;
+        break;
+    case UI_PAIRING_ACCEPT:
+        s_pairing.state = PAIRING_BUSY;
+        break;
+    case UI_PAIRING_FORGET:
+        s_pairing.bonded = 0;
+        break;
+    }
+    s_pairing.code = s_pairing.state == PAIRING_CONFIRM ? s_pairing.code : 0;
+    ui_update_pairing(&s_pairing);
+}
+
 // Fixed sample so the Weather page can be laid out without a network; the
 // place name says so.
 static void show_sample_weather(void) {
@@ -162,6 +212,8 @@ int main(void) {
     show_sample_weather();
     knob_emulation_create();
     lv_timer_create(clock_tick_cb, 1000, NULL);
+    ui_set_pairing_handler(on_pairing);
+    lv_timer_create(pairing_tick_cb, 1000, NULL);
 
     while (1) {
         uint32_t idle_ms = lv_timer_handler();

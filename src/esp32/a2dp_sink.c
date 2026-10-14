@@ -5,7 +5,6 @@
 
 #include "app_state.h"
 #include "bt_app_core.h"
-#include "bt_gap.h"
 #include "esp_log.h"
 #include "i2s_out.h"
 
@@ -26,9 +25,6 @@ static void handle_event(uint16_t event, void *param) {
             memcpy(s_peer, a2d->conn_stat.remote_bda, sizeof(s_peer));
         }
         s_has_peer = connected;
-        // Stop advertising once paired so a second phone can't hijack the
-        // link; go visible again once this one drops.
-        bt_gap_set_discoverable(!connected && a2d->conn_stat.state == ESP_A2D_CONNECTION_STATE_DISCONNECTED);
         if (!connected) {
             i2s_out_stop();
         }

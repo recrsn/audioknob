@@ -22,6 +22,11 @@ bool uart_link_get_latest(wireless_state_t *out);
 // e.g. nothing has played since boot.
 bool uart_link_get_latest_track(track_info_t *out);
 
+// Copies the ESP32's latest pairing status into *out. Returns false (and
+// leaves *out untouched) when none has arrived in the last few seconds,
+// e.g. Bluetooth is off or the ESP32 is restarting.
+bool uart_link_get_pairing(pairing_status_t *out);
+
 // The ESP32's current Bluetooth cover art as an ARTWORK_SIZE^2 RGB565
 // bitmap, or NULL if there is none. version changes whenever it does.
 const uint16_t *uart_link_get_artwork(uint32_t *version);

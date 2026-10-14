@@ -40,6 +40,9 @@ static bool s_has_track;
 static char s_device_name[DEVICE_NAME_MAX + 1];
 static int8_t s_bluetooth = -1; // unknown until settings load
 static TickType_t s_last_state_tick;
+static pairing_status_t s_pairing;
+static TickType_t s_last_pairing_tick;
+static bool s_has_pairing;
 
 // Bluetooth cover art being received, in PSRAM. Only the RX task touches it.
 static artwork_slot_t *s_art;
@@ -129,6 +132,16 @@ static void handle_frame(uint8_t type, const uint8_t *payload, uint8_t len) {
 
     if (type == MSG_HELLO) {
         send_peer_config();
+        return;
+    }
+
+    if (type == MSG_PAIRING && len == sizeof(pairing_status_t)) {
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        memcpy(&s_pairing, payload, sizeof(s_pairing));
+        s_pairing.peer[sizeof(s_pairing.peer) - 1] = '\0';
+        s_has_pairing = true;
+        s_last_pairing_tick = xTaskGetTickCount();
+        xSemaphoreGive(s_state_mutex);
         return;
     }
 
@@ -234,6 +247,17 @@ bool uart_link_get_latest_track(track_info_t *out) {
     }
     xSemaphoreGive(s_state_mutex);
     return has_track;
+}
+
+bool uart_link_get_pairing(pairing_status_t *out) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    // Resent every second; a stale code must not stay up for an answer.
+    bool fresh = s_has_pairing && xTaskGetTickCount() - s_last_pairing_tick <= pdMS_TO_TICKS(PEER_LOST_MS);
+    if (fresh) {
+        *out = s_pairing;
+    }
+    xSemaphoreGive(s_state_mutex);
+    return fresh;
 }
 
 const uint16_t *uart_link_get_artwork(uint32_t *version) {

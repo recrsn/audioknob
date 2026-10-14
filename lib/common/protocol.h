@@ -22,6 +22,9 @@ typedef enum {
     // No payload. The ESP32 just booted or woke; the S3 answers with the
     // device name and CMD_BT_ENABLE/CMD_BT_DISABLE.
     MSG_HELLO = 0x08,
+    // pairing_status_t, sent like MSG_STATE_UPDATE: on change and resent
+    // every ~1 s.
+    MSG_PAIRING = 0x09,
 } protocol_msg_type_t;
 
 // MSG_DEVICE_NAME's payload is the name's UTF-8 bytes, no NUL, 1 to
@@ -69,11 +72,38 @@ typedef enum {
     // until the S3 sends anything; the frame that wakes it is lost.
     CMD_BT_ENABLE = 0x07,
     CMD_BT_DISABLE = 0x08,
+    // Bluetooth pairing, driven from the S3's screen. New devices can pair
+    // only while the window is open, and only once the user accepts the
+    // numeric-comparison code (see pairing_status_t).
+    CMD_PAIRING_OPEN = 0x09,
+    CMD_PAIRING_CLOSE = 0x0A,
+    CMD_PAIRING_ACCEPT = 0x0B,
+    CMD_PAIRING_REJECT = 0x0C,
+    // Removes every bonded device and drops the current link.
+    CMD_FORGET_DEVICES = 0x0D,
 } protocol_cmd_t;
 
 typedef struct __attribute__((packed)) {
     uint8_t cmd;  // protocol_cmd_t
 } command_t;
+
+typedef enum {
+    PAIRING_IDLE = 0,    // not discoverable; only bonded devices connect
+    PAIRING_OPEN = 1,    // discoverable, waiting for a phone
+    PAIRING_CONFIRM = 2, // code is the 6-digit numeric comparison value
+    PAIRING_PASSKEY = 3, // code is a passkey to type on the other device
+    PAIRING_BUSY = 4,    // accepted, waiting for the link key
+    PAIRING_DONE = 5,    // peer paired; shown briefly, then IDLE
+    PAIRING_FAILED = 6,  // shown briefly, then OPEN while the window lasts
+} pairing_state_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t state;        // pairing_state_t
+    uint8_t seconds_left; // of the pairing window
+    uint8_t bonded;       // devices that may reconnect
+    uint32_t code;
+    char peer[DEVICE_NAME_MAX + 1]; // NUL-terminated; set in DONE
+} pairing_status_t;
 
 // Cover art (an AVRCP linked thumbnail, a baseline JPEG) streams as
 // MSG_ART_CHUNKs in order, then one MSG_ART_END. A chunk at offset 0 starts

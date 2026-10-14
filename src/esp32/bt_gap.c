@@ -7,6 +7,7 @@
 #include "esp_bt_device.h"
 #include "esp_bt_main.h"
 #include "esp_gap_bt_api.h"
+#include "bt_pairing.h"
 #include "esp_log.h"
 #include "protocol.h"
 
@@ -15,15 +16,12 @@ static const char *TAG = "bt_gap";
 static void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param) {
     switch (event) {
     case ESP_BT_GAP_AUTH_CMPL_EVT:
-        if (param->auth_cmpl.stat == ESP_BT_STATUS_SUCCESS) {
-            ESP_LOGI(TAG, "paired: %s", param->auth_cmpl.device_name);
-        } else {
-            ESP_LOGW(TAG, "pairing failed, status %d", param->auth_cmpl.stat);
-        }
-        break;
     case ESP_BT_GAP_CFM_REQ_EVT:
-        // Just Works: auto-accept, no keypad/display to confirm a passkey with.
-        esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, true);
+    case ESP_BT_GAP_KEY_NOTIF_EVT:
+    case ESP_BT_GAP_KEY_REQ_EVT:
+    case ESP_BT_GAP_PIN_REQ_EVT:
+    case ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT:
+        bt_pairing_gap_event(event, param);
         break;
     case ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT:
         ESP_LOGI(TAG, "ACL connected");
@@ -59,8 +57,13 @@ esp_err_t bt_gap_init(void) {
 
     esp_bt_gap_register_callback(bt_gap_cb);
 
-    esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;
+    // Display + yes/no (the S3's screen and knob): phones then pair by
+    // numeric comparison, which resists a man in the middle, rather than
+    // Just Works.
+    esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_IO;
     esp_bt_gap_set_security_param(ESP_BT_SP_IOCAP_MODE, &iocap, sizeof(iocap));
+    // Refuses the short keys a KNOB attack negotiates down to.
+    esp_bt_gap_set_min_enc_key_size(ESP_BT_ENC_KEY_SIZE_CTRL_MAX);
 
     esp_bt_gap_set_device_name(AK_BT_DEVICE_NAME);
 

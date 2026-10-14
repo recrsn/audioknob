@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "app_state.h"
+#include "bt_pairing.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_sleep.h"
@@ -68,6 +69,7 @@ void state_sync_send_art_end(uint8_t id, uint32_t total_len) {
 static void state_sync_task(void *arg) {
     (void)arg;
     wireless_state_t last_sent = {0};
+    pairing_status_t last_pairing = {0};
     int ticks_since_send = RESYNC_TICKS;  // force an initial send
 
     for (;;) {
@@ -77,9 +79,20 @@ static void state_sync_task(void *arg) {
         bool changed = memcmp(&current, &last_sent, sizeof(current)) != 0;
         ticks_since_send++;
 
+        pairing_status_t pairing = bt_pairing_status();
+        bool pairing_changed = memcmp(&pairing, &last_pairing, sizeof(pairing)) != 0;
+
         if (changed || ticks_since_send >= RESYNC_TICKS) {
             send_frame(MSG_STATE_UPDATE, &current, sizeof(current));
             last_sent = current;
+        }
+        // A lost frame would leave a pairing code unanswered on screen, so
+        // this resyncs too.
+        if (pairing_changed || ticks_since_send >= RESYNC_TICKS) {
+            send_frame(MSG_PAIRING, &pairing, sizeof(pairing));
+            last_pairing = pairing;
+        }
+        if (ticks_since_send >= RESYNC_TICKS) {
             ticks_since_send = 0;
         }
     }

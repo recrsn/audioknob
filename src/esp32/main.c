@@ -4,6 +4,7 @@
 #include "avrcp_target.h"
 #include "bt_app_core.h"
 #include "bt_gap.h"
+#include "bt_pairing.h"
 #include "bt_power.h"
 #include "driver/gpio.h"
 #include "encoder.h"
@@ -51,6 +52,13 @@ static void on_command(protocol_cmd_t cmd) {
     case CMD_VOLUME_DOWN:
         avrcp_target_step_volume(-1);
         break;
+    case CMD_PAIRING_OPEN:
+    case CMD_PAIRING_CLOSE:
+    case CMD_PAIRING_ACCEPT:
+    case CMD_PAIRING_REJECT:
+    case CMD_FORGET_DEVICES:
+        bt_pairing_command(cmd);
+        break;
     default:
         ESP_LOGW(TAG, "unknown command 0x%02x", cmd);
         break;
@@ -84,6 +92,7 @@ void app_main(void) {
     bt_app_task_start_up();
 
     ESP_ERROR_CHECK(bt_gap_init());
+    bt_pairing_init();
 
     esp_avrc_tg_register_callback(avrcp_target_bt_event);
     ESP_ERROR_CHECK(esp_avrc_tg_init());
@@ -99,6 +108,5 @@ void app_main(void) {
     encoder_start();
     state_sync_start(on_command, bt_gap_set_name);
 
-    bt_gap_set_discoverable(true);
     ESP_LOGI(TAG, "A2DP sink ready");
 }

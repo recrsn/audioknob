@@ -67,6 +67,9 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
         uart_link_get_latest_track(&wire_track);
     }
 
+    pairing_status_t pairing;
+    ui_update_pairing(uart_link_get_pairing(&pairing) ? &pairing : NULL);
+
     wifi_setup_info_t setup;
     if (wifi_get_setup_info(&setup)) {
         ui_show_wifi_setup(setup.qr_payload, setup.ap_ssid, setup.ap_password, setup.status);
@@ -180,6 +183,15 @@ static void on_transport(ui_transport_t button) {
     uart_link_send_command(cmds[button]);
 }
 
+static void on_pairing(ui_pairing_action_t action) {
+    static const protocol_cmd_t cmds[] = {
+        [UI_PAIRING_OPEN] = CMD_PAIRING_OPEN,     [UI_PAIRING_CLOSE] = CMD_PAIRING_CLOSE,
+        [UI_PAIRING_ACCEPT] = CMD_PAIRING_ACCEPT, [UI_PAIRING_REJECT] = CMD_PAIRING_REJECT,
+        [UI_PAIRING_FORGET] = CMD_FORGET_DEVICES,
+    };
+    uart_link_send_command(cmds[action]);
+}
+
 static void on_alert(bool ringing) {
     if (ringing && settings_ui_haptics()) {
         haptic_alarm_start();
@@ -232,6 +244,7 @@ void app_main(void) {
     ui_init();
     ui_set_transport_handler(on_transport);
     ui_set_source_handler(on_source_pick);
+    ui_set_pairing_handler(on_pairing);
     ui_set_alert_handler(on_alert);
     lv_indev_add_event_cb(lcd_driver_touch_indev(), on_touch_clicked, LV_EVENT_CLICKED, NULL);
     settings_ui_start();

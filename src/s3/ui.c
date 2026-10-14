@@ -92,14 +92,14 @@ typedef struct {
     lv_obj_t *source_icon;
     lv_obj_t *source_label;
 
-    // Shown when state->connected is false -- neither source has a local
-    // "pairing" step on this end (AirPlay only appears once picked from the
-    // phone's Control Center; Bluetooth just advertises until a phone
-    // connects), so there's nothing to show a tile/track for yet.
+    // Shown when state->connected is false, so there's nothing to show a
+    // tile/track for yet. For Bluetooth, tapping the chip opens a pairing
+    // window; bonded phones reconnect without one.
     lv_obj_t *wait_chip;
     lv_obj_t *wait_icon;
     lv_obj_t *wait_title;
     lv_obj_t *wait_subtitle;
+    bool bluetooth;
 
     // Shown once connected. The tile itself is part of the background.
     lv_obj_t *tile_icon;
@@ -582,6 +582,13 @@ static void idle_screen_refresh(void) {
     }
 }
 
+static void wait_chip_click_cb(lv_event_t *e) {
+    (void)e;
+    if (wireless_screen.bluetooth) {
+        ui_pairing_request(UI_PAIRING_OPEN);
+    }
+}
+
 static void wireless_screen_build(void) {
     wireless_screen.screen = screen_create();
     ui_now_playing_bg_create(&wireless_screen.bg, wireless_screen.screen, UI_BG_AIRPLAY);
@@ -598,6 +605,7 @@ static void wireless_screen_build(void) {
     // -- waiting-for-connection state (mock's .wait-icon / np-meta) --
     wireless_screen.wait_chip = lv_obj_create(wireless_screen.screen);
     lv_obj_remove_flag(wireless_screen.wait_chip, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(wireless_screen.wait_chip, wait_chip_click_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_size(wireless_screen.wait_chip, WIRELESS_WAIT_CHIP_SIZE, WIRELESS_WAIT_CHIP_SIZE);
     lv_obj_set_style_radius(wireless_screen.wait_chip, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_border_width(wireless_screen.wait_chip, 0, 0);
@@ -983,6 +991,9 @@ static void knob_activity(void) {
 
 bool ui_knob_rotate(int steps) {
     knob_activity();
+    if (ui_pairing_visible()) {
+        return true;
+    }
     if (launcher_visible()) {
         launcher_rotate(steps);
         return true;
@@ -992,6 +1003,9 @@ bool ui_knob_rotate(int steps) {
 
 bool ui_knob_press(void) {
     knob_activity();
+    if (ui_pairing_knob_press()) {
+        return true;
+    }
     if (launcher_visible()) {
         launcher_activate();
         return true;
@@ -1001,6 +1015,9 @@ bool ui_knob_press(void) {
 
 void ui_knob_long_press(void) {
     knob_activity();
+    if (ui_pairing_knob_long_press()) {
+        return;
+    }
     if (launcher_visible()) {
         go_home();
     } else {
@@ -1074,11 +1091,14 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     lv_obj_set_style_arc_color(wireless_screen.ring, tint, LV_PART_INDICATOR);
     ui_now_playing_bg_set(&wireless_screen.bg, airplay ? UI_BG_AIRPLAY : UI_BG_BLUETOOTH);
 
-    // Neither source has a local "pairing" step on this end -- AirPlay only
-    // appears once picked from the phone's Control Center, and Bluetooth
-    // just advertises until a phone connects -- so an unconnected wireless
-    // screen has nothing to show a tile/track for yet, nor a volume to show.
+    // Unconnected, there's no tile/track to show yet, nor a volume.
     bool waiting = !state->connected;
+    wireless_screen.bluetooth = !airplay;
+    if (airplay) {
+        lv_obj_remove_flag(wireless_screen.wait_chip, LV_OBJ_FLAG_CLICKABLE);
+    } else {
+        lv_obj_add_flag(wireless_screen.wait_chip, LV_OBJ_FLAG_CLICKABLE);
+    }
     lv_obj_t *status_row = lv_obj_get_parent(wireless_screen.source_icon);
     lv_obj_align(status_row, LV_ALIGN_CENTER, 0,
                  waiting ? WIRELESS_STATUS_ROW_Y_WAITING : WIRELESS_STATUS_ROW_Y_CONNECTED);
@@ -1099,9 +1119,9 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
 
     if (waiting) {
         lv_image_set_src(wireless_screen.wait_icon, airplay ? &icon_airplay : &icon_bluetooth);
-        ui_label_set_text(wireless_screen.wait_title, airplay ? "Waiting for AirPlay" : "Ready to pair");
+        ui_label_set_text(wireless_screen.wait_title, airplay ? "Waiting for AirPlay" : "Waiting for Bluetooth");
         ui_label_set_text(wireless_screen.wait_subtitle,
-                           airplay ? "Select this speaker from Control Center" : "Discoverable over Bluetooth");
+                           airplay ? "Select this speaker from Control Center" : "Tap the icon to pair a new phone");
     } else {
         ui_label_set_text(wireless_screen.play_icon,
                            state->muted ? LV_SYMBOL_MUTE : (state->playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));

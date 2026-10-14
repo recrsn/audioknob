@@ -86,3 +86,16 @@ void ui_tools_dismiss(lv_obj_t *screen);
 // has no use for it, or `screen` isn't a tool page.
 bool ui_tools_knob_rotate(lv_obj_t *screen, int steps);
 bool ui_tools_knob_press(lv_obj_t *screen);
+
+// The Bluetooth pairing prompt (ui_pairing.c), over every screen.
+bool ui_pairing_visible(void);
+// Knob input while the prompt is up; false when it isn't.
+bool ui_pairing_knob_press(void);
+bool ui_pairing_knob_long_press(void);
+// Sends an action to the handler from ui_set_pairing_handler().
+void ui_pairing_request(ui_pairing_action_t action);
+// The last status pushed, or NULL while Bluetooth isn't answering.
+const pairing_status_t *ui_pairing_status(void);
+// Re-renders the settings page's Bluetooth rows after ui_pairing_status()
+// changes.
+void ui_settings_refresh(void);
