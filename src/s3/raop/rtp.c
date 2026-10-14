@@ -35,6 +35,7 @@
 #include "alac_dec.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -42,7 +43,10 @@
 #include "lwip/sockets.h"
 #include "mbedtls/aes.h"
 
-#define NTP2MS(ntp) ((((ntp) >> 10) * 1000L) >> 22)
+// Sender clock offset: keep the last few NTP exchanges and trust the one
+// with the shortest network delay, whose midpoint estimate is the tightest.
+#define TIMING_HISTORY 8
+#define MAX_ROUNDTRIP_US 100000
 
 // Power of two that divides 2^16, so BUFIDX() stays collision-free across
 // the 16-bit seqno wrap (~4 s of 352-frame packets).
@@ -93,11 +97,13 @@ struct rtp_s {
         int sock;
     } sockets[3];
     struct {
-        uint32_t local;
-        uint64_t remote;
+        int64_t offset_us;  // sender NTP clock minus esp_timer clock
+        int64_t offsets[TIMING_HISTORY], delays[TIMING_HISTORY];
+        int count, next;
     } timing;
     struct {
-        uint32_t rtp, time;
+        uint32_t rtp;
+        int64_t remote_us;  // sender time at which rtp plays
         uint8_t status;
     } synchro;
     int latency;  // rtp hold depth in samples
@@ -358,32 +364,42 @@ static bool decode_packet(rtp_t *ctx, uint8_t *buf, int len, abuf_t *abuf) {
     return true;
 }
 
-static uint32_t playtime_of(rtp_t *ctx, uint32_t rtptime) {
-    // Stays within int32 range for ~13.5 h between sync packets (2^31 / 10 / 44100).
-    return ctx->synchro.time + ((rtptime - ctx->synchro.rtp) * 10) / (RAOP_SAMPLE_RATE / 100);
+static int64_t ntp_to_us(uint64_t ntp) {
+    return (int64_t)(ntp >> 32) * 1000000 + (int64_t)(((ntp & 0xffffffff) * 1000000) >> 32);
+}
+
+static uint64_t us_to_ntp(int64_t us) {
+    return ((uint64_t)(us / 1000000) << 32) | (((uint64_t)(us % 1000000) << 32) / 1000000);
+}
+
+// Local (esp_timer) time at which rtptime should reach the DAC. Applies the
+// latest clock offset, so a better NTP estimate takes effect immediately.
+static int64_t playtime_of(rtp_t *ctx, uint32_t rtptime) {
+    int32_t delta = (int32_t)(rtptime - ctx->synchro.rtp);
+    return ctx->synchro.remote_us - ctx->timing.offset_us + (int64_t)delta * 1000000 / RAOP_SAMPLE_RATE;
 }
 
 // Pushes as many frames as possible downstream, in order.
 static void buffer_push_packet(rtp_t *ctx) {
-    uint32_t hold = (ctx->latency * 1000) / (8 * RAOP_SAMPLE_RATE);
-    if (hold < 100) {
-        hold = 100;
+    int64_t hold = ((int64_t)ctx->latency * 1000000) / (8 * RAOP_SAMPLE_RATE);
+    if (hold < 100000) {
+        hold = 100000;
     }
 
     if (ctx->state != RTP_PLAY || ctx->synchro.status != (RTP_SYNC | NTP_SYNC)) {
         return;
     }
 
-    uint32_t now, playtime;
+    int64_t now, playtime;
     do {
         // Re-read the clock each loop: the downstream callback may take time.
-        now = raop_time_ms();
+        now = esp_timer_get_time();
         abuf_t *frame = ctx->audio_buffer + BUFIDX(ctx->ab_read);
         playtime = playtime_of(ctx, frame->rtptime);
 
-        if ((int32_t)(now - playtime) > 0) {
-            ESP_LOGD(TAG, "discarded frame, missed by %ld ms (W:%u R:%u)", (long)(now - playtime), ctx->ab_write,
-                     ctx->ab_read);
+        if (now > playtime) {
+            ESP_LOGD(TAG, "discarded frame, missed by %ld ms (W:%u R:%u)", (long)((now - playtime) / 1000),
+                     ctx->ab_write, ctx->ab_read);
             ctx->discarded++;
             frame->ready = false;
         } else if (playtime - now <= hold) {
@@ -409,7 +425,7 @@ static void buffer_push_packet(rtp_t *ctx) {
 
     if (ctx->out_frames > 1000) {
         ESP_LOGI(TAG, "drain [level:%d head:%ld ms] [W:%u R:%u] [req:%lu sil:%lu dis:%lu]",
-                 (int16_t)(ctx->ab_write - ctx->ab_read), (long)(playtime - now), ctx->ab_write, ctx->ab_read,
+                 (int16_t)(ctx->ab_write - ctx->ab_read), (long)((playtime - now) / 1000), ctx->ab_write, ctx->ab_read,
                  (unsigned long)ctx->resent_req, (unsigned long)ctx->silent_frames, (unsigned long)ctx->discarded);
         ctx->out_frames = 0;
     }
@@ -534,17 +550,11 @@ static void handle_sync(rtp_t *ctx, const uint8_t *pkt, int *count) {
     uint64_t remote = ((uint64_t)read_be32(pkt + 8) << 32) | read_be32(pkt + 12);
     uint32_t rtp_now = read_be32(pkt + 16);
     uint16_t flags = read_be16(pkt + 2);
-    uint32_t remote_gap = NTP2MS(remote - ctx->timing.remote);
 
     // Refresh NTP every 3 sync packets, or every time until synced.
     if (!(*count)-- || !(ctx->synchro.status & NTP_SYNC)) {
         rtp_request_timing(ctx);
         *count = 3;
-    }
-
-    if (remote_gap > 10000) {
-        ESP_LOGW(TAG, "discarding remote timing information %lu", (unsigned long)remote_gap);
-        return;
     }
 
     xSemaphoreTake(ctx->ab_mutex, portMAX_DELAY);
@@ -561,33 +571,56 @@ static void handle_sync(rtp_t *ctx, const uint8_t *pkt, int *count) {
         ctx->latency = MAX_LATENCY;
     }
     ctx->synchro.rtp = rtp_now - ctx->latency;
-    ctx->synchro.time = ctx->timing.local + remote_gap;
+    ctx->synchro.remote_us = ntp_to_us(remote);
     ctx->synchro.status |= RTP_SYNC;
 
     xSemaphoreGive(ctx->ab_mutex);
 
-    ESP_LOGD(TAG, "sync: latency:%d rtp:%lu local time:%lu", ctx->latency, (unsigned long)rtp_now,
-             (unsigned long)ctx->synchro.time);
+    ESP_LOGD(TAG, "sync: latency:%d rtp:%lu", ctx->latency, (unsigned long)rtp_now);
+}
+
+static uint64_t read_be64(const uint8_t *p) {
+    return ((uint64_t)read_be32(p) << 32) | read_be32(p + 4);
 }
 
 static void handle_timing(rtp_t *ctx, const uint8_t *pkt) {
-    // Our request carried the local ms clock in the low 32 bits of the
-    // originate timestamp; the reply echoes it back.
-    uint32_t reference = read_be32(pkt + 12);
-    uint64_t remote = ((uint64_t)read_be32(pkt + 16) << 32) | read_be32(pkt + 20);
-    uint32_t roundtrip = raop_time_ms() - reference;
+    int64_t arrival = esp_timer_get_time();
+    // origin echoes the transmit time of our request, in local time.
+    int64_t origin = ntp_to_us(read_be64(pkt + 8));
+    int64_t receive = ntp_to_us(read_be64(pkt + 16));
+    int64_t transmit = ntp_to_us(read_be64(pkt + 24));
+    int64_t delay = (arrival - origin) - (transmit - receive);
 
-    if (roundtrip > 100) {
+    if (delay < 0 || delay > MAX_ROUNDTRIP_US) {
         if (!(ctx->synchro.status & NTP_SYNC)) {
             rtp_request_timing(ctx);
         }
-        ESP_LOGW(TAG, "discarding NTP roundtrip of %lu ms", (unsigned long)roundtrip);
+        ESP_LOGW(TAG, "discarding NTP roundtrip of %ld us", (long)delay);
         return;
     }
 
-    ctx->timing.remote = remote;
-    ctx->timing.local = reference;
+    int i = ctx->timing.next;
+    ctx->timing.offsets[i] = ((receive - origin) + (transmit - arrival)) / 2;
+    ctx->timing.delays[i] = delay;
+    ctx->timing.next = (i + 1) % TIMING_HISTORY;
+    if (ctx->timing.count < TIMING_HISTORY) {
+        ctx->timing.count++;
+    }
+
+    int best = i;
+    for (int j = 0; j < ctx->timing.count; j++) {
+        if (ctx->timing.delays[j] < ctx->timing.delays[best]) {
+            best = j;
+        }
+    }
+
+    xSemaphoreTake(ctx->ab_mutex, portMAX_DELAY);
+    ctx->timing.offset_us = ctx->timing.offsets[best];
     ctx->synchro.status |= NTP_SYNC;
+    xSemaphoreGive(ctx->ab_mutex);
+
+    ESP_LOGD(TAG, "timing: delay:%ld us offset:%lld us (best delay:%ld us)", (long)delay,
+             (long long)ctx->timing.offset_us, (long)ctx->timing.delays[best]);
 }
 
 static void rtp_thread_func(void *arg) {
@@ -688,8 +721,10 @@ static bool rtp_request_timing(rtp_t *ctx) {
     req[0] = 0x80;
     req[1] = 0x52 | 0x80;
     write_be16(req + 2, 7);
-    // Not a real NTP timestamp: our ms clock in the low half of "transmit".
-    write_be32(req + 28, raop_time_ms());
+    // The sender echoes "transmit" back as "origin" in its reply.
+    uint64_t now = us_to_ntp(esp_timer_get_time());
+    write_be32(req + 24, now >> 32);
+    write_be32(req + 28, now);
 
     host.sin_addr = ctx->host.s_addr != INADDR_ANY ? ctx->host : ctx->rtp_host.sin_addr;
     // No sender address yet: wait for its first packet.

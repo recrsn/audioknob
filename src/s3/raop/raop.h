@@ -47,9 +47,9 @@ typedef struct {
 typedef bool (*raop_event_cb_t)(const raop_event_t *event);
 
 // Decoded interleaved stereo s16, in order, as soon as it is available --
-// typically ~2 s before it should be heard. playtime_ms is when the first
-// frame must reach the DAC, on the raop_time_ms() clock.
-typedef void (*raop_pcm_cb_t)(const int16_t *pcm, size_t frames, uint32_t playtime_ms);
+// typically ~2 s before it should be heard. playtime_us is when the first
+// frame must reach the DAC, on the esp_timer_get_time() clock.
+typedef void (*raop_pcm_cb_t)(const int16_t *pcm, size_t frames, int64_t playtime_us);
 
 typedef struct raop_ctx_s raop_ctx_t;
 
@@ -71,5 +71,5 @@ void raop_abort(raop_ctx_t *ctx);
 bool raop_remote_command(raop_ctx_t *ctx, const char *command);
 bool raop_remote_volume(raop_ctx_t *ctx, float volume);
 
-// Monotonic ms clock that playtime_ms is expressed in.
+// Monotonic ms clock for RTSP/RTP housekeeping (resend timeouts, stalls).
 uint32_t raop_time_ms(void);

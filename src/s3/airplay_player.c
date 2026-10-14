@@ -1,38 +1,77 @@
 #include "airplay_player.h"
 
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "audio_out.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "raop.h"
 
 #define SLOT_FRAMES 352  // one AirPlay packet
 // ~3.2 s: RAOP's maximum 2.4 s latency plus network jitter.
 #define SLOT_COUNT 400
-#define FRAME_MS ((SLOT_FRAMES * 1000) / RAOP_SAMPLE_RATE)
+#define FRAME_US ((SLOT_FRAMES * 1000000LL) / AUDIO_OUT_SAMPLE_RATE)
 
-// Average the scheduling error over ~250 ms before correcting it, so DMA
-// and scheduler jitter don't trigger corrections on their own.
-#define SYNC_WINDOW 32
-#define SYNC_TOLERANCE_MS 10
-#define IDLE_AFTER_MS 200
+// A frame this far off schedule means a real disturbance (stall, sender
+// clock jump), corrected at once: late frames are dropped until back on
+// time, an early one gets the silence it is ahead by. Anything smaller is
+// left to the trim servo.
+#define GATE_US 50000
+#define IDLE_AFTER_US 200000
+
+// Trim servo, after rbouteiller/airplay-esp32's audio_timing.c. The error
+// is low-passed with a clamped innovation, because a late read (task
+// briefly starved) can only ever measure "late": spikes must not drag the
+// average. One sample per TRIM_INTERVAL frames is ~710 ppm, far below an
+// audible pitch change but well above crystal drift.
+#define SERVO_FILTER_DIV 16
+#define SERVO_INNOV_CLAMP_US 1500
+#define SERVO_ENGAGE_US 5000
+#define SERVO_DISENGAGE_US 1500
+#define TRIM_INTERVAL 4
+// Right after a start the DMA cursor reads a few ms off (the idle ring's
+// free descriptors), a constant for the rest of the stream. Measure it once
+// the ring has cycled and servo around it instead of trimming it away.
+#define CAL_SETTLE_FRAMES 32
+#define CAL_FRAMES 32
+// Feed-forward: the DAC clock's offset from the sender's is near constant
+// (the S3 has no audio PLL, so 44.1 kHz is only approximated), so learn it
+// from the net trims and spread the same correction evenly, leaving the
+// servo only the residual. Learned per boot, across streams.
+#define FF_MIN_FRAMES (10 * AUDIO_OUT_SAMPLE_RATE)
+#define FF_MAX_FRAMES (600 * AUDIO_OUT_SAMPLE_RATE)
 
 #define PLAYER_STACK_SIZE 4096
 #define PLAYER_TASK_PRIO 15
 #define PLAYER_TASK_CORE 1
 
 #define GAIN_UNITY 32768
+// Per-frame exponential approach: ~3 ms time constant.
+#define GAIN_RAMP_DIV 256
 
 typedef struct {
-    uint32_t playtime_ms;
+    int64_t playtime_us;
     uint16_t frames;
     int16_t pcm[SLOT_FRAMES * 2];
 } slot_t;
+
+typedef struct {
+    bool running;
+    bool draining;  // inside a late-drop run
+    bool servo_on;
+    int servo_phase;
+    int cal_frames;
+    int64_t cal_sum_us, bias_us;
+    float ff_acc;
+    int64_t err_filtered_us;
+    int64_t last_audio_us;
+    uint32_t trims, drops;
+} sync_t;
 
 static const char *TAG = "airplay_player";
 
@@ -41,9 +80,14 @@ static uint16_t s_head, s_count;
 static uint32_t s_dropped;
 static SemaphoreHandle_t s_lock;
 static TaskHandle_t s_task;
-static volatile int32_t s_gain = GAIN_UNITY;
+static volatile bool s_flushed;
+static volatile int32_t s_gain_target = GAIN_UNITY;
+static int32_t s_gain = GAIN_UNITY;
+// Net samples added (+) or removed (-) per sample played, and its basis.
+static int64_t s_ff_net, s_ff_frames;
 
-static int16_t s_out[SLOT_FRAMES * 2];
+// One spare frame for a stretch trim.
+static int16_t s_out[(SLOT_FRAMES + 1) * 2];
 static const int16_t s_silence[SLOT_FRAMES * 2];
 
 // Caller holds s_lock.
@@ -55,8 +99,8 @@ static void pop_locked(int n) {
     s_count -= n;
 }
 
-static void write_silence_ms(int32_t ms) {
-    size_t frames = (size_t)ms * RAOP_SAMPLE_RATE / 1000;
+static void write_silence_us(int64_t us) {
+    size_t frames = (size_t)(us * AUDIO_OUT_SAMPLE_RATE / 1000000);
     while (frames > 0) {
         size_t chunk = frames < SLOT_FRAMES ? frames : SLOT_FRAMES;
         audio_out_write(s_silence, chunk);
@@ -64,84 +108,215 @@ static void write_silence_ms(int32_t ms) {
     }
 }
 
-// Caller holds s_lock. Copies the head slot into s_out with gain applied.
-static size_t take_head_locked(void) {
-    const slot_t *slot = &s_slots[s_head];
-    int32_t gain = s_gain;
-    size_t frames = slot->frames;
+// How early (positive) or late (negative) a frame would reach the DAC if
+// written now.
+static int64_t lead_us(int64_t playtime_us) {
+    int64_t now;
+    uint32_t queued = audio_out_queued_us(&now);
+    return playtime_us - (now + queued);
+}
 
-    for (size_t i = 0; i < frames * 2; i++) {
-        s_out[i] = (int16_t)((slot->pcm[i] * gain) >> 15);
+// The quietest point is where dropping or repeating a sample leaves the
+// smallest step in the waveform.
+static size_t quietest_frame(const int16_t *pcm, size_t frames) {
+    size_t best = frames - 1;
+    int32_t best_mag = INT32_MAX;
+    for (size_t i = 0; i < frames; i++) {
+        int32_t mag = abs(pcm[i * 2]) + abs(pcm[i * 2 + 1]);
+        if (mag < best_mag) {
+            best_mag = mag;
+            best = i;
+        }
     }
+    return best;
+}
+
+// Copies pcm into s_out, one frame shorter (adjust < 0) or longer (> 0).
+static size_t copy_trimmed(const int16_t *pcm, size_t frames, int adjust) {
+    if (adjust == 0) {
+        memcpy(s_out, pcm, frames * 2 * sizeof(int16_t));
+        return frames;
+    }
+    size_t at = quietest_frame(pcm, frames);
+    if (adjust < 0) {
+        memcpy(s_out, pcm, at * 2 * sizeof(int16_t));
+        memcpy(s_out + at * 2, pcm + (at + 1) * 2, (frames - at - 1) * 2 * sizeof(int16_t));
+        return frames - 1;
+    }
+    memcpy(s_out, pcm, (at + 1) * 2 * sizeof(int16_t));
+    memcpy(s_out + (at + 1) * 2, pcm + at * 2, (frames - at) * 2 * sizeof(int16_t));
+    return frames + 1;
+}
+
+static void apply_gain(size_t frames) {
+    int32_t target = s_gain_target;
+    for (size_t i = 0; i < frames; i++) {
+        if (s_gain != target) {
+            int32_t step = (target - s_gain) / GAIN_RAMP_DIV;
+            s_gain += step ? step : (target > s_gain ? 1 : -1);
+        }
+        s_out[i * 2] = (int16_t)((s_out[i * 2] * s_gain) >> 15);
+        s_out[i * 2 + 1] = (int16_t)((s_out[i * 2 + 1] * s_gain) >> 15);
+    }
+}
+
+static int feed_forward(sync_t *sync, size_t frames) {
+    if (s_ff_frames < FF_MIN_FRAMES) {
+        return 0;
+    }
+    sync->ff_acc += (float)s_ff_net / (float)s_ff_frames * (float)frames;
+    if (sync->ff_acc >= 1.0f) {
+        sync->ff_acc -= 1.0f;
+        return 1;
+    }
+    if (sync->ff_acc <= -1.0f) {
+        sync->ff_acc += 1.0f;
+        return -1;
+    }
+    return 0;
+}
+
+static void ff_record(int adjust, size_t frames) {
+    s_ff_net += adjust;
+    s_ff_frames += frames;
+    if (s_ff_frames > FF_MAX_FRAMES) {
+        // Age old history so a changed rate (another sender) is relearned.
+        s_ff_net /= 2;
+        s_ff_frames /= 2;
+    }
+}
+
+// Returns the one-sample adjustment the servo wants for the frame about to
+// play, given its current lead.
+static int servo_update(sync_t *sync, int64_t lead) {
+    if (sync->cal_frames < CAL_SETTLE_FRAMES + CAL_FRAMES) {
+        if (sync->cal_frames++ >= CAL_SETTLE_FRAMES) {
+            sync->cal_sum_us += lead;
+        }
+        if (sync->cal_frames == CAL_SETTLE_FRAMES + CAL_FRAMES) {
+            sync->bias_us = sync->cal_sum_us / CAL_FRAMES;
+            ESP_LOGI(TAG, "output offset %lld us", (long long)sync->bias_us);
+        }
+        return 0;
+    }
+    lead -= sync->bias_us;
+
+    int64_t innov = lead - sync->err_filtered_us;
+    if (innov > SERVO_INNOV_CLAMP_US) {
+        innov = SERVO_INNOV_CLAMP_US;
+    } else if (innov < -SERVO_INNOV_CLAMP_US) {
+        innov = -SERVO_INNOV_CLAMP_US;
+    }
+    sync->err_filtered_us += innov / SERVO_FILTER_DIV;
+
+    int64_t mag = llabs(sync->err_filtered_us);
+    if (!sync->servo_on && mag > SERVO_ENGAGE_US) {
+        sync->servo_on = true;
+        sync->servo_phase = 0;
+        ESP_LOGI(TAG, "trimming: %lld us %s", (long long)mag, sync->err_filtered_us > 0 ? "early" : "late");
+    } else if (sync->servo_on && mag < SERVO_DISENGAGE_US) {
+        sync->servo_on = false;
+        ESP_LOGI(TAG, "in sync (%lu trims so far, clock %+ld ppm, underruns %lu)", (unsigned long)sync->trims,
+                 s_ff_frames ? (long)(s_ff_net * 1000000 / s_ff_frames) : 0L, (unsigned long)audio_out_underruns());
+    }
+
+    if (!sync->servo_on || ++sync->servo_phase < TRIM_INTERVAL) {
+        return 0;
+    }
+    sync->servo_phase = 0;
+    sync->trims++;
+    // Early: stretch so playout slows down; late: shrink to catch up.
+    return sync->err_filtered_us > 0 ? 1 : -1;
+}
+
+// Caller holds s_lock; releases it.
+static void play_head_locked(sync_t *sync) {
+    const slot_t *slot = &s_slots[s_head];
+    int64_t lead = lead_us(slot->playtime_us);
+
+    if (!sync->running) {
+        if (lead < -FRAME_US / 2) {
+            pop_locked(1);
+            xSemaphoreGive(s_lock);
+            return;
+        }
+        if (lead > GATE_US) {
+            xSemaphoreGive(s_lock);
+            // Woken early by every push/flush; the loop just re-evaluates.
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((lead - GATE_US / 2) / 1000));
+            return;
+        }
+        // Pad up to the exact start sample so the stream begins in sync,
+        // and start at the target gain rather than ramping into it.
+        xSemaphoreGive(s_lock);
+        if (lead > 0) {
+            write_silence_us(lead);
+        }
+        memset(sync, 0, sizeof(*sync));
+        sync->running = true;
+        s_gain = s_gain_target;
+        return;
+    }
+
+    int64_t late_limit = sync->draining ? -FRAME_US / 2 : -GATE_US;
+    if (lead < late_limit) {
+        // Drop until back on schedule, not merely back inside the gate, or
+        // the session would sit at -GATE_US for good.
+        sync->draining = true;
+        sync->drops++;
+        pop_locked(1);
+        xSemaphoreGive(s_lock);
+        return;
+    }
+    if (sync->draining) {
+        ESP_LOGW(TAG, "behind sender, dropped %lu packet(s)", (unsigned long)sync->drops);
+        sync->draining = false;
+        sync->drops = 0;
+        sync->err_filtered_us = lead - sync->bias_us;
+    }
+    if (lead > GATE_US) {
+        // The schedule jumped ahead: restart, which waits and re-aligns.
+        xSemaphoreGive(s_lock);
+        ESP_LOGW(TAG, "%lld ms ahead of sender, re-aligning", (long long)(lead / 1000));
+        sync->running = false;
+        return;
+    }
+
+    int adjust = servo_update(sync, lead);
+    if (sync->cal_frames >= CAL_SETTLE_FRAMES + CAL_FRAMES) {
+        adjust += feed_forward(sync, slot->frames);
+        adjust = adjust > 1 ? 1 : (adjust < -1 ? -1 : adjust);
+        ff_record(adjust, slot->frames);
+    }
+    size_t frames = copy_trimmed(slot->pcm, slot->frames, adjust);
     pop_locked(1);
-    return frames;
+    xSemaphoreGive(s_lock);
+
+    apply_gain(frames);
+    audio_out_write(s_out, frames);
+    sync->last_audio_us = esp_timer_get_time();
 }
 
 static void player_task(void *arg) {
     (void)arg;
-    bool running = false;
-    int32_t error_sum = 0;
-    int error_count = 0;
-    uint32_t last_audio_ms = 0;
+    sync_t sync = {0};
 
     for (;;) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
-
+        if (s_flushed) {
+            // Pause or seek: whatever comes next starts a new stream.
+            s_flushed = false;
+            sync.running = false;
+        }
         if (s_count == 0) {
             xSemaphoreGive(s_lock);
-            if (running && raop_time_ms() - last_audio_ms > IDLE_AFTER_MS) {
-                running = false;
+            if (sync.running && esp_timer_get_time() - sync.last_audio_us > IDLE_AFTER_US) {
+                sync.running = false;
             }
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20));
             continue;
         }
-
-        uint32_t now = raop_time_ms();
-        // How early (positive) or late (negative) the head frame would reach
-        // the DAC if written right now.
-        int32_t lead = (int32_t)(s_slots[s_head].playtime_ms - (now + audio_out_latency_ms()));
-
-        if (!running) {
-            if (lead > 1) {
-                xSemaphoreGive(s_lock);
-                // Woken early by every push/flush; the loop just re-evaluates.
-                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(lead));
-                continue;
-            }
-            if (lead < -FRAME_MS) {
-                pop_locked(1);
-                xSemaphoreGive(s_lock);
-                continue;
-            }
-            running = true;
-            error_sum = error_count = 0;
-        } else {
-            error_sum += lead;
-            if (++error_count == SYNC_WINDOW) {
-                int32_t avg = error_sum / error_count;
-                error_sum = error_count = 0;
-
-                if (avg < -SYNC_TOLERANCE_MS) {
-                    int drop = (-avg + FRAME_MS / 2) / FRAME_MS;
-                    pop_locked(drop > 0 ? drop : 1);
-                    xSemaphoreGive(s_lock);
-                    ESP_LOGI(TAG, "%ld ms behind sender, skipped %d packet(s)", (long)-avg, drop);
-                    continue;
-                }
-                if (avg > SYNC_TOLERANCE_MS) {
-                    xSemaphoreGive(s_lock);
-                    ESP_LOGI(TAG, "%ld ms ahead of sender, padding silence", (long)avg);
-                    write_silence_ms(avg);
-                    continue;
-                }
-            }
-        }
-
-        size_t frames = take_head_locked();
-        xSemaphoreGive(s_lock);
-
-        last_audio_ms = now;
-        audio_out_write(s_out, frames);
+        play_head_locked(&sync);
     }
 }
 
@@ -155,7 +330,7 @@ void airplay_player_init(void) {
     ESP_ERROR_CHECK(ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }
 
-void airplay_player_push(const int16_t *pcm, size_t frames, uint32_t playtime_ms) {
+void airplay_player_push(const int16_t *pcm, size_t frames, int64_t playtime_us) {
     size_t offset = 0;
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -169,7 +344,7 @@ void airplay_player_push(const int16_t *pcm, size_t frames, uint32_t playtime_ms
 
         size_t chunk = frames - offset < SLOT_FRAMES ? frames - offset : SLOT_FRAMES;
         slot_t *slot = &s_slots[(s_head + s_count) % SLOT_COUNT];
-        slot->playtime_ms = playtime_ms + (uint32_t)((offset * 1000) / RAOP_SAMPLE_RATE);
+        slot->playtime_us = playtime_us + (int64_t)offset * 1000000 / AUDIO_OUT_SAMPLE_RATE;
         slot->frames = chunk;
         memcpy(slot->pcm, pcm + offset * 2, chunk * 2 * sizeof(int16_t));
         s_count++;
@@ -183,11 +358,12 @@ void airplay_player_push(const int16_t *pcm, size_t frames, uint32_t playtime_ms
 void airplay_player_flush(void) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     pop_locked(s_count);
+    s_flushed = true;
     xSemaphoreGive(s_lock);
     xTaskNotifyGive(s_task);
 }
 
 void airplay_player_set_volume(uint8_t volume_pct) {
     float v = volume_pct / 100.0f;
-    s_gain = (int32_t)(v * v * v * GAIN_UNITY);
+    s_gain_target = (int32_t)(v * v * v * GAIN_UNITY);
 }
