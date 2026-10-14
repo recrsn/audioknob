@@ -4,7 +4,9 @@
 #include <string.h>
 
 #include "app_state.h"
+#include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_sleep.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -31,6 +33,21 @@ static void send_frame(uint8_t type, const void *payload, uint8_t len) {
     uint8_t frame[PROTOCOL_MAX_FRAME];
     size_t frame_len = protocol_encode(type, payload, len, frame);
     uart_write_bytes(UART_PORT, frame, frame_len);
+}
+
+void state_sync_send_hello(void) {
+    send_frame(MSG_HELLO, "", 0);
+}
+
+void state_sync_light_sleep(void) {
+    uart_wait_tx_done(UART_PORT, portMAX_DELAY);
+    // UART wakeup on this chip needs RX on its IO_MUX pin; IO23 isn't, so
+    // wake on the start bit's low level instead.
+    gpio_wakeup_enable(UART_RX_GPIO, GPIO_INTR_LOW_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+    esp_light_sleep_start();
+    gpio_wakeup_disable(UART_RX_GPIO);
+    state_sync_send_hello();
 }
 
 void state_sync_send_track(const track_info_t *track) {
@@ -131,4 +148,5 @@ void state_sync_start(state_sync_command_cb_t on_command, state_sync_name_cb_t o
     ESP_LOGI(TAG, "inter-MCU UART ready (TX=%d RX=%d)", UART_TX_GPIO, UART_RX_GPIO);
     xTaskCreate(state_sync_task, "state_sync", 3072, NULL, 4, NULL);
     xTaskCreate(command_rx_task, "cmd_rx", 3072, NULL, 5, NULL);
+    state_sync_send_hello();
 }

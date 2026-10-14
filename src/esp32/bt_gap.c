@@ -8,7 +8,6 @@
 #include "esp_bt_main.h"
 #include "esp_gap_bt_api.h"
 #include "esp_log.h"
-#include "nvs_flash.h"
 #include "protocol.h"
 
 static const char *TAG = "bt_gap";
@@ -38,13 +37,7 @@ static void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 }
 
 esp_err_t bt_gap_init(void) {
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
-
+    esp_err_t err;
     // Classic BT only: BLE is unused here, so reclaim its controller memory.
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
 

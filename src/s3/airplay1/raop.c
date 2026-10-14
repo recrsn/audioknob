@@ -44,6 +44,8 @@ struct raop_ctx_s {
     } rtsp;
     raop_rtp_t *rtp;
     bool session_active;
+    volatile bool enabled;
+    char instance[96];
     raop_event_cb_t event_cb;
     raop_pcm_cb_t pcm_cb;
 };
@@ -112,6 +114,9 @@ static bool handle_setup(raop_ctx_t *ctx, const key_data_t *headers, key_data_t 
         return false;
     }
 
+    if (!ctx->enabled) {
+        return false;
+    }
     if (!ctx->session_active) {
         raop_event_t event = {.type = RAOP_EVENT_SESSION_START};
         if (!ctx->event_cb(&event)) {
@@ -292,7 +297,21 @@ static void instance_name(const raop_ctx_t *ctx, const char *name, char *out, si
     snprintf(out, len, "%02X%02X%02X%02X%02X%02X@%s", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], name);
 }
 
-raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], raop_event_cb_t event_cb, raop_pcm_cb_t pcm_cb) {
+// Advertised capabilities: ALAC only (no raw PCM decoder here) at
+// 44.1k/16/stereo over UDP, RSA-encrypted or clear, text metadata and
+// JPEG/PNG artwork (no progress).
+static esp_err_t advertise(const raop_ctx_t *ctx) {
+    const mdns_txt_item_t txt[] = {
+        {"txtvers", "1"}, {"am", "AudioKnob"}, {"tp", "UDP"},  {"sm", "false"}, {"sv", "false"},
+        {"ek", "1"},      {"et", "0,1"},       {"md", "0,1"},    {"cn", "1"},   {"ch", "2"},
+        {"ss", "16"},     {"sr", "44100"},     {"vn", "3"},
+    };
+    return mdns_service_add(ctx->instance, "_raop", "_tcp", RTSP_PORT, (mdns_txt_item_t *)txt,
+                            sizeof(txt) / sizeof(txt[0]));
+}
+
+raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], uint8_t protocols, raop_event_cb_t event_cb,
+                        raop_pcm_cb_t pcm_cb) {
     raop_ctx_t *ctx = calloc(1, sizeof(raop_ctx_t));
     if (!ctx) {
         return NULL;
@@ -317,18 +336,9 @@ raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], raop_event_cb_t 
         goto fail;
     }
 
-    // Advertised capabilities: ALAC only (no raw PCM decoder here) at
-    // 44.1k/16/stereo over UDP, RSA-encrypted or clear, text metadata and
-    // JPEG/PNG artwork (no progress).
-    const mdns_txt_item_t txt[] = {
-        {"txtvers", "1"}, {"am", "AudioKnob"}, {"tp", "UDP"},  {"sm", "false"}, {"sv", "false"},
-        {"ek", "1"},      {"et", "0,1"},       {"md", "0,1"},    {"cn", "1"},   {"ch", "2"},
-        {"ss", "16"},     {"sr", "44100"},     {"vn", "3"},
-    };
-    char instance[96];
-    instance_name(ctx, name, instance, sizeof(instance));
-    if (mdns_service_add(instance, "_raop", "_tcp", RTSP_PORT, (mdns_txt_item_t *)txt, sizeof(txt) / sizeof(txt[0])) !=
-        ESP_OK) {
+    instance_name(ctx, name, ctx->instance, sizeof(ctx->instance));
+    ctx->enabled = protocols & RAOP_PROTOCOL_AIRPLAY1;
+    if (ctx->enabled && advertise(ctx) != ESP_OK) {
         ESP_LOGE(TAG, "cannot register mDNS service");
         goto fail;
     }
@@ -350,6 +360,23 @@ fail:
     return NULL;
 }
 
+void raop_set_protocols(raop_ctx_t *ctx, uint8_t protocols) {
+    bool enabled = protocols & RAOP_PROTOCOL_AIRPLAY1;
+    if (enabled == ctx->enabled) {
+        return;
+    }
+    ctx->enabled = enabled;
+    if (enabled) {
+        if (advertise(ctx) != ESP_OK) {
+            ESP_LOGE(TAG, "cannot register mDNS service");
+        }
+    } else {
+        mdns_service_remove("_raop", "_tcp");
+        ctx->abort = true;
+    }
+    ESP_LOGI(TAG, "AirPlay %s", enabled ? "on" : "off");
+}
+
 void raop_abort(raop_ctx_t *ctx) {
     ctx->abort = true;
 }
@@ -365,9 +392,11 @@ bool raop_remote_volume(raop_ctx_t *ctx, float volume) {
 }
 
 void raop_set_name(raop_ctx_t *ctx, const char *name) {
-    char instance[96];
-    instance_name(ctx, name, instance, sizeof(instance));
-    if (mdns_service_instance_name_set("_raop", "_tcp", instance) != ESP_OK) {
+    instance_name(ctx, name, ctx->instance, sizeof(ctx->instance));
+    if (!ctx->enabled) {
+        return;
+    }
+    if (mdns_service_instance_name_set("_raop", "_tcp", ctx->instance) != ESP_OK) {
         ESP_LOGW(TAG, "cannot rename mDNS service");
         return;
     }

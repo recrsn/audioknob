@@ -53,11 +53,21 @@ typedef void (*raop_pcm_cb_t)(const int16_t *pcm, size_t frames, int64_t playtim
 
 typedef struct raop_ctx_s raop_ctx_t;
 
-// Advertises "<name>" over mDNS (mdns_init() must already have run) and
-// starts listening for RTSP on all interfaces. mac feeds the mDNS instance
-// name and the Apple-Challenge response. Never torn down: the receiver
-// lives for the life of the firmware.
-raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], raop_event_cb_t event_cb, raop_pcm_cb_t pcm_cb);
+// Which senders the receiver takes, as a mask. A receiver built without
+// AirPlay 2 ignores RAOP_PROTOCOL_AIRPLAY2.
+#define RAOP_PROTOCOL_AIRPLAY1 (1u << 0)
+#define RAOP_PROTOCOL_AIRPLAY2 (1u << 1)
+
+// Advertises "<name>" over mDNS (mdns_init() must already have run) for the
+// protocols in the mask and starts listening for RTSP on all interfaces.
+// mac feeds the mDNS instance name and the Apple-Challenge response. Never
+// torn down: the receiver lives for the life of the firmware.
+raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], uint8_t protocols, raop_event_cb_t event_cb,
+                        raop_pcm_cb_t pcm_cb);
+
+// Re-advertises for a new protocol mask and refuses new sessions of the
+// protocols left out; a session of one of those is dropped.
+void raop_set_protocols(raop_ctx_t *ctx, uint8_t protocols);
 
 // Re-advertises under a new name; a session in progress is unaffected.
 void raop_set_name(raop_ctx_t *ctx, const char *name);

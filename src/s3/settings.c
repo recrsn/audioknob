@@ -4,6 +4,7 @@
 
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "ui.h"
 
 #define NVS_NAMESPACE "settings"
 
@@ -14,6 +15,8 @@ static const settings_t k_defaults = {
     .clock_24h = true,
     .fahrenheit = false,
     .haptics = true,
+    .bluetooth = true,
+    .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .tz = "",
 };
 
@@ -41,6 +44,8 @@ void settings_load(settings_t *out) {
     out->clock_24h = get_u8(nvs, "clock_24h", k_defaults.clock_24h);
     out->fahrenheit = get_u8(nvs, "fahrenheit", k_defaults.fahrenheit);
     out->haptics = get_u8(nvs, "haptics", k_defaults.haptics);
+    out->bluetooth = get_u8(nvs, "bluetooth", k_defaults.bluetooth);
+    out->airplay = get_u8(nvs, "airplay", k_defaults.airplay);
     size_t len = sizeof(out->tz);
     if (nvs_get_str(nvs, "tz", out->tz, &len) != ESP_OK) {
         out->tz[0] = '\0';
@@ -58,6 +63,8 @@ void settings_save(const settings_t *s) {
     nvs_set_u8(nvs, "clock_24h", s->clock_24h);
     nvs_set_u8(nvs, "fahrenheit", s->fahrenheit);
     nvs_set_u8(nvs, "haptics", s->haptics);
+    nvs_set_u8(nvs, "bluetooth", s->bluetooth);
+    nvs_set_u8(nvs, "airplay", s->airplay);
     nvs_set_str(nvs, "tz", s->tz);
     nvs_commit(nvs);
     nvs_close(nvs);

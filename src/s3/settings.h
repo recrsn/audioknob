@@ -11,6 +11,8 @@ typedef struct {
     bool clock_24h;
     bool fahrenheit;
     bool haptics;
+    bool bluetooth;
+    uint8_t airplay; // UI_AIRPLAY_* mask; 0 = off
     char tz[40]; // manual IANA zone; "" follows the IP-detected one
 } settings_t;
 

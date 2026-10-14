@@ -132,6 +132,9 @@ typedef struct {
     bool clock_24h;
     bool fahrenheit;
     bool haptics;
+    bool bluetooth;
+    uint8_t airplay;   // UI_AIRPLAY_* mask; 0 = off
+    bool airplay2_available; // else only UI_AIRPLAY_1 means anything
     bool tz_auto;      // following the IP-detected zone
     char tz_name[40];  // zone in effect; "" while still unknown
     char device_name[33];
@@ -153,7 +156,12 @@ typedef enum {
     UI_SETTING_HAPTICS,    // value: 0/1
     UI_SETTING_TIMEZONE,   // zone: a tz_db name, or NULL for automatic
     UI_SETTING_FORGET_WIFI,
+    UI_SETTING_BLUETOOTH,  // value: 0/1
+    UI_SETTING_AIRPLAY,    // value: UI_AIRPLAY_* mask
 } ui_setting_t;
+
+#define UI_AIRPLAY_1 (1u << 0)
+#define UI_AIRPLAY_2 (1u << 1)
 
 // Called on the LVGL task when the user changes a setting; must not block.
 // The handler applies and persists it, then pushes ui_update_settings().

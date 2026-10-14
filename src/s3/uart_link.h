@@ -33,3 +33,7 @@ void uart_link_send_command(protocol_cmd_t cmd);
 // Sends the Bluetooth device name now, and again whenever the ESP32
 // reappears on the link after a reset. Safe from any task.
 void uart_link_set_device_name(const char *name);
+
+// Turns Bluetooth on or off on the ESP32, now and whenever it reappears
+// (it sleeps while off and asks on waking). Safe from any task.
+void uart_link_set_bluetooth(bool enabled);

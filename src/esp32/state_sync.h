@@ -16,6 +16,13 @@ typedef void (*state_sync_name_cb_t)(const char *name);
 
 void state_sync_start(state_sync_command_cb_t on_command, state_sync_name_cb_t on_device_name);
 
+// Sends MSG_HELLO, which state_sync_start() and every wake also do.
+void state_sync_send_hello(void);
+
+// Light-sleeps until the S3 sends something (that frame is lost), then
+// says hello so the S3 repeats what it needs this MCU to know.
+void state_sync_light_sleep(void);
+
 // Sends a one-off MSG_TRACK_INFO frame. Call on a genuine track change
 // (AVRCP GetElementAttributes / MPRIS metadata event), not on a timer —
 // unlike wireless_state_t there's no polling cadence or resync for this.

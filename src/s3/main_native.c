@@ -29,6 +29,9 @@ static ui_settings_t s_settings = {
     .brightness = 80,
     .clock_24h = true,
     .haptics = true,
+    .bluetooth = true,
+    .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
+    .airplay2_available = true,
     .tz_auto = true,
     .device_name = "AudioKnob-K7MXQ2PA",
     .hostname = "audioknob-k7mxq2pa",
@@ -74,6 +77,12 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         break;
     case UI_SETTING_FORGET_WIFI:
         printf("settings: forget WiFi (no-op on native)\n");
+        break;
+    case UI_SETTING_BLUETOOTH:
+        s_settings.bluetooth = value;
+        break;
+    case UI_SETTING_AIRPLAY:
+        s_settings.airplay = (uint8_t)value;
         break;
     }
     ui_update_settings(&s_settings);

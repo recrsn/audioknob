@@ -10,6 +10,7 @@
 
 // Brings up the BT controller (Classic-only) and Bluedroid host, and sets
 // Secure Simple Pairing to Just Works (no display/keyboard on this device).
+// NVS must already be up (bt_power_enabled() does that).
 esp_err_t bt_gap_init(void);
 
 // Makes the device discoverable and connectable so a phone can pair/reconnect.

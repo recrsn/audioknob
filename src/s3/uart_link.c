@@ -27,7 +27,7 @@
 // The JPEG decode runs on this task when an image completes.
 #define RX_TASK_STACK 6144
 // The ESP32 resyncs state every ~1s, so a longer silence means it reset
-// (or wasn't up yet) and has lost the device name.
+// or slept (or wasn't up yet) and may have missed what the S3 sent.
 #define PEER_LOST_MS 3000
 
 static const char *TAG = "uart_link";
@@ -38,6 +38,7 @@ static bool s_has_state;
 static track_info_t s_latest_track;
 static bool s_has_track;
 static char s_device_name[DEVICE_NAME_MAX + 1];
+static int8_t s_bluetooth = -1; // unknown until settings load
 static TickType_t s_last_state_tick;
 
 // Bluetooth cover art being received, in PSRAM. Only the RX task touches it.
@@ -97,6 +98,20 @@ static void send_device_name(void) {
     }
 }
 
+static void send_bluetooth(void) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    int8_t on = s_bluetooth;
+    xSemaphoreGive(s_state_mutex);
+    if (on >= 0) {
+        uart_link_send_command(on ? CMD_BT_ENABLE : CMD_BT_DISABLE);
+    }
+}
+
+static void send_peer_config(void) {
+    send_device_name();
+    send_bluetooth();
+}
+
 static void handle_frame(uint8_t type, const uint8_t *payload, uint8_t len) {
     if (type == MSG_STATE_UPDATE && len == sizeof(wireless_state_t)) {
         TickType_t now = xTaskGetTickCount();
@@ -107,8 +122,13 @@ static void handle_frame(uint8_t type, const uint8_t *payload, uint8_t len) {
         s_last_state_tick = now;
         xSemaphoreGive(s_state_mutex);
         if (peer_back) {
-            send_device_name();
+            send_peer_config();
         }
+        return;
+    }
+
+    if (type == MSG_HELLO) {
+        send_peer_config();
         return;
     }
 
@@ -230,4 +250,11 @@ void uart_link_set_device_name(const char *name) {
     snprintf(s_device_name, sizeof(s_device_name), "%s", name);
     xSemaphoreGive(s_state_mutex);
     send_device_name();
+}
+
+void uart_link_set_bluetooth(bool enabled) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_bluetooth = enabled;
+    xSemaphoreGive(s_state_mutex);
+    send_bluetooth();
 }

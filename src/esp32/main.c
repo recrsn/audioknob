@@ -4,6 +4,7 @@
 #include "avrcp_target.h"
 #include "bt_app_core.h"
 #include "bt_gap.h"
+#include "bt_power.h"
 #include "driver/gpio.h"
 #include "encoder.h"
 #include "esp_avrc_api.h"
@@ -18,6 +19,13 @@ static const char *TAG = "esp32";
 #define DAC_XSMT_GPIO GPIO_NUM_32
 
 static void on_command(protocol_cmd_t cmd) {
+    if (cmd == CMD_BT_ENABLE || cmd == CMD_BT_DISABLE) {
+        bt_power_set_enabled(cmd == CMD_BT_ENABLE);
+        return;
+    }
+    if (!bt_power_enabled()) {
+        return;
+    }
     switch (cmd) {
     case CMD_PAUSE:
         // AirPlay took the DAC on the S3. Without an AVRCP link the phone
@@ -56,11 +64,23 @@ static void dac_unmute(void) {
     };
     ESP_ERROR_CHECK(gpio_config(&cfg));
     ESP_ERROR_CHECK(gpio_set_level(DAC_XSMT_GPIO, 1));
+    // Through light sleep and the restart a Bluetooth toggle takes, so
+    // AirPlay on the S3 keeps playing.
+    ESP_ERROR_CHECK(gpio_hold_en(DAC_XSMT_GPIO));
+}
+
+// Only the device name, which this MCU can't use until Bluetooth is on.
+static void ignore_name(const char *name) {
+    (void)name;
 }
 
 void app_main(void) {
     dac_unmute();
     app_state_init();
+    if (!bt_power_enabled()) {
+        state_sync_start(on_command, ignore_name);
+        bt_power_sleep_forever();
+    }
     bt_app_task_start_up();
 
     ESP_ERROR_CHECK(bt_gap_init());

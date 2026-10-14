@@ -19,6 +19,9 @@ typedef enum {
     MSG_ART_CHUNK = 0x05,
     MSG_ART_END = 0x06,
     MSG_DEVICE_NAME = 0x07,  // S3 -> ESP32; every other type flows ESP32 -> S3
+    // No payload. The ESP32 just booted or woke; the S3 answers with the
+    // device name and CMD_BT_ENABLE/CMD_BT_DISABLE.
+    MSG_HELLO = 0x08,
 } protocol_msg_type_t;
 
 // MSG_DEVICE_NAME's payload is the name's UTF-8 bytes, no NUL, 1 to
@@ -61,6 +64,11 @@ typedef enum {
     // One S3 knob detent of Bluetooth volume, while A2DP is in front.
     CMD_VOLUME_UP = 0x05,
     CMD_VOLUME_DOWN = 0x06,
+    // The user's Bluetooth setting, sent on change and in answer to
+    // MSG_HELLO. Off, the ESP32 runs without Bluedroid and light-sleeps
+    // until the S3 sends anything; the frame that wakes it is lost.
+    CMD_BT_ENABLE = 0x07,
+    CMD_BT_DISABLE = 0x08,
 } protocol_cmd_t;
 
 typedef struct __attribute__((packed)) {

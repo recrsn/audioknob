@@ -809,7 +809,21 @@ static const struct {
     {"SETPEERSX", handle_ok},
 };
 
+// Sessions start at ANNOUNCE (AirPlay 1) or SETUP (AirPlay 2), so turning
+// a protocol off only needs those refused.
+static bool refused(const ap2_conn_t *conn, const rtsp_req_t *req) {
+    if (!strcmp(req->method, "ANNOUNCE")) {
+        return !ap2_protocol_enabled(RAOP_PROTOCOL_AIRPLAY1);
+    }
+    return !conn->airplay1 && !strcmp(req->method, "SETUP") && !ap2_protocol_enabled(RAOP_PROTOCOL_AIRPLAY2);
+}
+
 static void dispatch(ap2_conn_t *conn, const rtsp_req_t *req, rtsp_resp_t *resp) {
+    if (refused(conn, req)) {
+        ESP_LOGI(TAG, "conn %d: %s refused, protocol turned off", conn->id, req->method);
+        resp->code = 503;
+        return;
+    }
     ap1_apple_challenge(conn, req, resp);
     for (size_t i = 0; conn->airplay1 && i < sizeof(s_ap1_methods) / sizeof(s_ap1_methods[0]); i++) {
         if (!strcmp(req->method, s_ap1_methods[i].method)) {

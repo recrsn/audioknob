@@ -34,6 +34,8 @@ typedef enum {
     ROW_UNITS,
     ROW_TIMEZONE,
     ROW_HAPTICS,
+    ROW_BLUETOOTH,
+    ROW_AIRPLAY,
     ROW_NAME,
     ROW_WIFI,
     ROW_FORGET,
@@ -43,8 +45,8 @@ typedef enum {
 
 static const char *const k_row_names[ROW_COUNT] = {
     [ROW_BRIGHTNESS] = "Brightness", [ROW_CLOCK] = "Clock",   [ROW_UNITS] = "Units",
-    [ROW_TIMEZONE] = "Timezone",     [ROW_HAPTICS] = "Haptics", [ROW_NAME] = "Name",
-    [ROW_WIFI] = "WiFi",
+    [ROW_TIMEZONE] = "Timezone",     [ROW_HAPTICS] = "Haptics", [ROW_BLUETOOTH] = "Bluetooth",
+    [ROW_AIRPLAY] = "AirPlay",       [ROW_NAME] = "Name",       [ROW_WIFI] = "WiFi",
     [ROW_FORGET] = "Forget network", [ROW_ABOUT] = "About",
 };
 
@@ -52,6 +54,8 @@ static ui_settings_t s_settings = {
     .brightness = 80,
     .clock_24h = true,
     .haptics = true,
+    .bluetooth = true,
+    .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .tz_auto = true,
 };
 
@@ -113,6 +117,39 @@ static void timezone_text(char *out, size_t len) {
     }
 }
 
+static const char *airplay_text(const ui_settings_t *s) {
+    if (!s->airplay2_available) {
+        return s->airplay & UI_AIRPLAY_1 ? "On" : "Off";
+    }
+    switch (s->airplay & (UI_AIRPLAY_1 | UI_AIRPLAY_2)) {
+    case UI_AIRPLAY_1 | UI_AIRPLAY_2:
+        return "AirPlay 2 and 1";
+    case UI_AIRPLAY_2:
+        return "AirPlay 2 only";
+    case UI_AIRPLAY_1:
+        return "AirPlay 1 only";
+    default:
+        return "Off";
+    }
+}
+
+// Each press steps down from both versions to off, then back to both.
+static uint8_t airplay_next(const ui_settings_t *s) {
+    if (!s->airplay2_available) {
+        return s->airplay & UI_AIRPLAY_1 ? 0 : UI_AIRPLAY_1 | UI_AIRPLAY_2;
+    }
+    switch (s->airplay & (UI_AIRPLAY_1 | UI_AIRPLAY_2)) {
+    case UI_AIRPLAY_1 | UI_AIRPLAY_2:
+        return UI_AIRPLAY_2;
+    case UI_AIRPLAY_2:
+        return UI_AIRPLAY_1;
+    case UI_AIRPLAY_1:
+        return 0;
+    default:
+        return UI_AIRPLAY_1 | UI_AIRPLAY_2;
+    }
+}
+
 static void render(void) {
     const ui_settings_t *s = &s_settings;
     char buf[64];
@@ -134,6 +171,12 @@ static void render(void) {
             break;
         case ROW_HAPTICS:
             snprintf(buf, sizeof(buf), "%s", s->haptics ? "On" : "Off");
+            break;
+        case ROW_BLUETOOTH:
+            snprintf(buf, sizeof(buf), "%s", s->bluetooth ? "On" : "Off");
+            break;
+        case ROW_AIRPLAY:
+            snprintf(buf, sizeof(buf), "%s", airplay_text(s));
             break;
         case ROW_NAME:
             snprintf(buf, sizeof(buf), "%s", s->device_name);
@@ -277,6 +320,12 @@ static void activate(void) {
         break;
     case ROW_HAPTICS:
         emit(UI_SETTING_HAPTICS, !s->haptics, NULL);
+        break;
+    case ROW_BLUETOOTH:
+        emit(UI_SETTING_BLUETOOTH, !s->bluetooth, NULL);
+        break;
+    case ROW_AIRPLAY:
+        emit(UI_SETTING_AIRPLAY, airplay_next(s), NULL);
         break;
     case ROW_NAME:
         if (s->ip[0]) {

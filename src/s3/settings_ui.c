@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "airplay.h"
 #include "device_name.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -13,6 +14,7 @@
 #include "online.h"
 #include "settings.h"
 #include "tz.h"
+#include "uart_link.h"
 #include "ui.h"
 #include "wifi.h"
 
@@ -64,12 +66,19 @@ static void apply_timezone(void) {
     }
 }
 
+static void apply_airplay(void) {
+    airplay_set_protocols(s_settings.airplay & UI_AIRPLAY_1, s_settings.airplay & UI_AIRPLAY_2);
+}
+
 static void push(void) {
     ui_settings_t ui = {
         .brightness = s_settings.brightness,
         .clock_24h = s_settings.clock_24h,
         .fahrenheit = s_settings.fahrenheit,
         .haptics = s_settings.haptics,
+        .bluetooth = s_settings.bluetooth,
+        .airplay = s_settings.airplay,
+        .airplay2_available = airplay_supports_airplay2(),
         .tz_auto = !s_settings.tz[0],
         .free_internal_kb = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
         .free_psram_kb = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
@@ -101,6 +110,14 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         snprintf(s_settings.tz, sizeof(s_settings.tz), "%s", zone ? zone : "");
         apply_timezone();
         break;
+    case UI_SETTING_BLUETOOTH:
+        s_settings.bluetooth = value;
+        uart_link_set_bluetooth(s_settings.bluetooth);
+        break;
+    case UI_SETTING_AIRPLAY:
+        s_settings.airplay = (uint8_t)value;
+        apply_airplay();
+        break;
     case UI_SETTING_FORGET_WIFI:
         wifi_forget();
         return;
@@ -124,6 +141,8 @@ void settings_ui_init(void) {
     settings_load(&s_settings);
     lcd_driver_set_brightness(s_settings.brightness);
     apply_timezone();
+    uart_link_set_bluetooth(s_settings.bluetooth);
+    apply_airplay();
     const esp_timer_create_args_t args = {.callback = save_cb, .name = "settings_save"};
     ESP_ERROR_CHECK(esp_timer_create(&args, &s_save_timer));
 }
