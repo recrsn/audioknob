@@ -3,12 +3,30 @@
 #include "esp_log.h"
 #include "esp_netif_sntp.h"
 
+#include <time.h>
+
 static const char *TAG = "ntp";
 static volatile bool s_synced;
+
+// 2025-01-01T00:00:00Z. The RTC counts from 0 after power-on, so anything
+// later was set by a sync before a software reset.
+#define RTC_VALID_AFTER 1735689600
 
 static void sync_cb(struct timeval *tv) {
     ESP_LOGI(TAG, "synced: unix_time=%lld", (long long)tv->tv_sec);
     s_synced = true;
+}
+
+void ntp_restore_rtc(void) {
+    // System time lives in the RTC and survives esp_restart(), panics and
+    // deep sleep, so a time from an earlier sync is good until SNTP lands.
+    time_t now = time(NULL);
+    if (now >= RTC_VALID_AFTER) {
+        ESP_LOGI(TAG, "restored from RTC: unix_time=%lld", (long long)now);
+        s_synced = true;
+    } else {
+        ESP_LOGI(TAG, "RTC unset (power-on), waiting for SNTP");
+    }
 }
 
 void ntp_start(void) {

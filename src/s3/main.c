@@ -191,6 +191,7 @@ static void on_source_pick(ui_source_t source) {
 
 void app_main(void) {
     ESP_LOGI(TAG, "ESP32-S3 target boot");
+    ntp_restore_rtc();
 
     uart_link_start();
 
