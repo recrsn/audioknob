@@ -2,6 +2,7 @@
 #include "lvgl.h"
 #include "fonts.h"
 #include "icons.h"
+#include "ui_bg_data.h"
 #include "ui_internal.h"
 #include "ui_launcher.h"
 
@@ -63,6 +64,13 @@
 #define USB_TITLE_Y        118
 #endif
 
+// tools/gen_backgrounds.py bakes the tile into the backgrounds at these.
+_Static_assert(ART_TILE_SIZE == UI_BG_TILE_SIZE && UI_ART_SIZE == UI_BG_TILE_SIZE, "regenerate backgrounds");
+_Static_assert(WIRELESS_TILE_Y == UI_BG_WIRELESS_TILE_Y, "regenerate backgrounds");
+#ifdef AK_USB_AUDIO
+_Static_assert(USB_TILE_Y == UI_BG_USB_TILE_Y, "regenerate backgrounds");
+#endif
+
 #define TRANSPORT_PRIMARY_SIZE   48
 #define TRANSPORT_SECONDARY_SIZE 40
 #define TRANSPORT_GAP            14
@@ -79,7 +87,7 @@
 
 typedef struct {
     lv_obj_t *screen;
-    lv_obj_t *backdrop;
+    ui_now_playing_bg_t bg;
     lv_obj_t *ring;
     lv_obj_t *source_icon;
     lv_obj_t *source_label;
@@ -93,18 +101,11 @@ typedef struct {
     lv_obj_t *wait_title;
     lv_obj_t *wait_subtitle;
 
-    // Shown once connected.
-    // The tile is never shown itself: it is snapshotted into tile_img when
-    // its tint or art changes (see tile_bake()).
-    lv_obj_t *tile;
+    // Shown once connected. The tile itself is part of the background.
     lv_obj_t *tile_icon;
     lv_obj_t *art;
     lv_image_dsc_t art_dsc;
     uint32_t art_version;
-    lv_obj_t *tile_img;
-    lv_draw_buf_t *tile_baked;
-    uint32_t baked_art_version;
-    lv_color_t baked_tint;
     lv_obj_t *transport;
     lv_obj_t *prev_icon;
     lv_obj_t *play_icon;
@@ -116,9 +117,8 @@ typedef struct {
 #ifdef AK_USB_AUDIO
 typedef struct {
     lv_obj_t *screen;
+    ui_now_playing_bg_t bg;
     lv_obj_t *ring;
-    lv_obj_t *tile;
-    lv_obj_t *backdrop;
     lv_obj_t *prev_icon;
     lv_obj_t *play_icon;
     lv_obj_t *next_icon;
@@ -380,22 +380,6 @@ static lv_obj_t *marquee_label_create(lv_obj_t *parent, const lv_font_t *font, l
     return label;
 }
 
-// Ambient art placeholder: a flat tinted rounded tile, since no album-art
-// transfer exists over the inter-MCU link yet. Caller centers its own icon
-// inside (an image for a real asset, or a label for an LV_SYMBOL glyph).
-static lv_obj_t *art_tile_create(lv_obj_t *parent, lv_color_t tint, int32_t y) {
-    lv_obj_t *tile = lv_obj_create(parent);
-    lv_obj_set_size(tile, ART_TILE_SIZE, ART_TILE_SIZE);
-    lv_obj_set_style_radius(tile, 28, 0);
-    lv_obj_set_style_border_width(tile, 0, 0);
-    lv_obj_set_style_bg_color(tile, tint, 0);
-    lv_obj_set_style_bg_grad_color(tile, lv_color_hex(0x0b0b10), 0);
-    lv_obj_set_style_bg_grad_dir(tile, LV_GRAD_DIR_VER, 0);
-    lv_obj_remove_flag(tile, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(tile, LV_ALIGN_CENTER, 0, y);
-    return tile;
-}
-
 // One now-playing transport button (mock-react's .now-btn / .now-btn.primary):
 // a circular chip with a centered glyph. Returns the inner label so callers
 // can swap its symbol/color later (e.g. play <-> pause). `dim` renders it as
@@ -471,18 +455,6 @@ static lv_obj_t *volume_ring_create(lv_obj_t *parent, lv_color_t tint) {
     lv_obj_set_style_opa(arc, LV_OPA_TRANSP, 0);
     lv_obj_center(arc);
     return arc;
-}
-
-// Stand-in for mock-react's blurred, darkened album-art wash (.art-bg): LVGL
-// has no blur, so a flat tint at low opacity gives the screen the same
-// source-coloured cast instead of a flat black.
-static lv_obj_t *backdrop_create(lv_obj_t *parent) {
-    lv_obj_t *bd = lv_obj_create(parent);
-    lv_obj_remove_style_all(bd);
-    lv_obj_remove_flag(bd, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(bd, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_bg_opa(bd, LV_OPA_10, 0);
-    return bd;
 }
 
 // The state poll pushes every 33 ms; lv_label_set_text() frees and reallocates
@@ -612,7 +584,7 @@ static void idle_screen_refresh(void) {
 
 static void wireless_screen_build(void) {
     wireless_screen.screen = screen_create();
-    wireless_screen.backdrop = backdrop_create(wireless_screen.screen);
+    ui_now_playing_bg_create(&wireless_screen.bg, wireless_screen.screen, UI_BG_AIRPLAY);
     wireless_screen.ring = volume_ring_create(wireless_screen.screen, lv_color_hex(0x4ea1ff));
 
     // Y is set per-update (WIRELESS_STATUS_ROW_Y_CONNECTED vs. _WAITING) --
@@ -648,23 +620,12 @@ static void wireless_screen_build(void) {
     lv_obj_align(wireless_screen.wait_subtitle, LV_ALIGN_CENTER, 0, WIRELESS_WAIT_SUBTITLE_Y);
 
     // -- connected / now-playing state --
-    wireless_screen.tile = art_tile_create(wireless_screen.screen, lv_color_hex(0x4ea1ff), WIRELESS_TILE_Y);
-    wireless_screen.tile_icon = lv_image_create(wireless_screen.tile);
+    wireless_screen.tile_icon = lv_image_create(wireless_screen.screen);
     lv_image_set_src(wireless_screen.tile_icon, &icon_music_note);
     lv_obj_set_style_image_recolor(wireless_screen.tile_icon, lv_color_white(), 0);
     lv_obj_set_style_image_recolor_opa(wireless_screen.tile_icon, LV_OPA_COVER, 0);
-    lv_obj_center(wireless_screen.tile_icon);
-
-    lv_obj_set_style_clip_corner(wireless_screen.tile, true, 0);
-    lv_obj_set_style_pad_all(wireless_screen.tile, 0, 0);
-    wireless_screen.art = lv_image_create(wireless_screen.tile);
-    lv_obj_center(wireless_screen.art);
-    lv_obj_add_flag(wireless_screen.art, LV_OBJ_FLAG_HIDDEN);
-
-    lv_obj_add_flag(wireless_screen.tile, LV_OBJ_FLAG_HIDDEN);
-    wireless_screen.tile_img = lv_image_create(wireless_screen.screen);
-    lv_obj_align(wireless_screen.tile_img, LV_ALIGN_CENTER, 0, WIRELESS_TILE_Y);
-    lv_obj_move_to_index(wireless_screen.tile_img, lv_obj_get_index(wireless_screen.tile) + 1);
+    lv_obj_align(wireless_screen.tile_icon, LV_ALIGN_CENTER, 0, WIRELESS_TILE_Y);
+    wireless_screen.art = ui_now_playing_art_create(&wireless_screen.bg, wireless_screen.screen, WIRELESS_TILE_Y);
 
     wireless_screen.transport = flex_row_create(wireless_screen.screen, TRANSPORT_GAP, WIRELESS_TRANSPORT_Y);
     wireless_screen.prev_icon = ui_round_button_create(wireless_screen.transport, LV_SYMBOL_PREV,
@@ -703,8 +664,7 @@ static void wireless_screen_build(void) {
 #ifdef AK_USB_AUDIO
 static void usb_screen_build(void) {
     usb_screen.screen = screen_create();
-    usb_screen.backdrop = backdrop_create(usb_screen.screen);
-    lv_obj_set_style_bg_color(usb_screen.backdrop, lv_color_hex(0x2dd4bf), 0);
+    ui_now_playing_bg_create(&usb_screen.bg, usb_screen.screen, UI_BG_USB);
     usb_screen.ring = volume_ring_create(usb_screen.screen, lv_color_hex(0x2dd4bf));
 
     lv_obj_t *row = status_pill_create(usb_screen.screen, USB_STATUS_ROW_Y);
@@ -715,14 +675,13 @@ static void usb_screen_build(void) {
     lv_obj_t *label = status_label_create(row);
     lv_label_set_text(label, "USB Audio");
 
-    usb_screen.tile = art_tile_create(usb_screen.screen, lv_color_hex(0x2dd4bf), USB_TILE_Y);
     // mock-react's USB art-tile shows a generic speaker glyph, not the USB
     // plug glyph -- that one's reserved for the status row above.
-    lv_obj_t *tile_icon = lv_label_create(usb_screen.tile);
+    lv_obj_t *tile_icon = lv_label_create(usb_screen.screen);
     lv_label_set_text(tile_icon, LV_SYMBOL_VOLUME_MAX);
     lv_obj_set_style_text_font(tile_icon, &lv_font_montserrat_32, 0);
     lv_obj_set_style_text_color(tile_icon, lv_color_white(), 0);
-    lv_obj_center(tile_icon);
+    lv_obj_align(tile_icon, LV_ALIGN_CENTER, 0, USB_TILE_Y);
 
     lv_obj_t *transport = flex_row_create(usb_screen.screen, TRANSPORT_GAP, USB_TRANSPORT_Y);
     usb_screen.prev_icon = ui_round_button_create(transport, LV_SYMBOL_PREV, TRANSPORT_SECONDARY_SIZE,
@@ -1074,10 +1033,7 @@ static void update_artwork(const ui_track_info_t *track) {
         return;
     }
     wireless_screen.art_version = version;
-
     if (!art) {
-        lv_obj_add_flag(wireless_screen.art, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(wireless_screen.tile_icon, LV_OBJ_FLAG_HIDDEN);
         return;
     }
     lv_image_dsc_t *dsc = &wireless_screen.art_dsc;
@@ -1089,34 +1045,6 @@ static void update_artwork(const ui_track_info_t *track) {
     dsc->data_size = UI_ART_SIZE * UI_ART_SIZE * 2;
     dsc->data = (const uint8_t *)art;
     lv_image_set_src(wireless_screen.art, dsc);
-    lv_obj_invalidate(wireless_screen.art);
-    lv_obj_remove_flag(wireless_screen.art, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(wireless_screen.tile_icon, LV_OBJ_FLAG_HIDDEN);
-}
-
-// A rounded, clipped, gradient tile costs a few ms per full frame to
-// rasterise, and it only changes with the source tint or the art. Its
-// snapshot keeps alpha so the antialiased corners blend over the backdrop
-// (ARGB8888: LVGL can't blend ARGB8565 onto the panel's swapped RGB565).
-static void tile_bake(lv_color_t tint) {
-    if (wireless_screen.tile_baked && wireless_screen.baked_art_version == wireless_screen.art_version &&
-        lv_color_eq(wireless_screen.baked_tint, tint)) {
-        return;
-    }
-    lv_obj_remove_flag(wireless_screen.tile, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_update_layout(wireless_screen.tile);
-    lv_draw_buf_t *baked = lv_snapshot_take(wireless_screen.tile, LV_COLOR_FORMAT_ARGB8888);
-    lv_obj_add_flag(wireless_screen.tile, LV_OBJ_FLAG_HIDDEN);
-    if (!baked) {
-        return;
-    }
-    lv_image_set_src(wireless_screen.tile_img, baked);
-    if (wireless_screen.tile_baked) {
-        lv_draw_buf_destroy(wireless_screen.tile_baked);
-    }
-    wireless_screen.tile_baked = baked;
-    wireless_screen.baked_art_version = wireless_screen.art_version;
-    wireless_screen.baked_tint = tint;
 }
 
 static void format_subtitle(const ui_track_info_t *track, char *out, size_t len) {
@@ -1144,8 +1072,7 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     lv_obj_set_style_image_recolor(wireless_screen.source_icon, tint, 0);
     ui_label_set_text(wireless_screen.source_label, airplay ? "AirPlay" : "Bluetooth");
     lv_obj_set_style_arc_color(wireless_screen.ring, tint, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(wireless_screen.tile, tint, 0);
-    lv_obj_set_style_bg_color(wireless_screen.backdrop, tint, 0);
+    ui_now_playing_bg_set(&wireless_screen.bg, airplay ? UI_BG_AIRPLAY : UI_BG_BLUETOOTH);
 
     // Neither source has a local "pairing" step on this end -- AirPlay only
     // appears once picked from the phone's Control Center, and Bluetooth
@@ -1157,11 +1084,10 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
                  waiting ? WIRELESS_STATUS_ROW_Y_WAITING : WIRELESS_STATUS_ROW_Y_CONNECTED);
 
     ui_set_visible(wireless_screen.ring, !waiting);
-    ui_set_visible(wireless_screen.backdrop, !waiting);
+    ui_set_visible(wireless_screen.bg.img, !waiting);
     ui_set_visible(wireless_screen.wait_chip, waiting);
     ui_set_visible(wireless_screen.wait_title, waiting);
     ui_set_visible(wireless_screen.wait_subtitle, waiting);
-    ui_set_visible(wireless_screen.tile_img, !waiting);
     ui_set_visible(wireless_screen.transport, !waiting);
     ui_set_visible(wireless_screen.title_label, !waiting);
     ui_set_visible(wireless_screen.subtitle_label, !waiting);
@@ -1184,8 +1110,9 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
         ui_label_set_text(wireless_screen.title_label, has_track ? track->title : source_name);
         ui_label_set_text(wireless_screen.subtitle_label, subtitle);
         update_artwork(track);
-        tile_bake(tint);
     }
+    ui_set_visible(wireless_screen.tile_icon, !waiting && !wireless_screen.art_version);
+    ui_set_visible(wireless_screen.art, !waiting && wireless_screen.art_version);
 
     s_audio.wireless_connected = state->connected;
     s_audio.wireless_playing = state->playing;

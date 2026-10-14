@@ -19,6 +19,27 @@ lv_obj_t *ui_round_button_create(lv_obj_t *parent, const char *symbol, int32_t s
 // The idle screen's pre-dithered ambient glow, covering the whole display.
 lv_obj_t *ui_wallpaper_create(lv_obj_t *parent);
 
+typedef enum {
+    UI_BG_AIRPLAY,
+    UI_BG_BLUETOOTH,
+    UI_BG_USB,
+} ui_bg_source_t;
+
+// A now-playing screen's full-screen background: the source-tinted wash with
+// its art tile baked in, and the corners that round cover art over the tile.
+typedef struct {
+    lv_obj_t *img;
+    lv_image_dsc_t dsc;
+    lv_obj_t *corners[4];
+    ui_bg_source_t source;
+} ui_now_playing_bg_t;
+
+void ui_now_playing_bg_create(ui_now_playing_bg_t *bg, lv_obj_t *parent, ui_bg_source_t source);
+// An empty, hidden image over the tile (tile_y from screen center) for
+// UI_BG_TILE_SIZE square cover art, which the background's corners round.
+lv_obj_t *ui_now_playing_art_create(ui_now_playing_bg_t *bg, lv_obj_t *parent, int32_t tile_y);
+void ui_now_playing_bg_set(ui_now_playing_bg_t *bg, ui_bg_source_t source);
+
 #include "ui.h"
 
 // The app pages, in launcher order (clockwise from the top).
