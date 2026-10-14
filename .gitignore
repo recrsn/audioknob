@@ -3,3 +3,5 @@ managed_components/
 node_modules/
 mock-react/dist/
 .DS_Store
+logs/
+*.stl
