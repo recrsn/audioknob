@@ -70,6 +70,7 @@
 
 static const char *TAG = "lcd_driver";
 static SemaphoreHandle_t s_lvgl_mutex;
+static SemaphoreHandle_t s_flush_done;
 static lv_indev_t *s_touch_indev;
 static esp_lcd_touch_handle_t s_touch_handle;
 static i2c_master_bus_handle_t s_i2c_bus;
@@ -85,9 +86,18 @@ void lcd_driver_lvgl_unlock(void) {
 static bool notify_flush_ready(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *edata, void *user_ctx) {
     (void)io;
     (void)edata;
-    lv_display_t *disp = (lv_display_t *)user_ctx;
-    lv_display_flush_ready(disp);
-    return false;
+    (void)user_ctx;
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(s_flush_done, &woken);
+    return woken == pdTRUE;
+}
+
+// Without this LVGL busy-spins on the flushing flag through every DMA
+// transfer, which starved IDLE1 into the task watchdog while AirPlay played.
+// LVGL clears the flag itself once this returns.
+static void lvgl_flush_wait_cb(lv_display_t *disp) {
+    (void)disp;
+    xSemaphoreTake(s_flush_done, portMAX_DELAY);
 }
 
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
@@ -258,6 +268,9 @@ static lv_display_t *lvgl_display_init(esp_lcd_panel_handle_t panel_handle, esp_
     // every flushed pixel on the CPU.
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
+    s_flush_done = xSemaphoreCreateBinary();
+    ESP_ERROR_CHECK(s_flush_done ? ESP_OK : ESP_ERR_NO_MEM);
+    lv_display_set_flush_wait_cb(disp, lvgl_flush_wait_cb);
 
     size_t buf_px = (size_t)LCD_H_RES * LVGL_DRAW_BUF_LINES;
     void *buf = heap_caps_malloc(buf_px * sizeof(uint16_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
