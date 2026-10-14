@@ -27,12 +27,13 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include "rtp.h"
+#include "raop_rtp.h"
 
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
-#include "alac_dec.h"
+#include "decoder.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -53,7 +54,7 @@
 #define BUFFER_FRAMES 512
 #define BUFIDX(seqno) ((seq_t)(seqno) % BUFFER_FRAMES)
 #define MAX_PACKET 1408
-// ALAC's bit reader peeks past the end of the payload.
+// Room past the payload, in case the decoder's bit reader peeks ahead.
 #define PACKET_SLACK 16
 // Every AirPlay 1 sender uses 352-frame packets; the player is fixed at it too.
 #define MAX_FRAME_SIZE 352
@@ -82,7 +83,7 @@ typedef struct {
     bool ready, missed;
 } abuf_t;
 
-struct rtp_s {
+struct raop_rtp_s {
     volatile bool running;
     uint8_t aesiv[16];
     mbedtls_aes_context aes;
@@ -90,6 +91,7 @@ struct rtp_s {
     uint8_t *decrypt_buf;
     uint8_t *packet;
     uint32_t frame_size;
+    bool pcm;  // L16: big-endian samples, no decoder
     struct in_addr host;
     struct sockaddr_in rtp_host;
     struct {
@@ -112,7 +114,7 @@ struct rtp_s {
     seq_t ab_read, ab_write;
     SemaphoreHandle_t ab_mutex;
     TaskHandle_t thread, joiner;
-    alac_dec_t *alac;
+    decoder_t *dec;
     int first_seqno;
     enum { RTP_WAIT, RTP_STREAM, RTP_PLAY } state;
     int stalled;
@@ -123,8 +125,8 @@ struct rtp_s {
 static const char *TAG = "rtp";
 
 static void rtp_thread_func(void *arg);
-static bool rtp_request_resend(rtp_t *ctx, seq_t first, seq_t last);
-static bool rtp_request_timing(rtp_t *ctx);
+static bool rtp_request_resend(raop_rtp_t *ctx, seq_t first, seq_t last);
+static bool rtp_request_timing(raop_rtp_t *ctx);
 
 static uint16_t read_be16(const uint8_t *p) {
     return ((uint16_t)p[0] << 8) | p[1];
@@ -152,24 +154,26 @@ static bool seq_order(seq_t a, seq_t b) {
     return d > 0;
 }
 
-static void emit(rtp_t *ctx, raop_event_type_t type) {
+static void emit(raop_rtp_t *ctx, raop_event_type_t type) {
     raop_event_t event = {.type = type};
     ctx->event_cb(&event);
 }
 
-static bool parse_fmtp(const char *fmtp, int out[12]) {
+// Fields the sender leaves out keep shairport-sync's defaults: 352-frame,
+// 16-bit stereo ALAC at 44.1 kHz.
+static void parse_fmtp(const char *fmtp, int out[12]) {
+    static const int defaults[12] = {96, 352, 0, 16, 40, 10, 14, 2, 255, 0, 0, RAOP_SAMPLE_RATE};
     char *copy = strdup(fmtp ? fmtp : "");
     char *cursor = copy, *arg;
     int n = 0;
 
-    memset(out, 0, 12 * sizeof(int));
+    memcpy(out, defaults, sizeof(defaults));
     while (copy && n < 12 && (arg = strsep(&cursor, " \t")) != NULL) {
         if (*arg) {
             out[n++] = atoi(arg);
         }
     }
     free(copy);
-    return n == 12;
 }
 
 static const int16_t s_silence[MAX_FRAME_SIZE * 2];
@@ -180,7 +184,7 @@ static const int16_t s_silence[MAX_FRAME_SIZE * 2];
 static abuf_t *s_audio_buffer;  // internal: touched on every packet
 static int16_t *s_pcm_pool;
 
-static bool buffers_get(rtp_t *ctx) {
+static bool buffers_get(raop_rtp_t *ctx) {
     if (!s_audio_buffer) {
         s_audio_buffer = malloc(BUFFER_FRAMES * sizeof(abuf_t));
     }
@@ -197,16 +201,17 @@ static bool buffers_get(rtp_t *ctx) {
     return true;
 }
 
-static void buffer_reset(rtp_t *ctx) {
+static void buffer_reset(raop_rtp_t *ctx) {
     for (int i = 0; i < BUFFER_FRAMES; i++) {
         ctx->audio_buffer[i].ready = false;
     }
 }
 
-rtp_resp_t rtp_init(struct in_addr host, const uint8_t *aeskey, const uint8_t *aesiv, const char *fmtp,
+raop_rtp_resp_t raop_rtp_init(struct in_addr host, const uint8_t *aeskey, const uint8_t *aesiv, const char *rtpmap,
+                              const char *fmtp,
                     uint16_t ctrl_port, uint16_t timing_port, raop_event_cb_t event_cb, raop_pcm_cb_t pcm_cb) {
-    rtp_resp_t resp = {0};
-    rtp_t *ctx = calloc(1, sizeof(rtp_t));
+    raop_rtp_resp_t resp = {0};
+    raop_rtp_t *ctx = calloc(1, sizeof(raop_rtp_t));
     if (!ctx) {
         return resp;
     }
@@ -236,16 +241,25 @@ rtp_resp_t rtp_init(struct in_addr host, const uint8_t *aeskey, const uint8_t *a
         ok &= ctx->decrypt_buf != NULL;
     }
 
+    // An fmtp line can come with L16 too (pyatv sends both); PCM is always
+    // 352 frames.
     int fmtp_vals[12];
-    if (!parse_fmtp(fmtp, fmtp_vals) || fmtp_vals[1] <= 0 || fmtp_vals[1] > MAX_FRAME_SIZE) {
+    ctx->pcm = rtpmap && strcasestr(rtpmap, "L16/");
+    parse_fmtp(ctx->pcm ? NULL : fmtp, fmtp_vals);
+    if (ctx->pcm && !strcasestr(rtpmap, "L16/44100/2")) {
+        ESP_LOGE(TAG, "unsupported PCM format: %s", rtpmap);
+        ok = false;
+    } else if (fmtp_vals[1] <= 0 || fmtp_vals[1] > MAX_FRAME_SIZE) {
         ESP_LOGE(TAG, "unsupported fmtp: %s", fmtp ? fmtp : "(none)");
         ok = false;
     } else {
         ctx->frame_size = fmtp_vals[1];
-        ctx->alac = alac_dec_create(fmtp_vals);
-        ok &= ctx->alac != NULL;
-        if (!ctx->alac) {
-            ESP_LOGE(TAG, "ALAC decoder create failed");
+        if (!ctx->pcm) {
+            ctx->dec = decoder_open_alac_fmtp(fmtp_vals);
+            ok &= ctx->dec != NULL;
+            if (!ctx->dec) {
+                ESP_LOGE(TAG, "ALAC decoder create failed");
+            }
         }
         if (!buffers_get(ctx)) {
             ESP_LOGE(TAG, "audio buffer alloc failed");
@@ -273,7 +287,7 @@ rtp_resp_t rtp_init(struct in_addr host, const uint8_t *aeskey, const uint8_t *a
 
     if (!ok) {
         ESP_LOGE(TAG, "cannot start RTP");
-        rtp_end(ctx);
+        raop_rtp_end(ctx);
         return resp;
     }
     // Internal RAM headroom is what decides whether the next SETUP's task create succeeds.
@@ -287,7 +301,7 @@ rtp_resp_t rtp_init(struct in_addr host, const uint8_t *aeskey, const uint8_t *a
     return resp;
 }
 
-void rtp_end(rtp_t *ctx) {
+void raop_rtp_end(raop_rtp_t *ctx) {
     if (!ctx) {
         return;
     }
@@ -303,9 +317,7 @@ void rtp_end(rtp_t *ctx) {
             close(ctx->sockets[i].sock);
         }
     }
-    if (ctx->alac) {
-        alac_dec_delete(ctx->alac);
-    }
+    decoder_close(ctx->dec);
     if (ctx->decrypt) {
         mbedtls_aes_free(&ctx->aes);
     }
@@ -317,7 +329,7 @@ void rtp_end(rtp_t *ctx) {
     free(ctx);
 }
 
-void rtp_flush(rtp_t *ctx, uint16_t seqno, uint32_t rtptime) {
+void raop_rtp_flush(raop_rtp_t *ctx, uint16_t seqno, uint32_t rtptime) {
     xSemaphoreTake(ctx->ab_mutex, portMAX_DELAY);
 
     // Always store the flush seqno: only packets strictly above it are wanted,
@@ -333,7 +345,7 @@ void rtp_flush(rtp_t *ctx, uint16_t seqno, uint32_t rtptime) {
     xSemaphoreGive(ctx->ab_mutex);
 }
 
-void rtp_record(rtp_t *ctx, uint16_t seqno, uint32_t rtptime) {
+void raop_rtp_record(raop_rtp_t *ctx, uint16_t seqno, uint32_t rtptime) {
     xSemaphoreTake(ctx->ab_mutex, portMAX_DELAY);
     ctx->first_seqno = (seqno || rtptime) ? seqno : -1;
     ctx->state = RTP_WAIT;
@@ -341,7 +353,7 @@ void rtp_record(rtp_t *ctx, uint16_t seqno, uint32_t rtptime) {
     ESP_LOGI(TAG, "record %u - %lu", seqno, (unsigned long)rtptime);
 }
 
-static bool decode_packet(rtp_t *ctx, uint8_t *buf, int len, abuf_t *abuf) {
+static bool decode_packet(raop_rtp_t *ctx, uint8_t *buf, int len, abuf_t *abuf) {
     uint8_t *in = buf;
 
     if (ctx->decrypt) {
@@ -355,9 +367,17 @@ static bool decode_packet(rtp_t *ctx, uint8_t *buf, int len, abuf_t *abuf) {
         in = ctx->decrypt_buf;
     }
 
-    uint32_t frames = 0;
-    if (!alac_dec_decode(ctx->alac, in, len, abuf->data, &frames) || frames == 0 || frames > ctx->frame_size) {
-        ESP_LOGW(TAG, "ALAC decode failed (%d bytes)", len);
+    int frames;
+    if (ctx->pcm) {
+        frames = len / 4 < (int)ctx->frame_size ? len / 4 : (int)ctx->frame_size;
+        for (int i = 0; i < frames * 2; i++) {
+            abuf->data[i] = (int16_t)read_be16(in + i * 2);
+        }
+    } else {
+        frames = decoder_decode(ctx->dec, in, len, abuf->data, ctx->frame_size);
+    }
+    if (frames <= 0) {
+        ESP_LOGW(TAG, "%s packet unusable (%d bytes)", ctx->pcm ? "PCM" : "ALAC", len);
         return false;
     }
     abuf->frames = frames;
@@ -374,13 +394,13 @@ static uint64_t us_to_ntp(int64_t us) {
 
 // Local (esp_timer) time at which rtptime should reach the DAC. Applies the
 // latest clock offset, so a better NTP estimate takes effect immediately.
-static int64_t playtime_of(rtp_t *ctx, uint32_t rtptime) {
+static int64_t playtime_of(raop_rtp_t *ctx, uint32_t rtptime) {
     int32_t delta = (int32_t)(rtptime - ctx->synchro.rtp);
     return ctx->synchro.remote_us - ctx->timing.offset_us + (int64_t)delta * 1000000 / RAOP_SAMPLE_RATE;
 }
 
 // Pushes as many frames as possible downstream, in order.
-static void buffer_push_packet(rtp_t *ctx) {
+static void buffer_push_packet(raop_rtp_t *ctx) {
     int64_t hold = ((int64_t)ctx->latency * 1000000) / (8 * RAOP_SAMPLE_RATE);
     if (hold < 100000) {
         hold = 100000;
@@ -452,7 +472,7 @@ static void buffer_push_packet(rtp_t *ctx) {
     }
 }
 
-static void buffer_put_packet(rtp_t *ctx, seq_t seqno, uint32_t rtptime, uint8_t *data, int len) {
+static void buffer_put_packet(raop_rtp_t *ctx, seq_t seqno, uint32_t rtptime, uint8_t *data, int len) {
     xSemaphoreTake(ctx->ab_mutex, portMAX_DELAY);
 
     /* After a RECORD with a seqno we are in RTP_WAIT and that seqno is the
@@ -545,7 +565,7 @@ static void buffer_put_packet(rtp_t *ctx, seq_t seqno, uint32_t rtptime, uint8_t
     xSemaphoreGive(ctx->ab_mutex);
 }
 
-static void handle_sync(rtp_t *ctx, const uint8_t *pkt, int *count) {
+static void handle_sync(raop_rtp_t *ctx, const uint8_t *pkt, int *count) {
     uint32_t rtp_now_latency = read_be32(pkt + 4);
     uint64_t remote = ((uint64_t)read_be32(pkt + 8) << 32) | read_be32(pkt + 12);
     uint32_t rtp_now = read_be32(pkt + 16);
@@ -583,7 +603,7 @@ static uint64_t read_be64(const uint8_t *p) {
     return ((uint64_t)read_be32(p) << 32) | read_be32(p + 4);
 }
 
-static void handle_timing(rtp_t *ctx, const uint8_t *pkt) {
+static void handle_timing(raop_rtp_t *ctx, const uint8_t *pkt) {
     int64_t arrival = esp_timer_get_time();
     // origin echoes the transmit time of our request, in local time.
     int64_t origin = ntp_to_us(read_be64(pkt + 8));
@@ -624,7 +644,7 @@ static void handle_timing(rtp_t *ctx, const uint8_t *pkt) {
 }
 
 static void rtp_thread_func(void *arg) {
-    rtp_t *ctx = arg;
+    raop_rtp_t *ctx = arg;
     uint8_t *packet = ctx->packet;
     int max_sock = -1;
     int count = 0;
@@ -714,7 +734,7 @@ static void rtp_thread_func(void *arg) {
     vTaskDelete(NULL);
 }
 
-static bool rtp_request_timing(rtp_t *ctx) {
+static bool rtp_request_timing(raop_rtp_t *ctx) {
     uint8_t req[32] = {0};
     struct sockaddr_in host = {.sin_family = AF_INET};
 
@@ -740,7 +760,7 @@ static bool rtp_request_timing(rtp_t *ctx) {
     return true;
 }
 
-static bool rtp_request_resend(rtp_t *ctx, seq_t first, seq_t last) {
+static bool rtp_request_resend(raop_rtp_t *ctx, seq_t first, seq_t last) {
     uint8_t req[8];  // Apple's resend request, not a standard RTCP NACK
 
     // Avoid absurd ranges (happens after long network blackouts).

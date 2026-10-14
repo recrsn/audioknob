@@ -16,8 +16,10 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 # 1 ms ticks so the AirPlay player can wake close to a frame's playtime.
 CONFIG_FREERTOS_HZ=1000
 
-# RTSP listener + session, 3 RTP sockets, DACP, mDNS, SNTP.
-CONFIG_LWIP_MAX_SOCKETS=16
+# AirPlay 2: RTSP listener + 2 sessions, event port, PTP x2, NTP, RTP data
+# and control (or buffered TCP), DACP; plus mDNS, SNTP, the settings page
+# and HTTPS.
+CONFIG_LWIP_MAX_SOCKETS=24
 
 # ntp.c takes NTP servers from DHCP when the router offers them.
 CONFIG_LWIP_DHCP_GET_NTP_SRV=y

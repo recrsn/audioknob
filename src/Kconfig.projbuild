@@ -28,6 +28,30 @@ menu "AudioKnob"
         range 5 100
         default 40
 
+    choice AK_AIRPLAY_RECEIVER
+        prompt "AirPlay receiver (s3 target)"
+        depends on IDF_TARGET_ESP32S3
+        default AK_AIRPLAY2
+        help
+            Which AirPlay receiver the S3 runs. Both play through the same
+            player and UI.
+
+        config AK_AIRPLAY1
+            bool "AirPlay 1 only (src/s3/airplay1/)"
+
+        config AK_AIRPLAY2
+            bool "AirPlay 2 and AirPlay 1 (src/s3/airplay2/)"
+            select MBEDTLS_CHACHA20_C
+            select MBEDTLS_POLY1305_C
+            select MBEDTLS_CHACHAPOLY_C
+            select MBEDTLS_HKDF_C
+            help
+                Built from shairport-sync's AirPlay 2 handling and owntone's
+                pair_ap (MIT) with a PTP follower of our own. AirPlay 1
+                senders share its RTSP port, as with shairport-sync. No
+                FairPlay.
+    endchoice
+
     config AK_LVGL_PERF_LOG
         bool "Benchmark LVGL rendering (s3 target)"
         depends on IDF_TARGET_ESP32S3

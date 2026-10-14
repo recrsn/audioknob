@@ -29,6 +29,8 @@ set(AK_REQUIRES
     lwip
     mbedtls
     mdns
+    esp_audio_codec
+    libsodium
 )
 
 # ESP-IDF runs every component's CMakeLists.txt once in a restricted "early
@@ -59,18 +61,30 @@ if(AK_TARGET STREQUAL "s3")
     # main_native.c is the env:native (SDL/desktop) entry point only.
     list(REMOVE_ITEM AK_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/s3/main_native.c")
 
-    # AirPlay receiver: the RAOP port (s3/raop/) and Apple's ALAC decoder,
-    # vendored unmodified (s3/alac/).
-    file(GLOB AK_RAOP_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/s3/raop/*.c" "${CMAKE_CURRENT_SOURCE_DIR}/s3/raop/*.cpp")
-    file(GLOB AK_ALAC_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/s3/alac/*.c" "${CMAKE_CURRENT_SOURCE_DIR}/s3/alac/*.cpp")
-    list(APPEND AK_SRCS ${AK_RAOP_SRCS} ${AK_ALAC_SRCS})
-    list(APPEND AK_INCLUDE_DIRS "s3/raop" "s3/alac")
+    # Shared by both receivers (s3/airplay/): raop.h, the receiver interface
+    # airplay.c uses, the AirPlay 1 RTP receiver and session setup, DACP,
+    # DMAP metadata and the esp_audio_codec decoders.
+    file(GLOB AK_AIRPLAY_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/s3/airplay/*.c")
+    list(APPEND AK_SRCS ${AK_AIRPLAY_SRCS})
+    list(APPEND AK_INCLUDE_DIRS "s3/airplay")
 
-    # Apple's endianness sniffing only recognises x86/Win32 hosts; without
-    # this it byte-swaps everything on Xtensa. Warnings are upstream's.
-    set_source_files_properties(${AK_ALAC_SRCS} PROPERTIES
-        COMPILE_DEFINITIONS "TARGET_RT_LITTLE_ENDIAN=1"
-        COMPILE_OPTIONS "-Wno-error;-w")
+    if(CONFIG_AK_AIRPLAY2)
+        # AirPlay 2 after shairport-sync, which takes AirPlay 1 senders on the
+        # same port, with owntone's pair_ap on an mbedtls backend
+        # (PAIR_MBEDTLS).
+        file(GLOB AK_AIRPLAY2_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/s3/airplay2/*.c")
+        file(GLOB AK_PAIR_AP_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/s3/airplay2/pair_ap/*.c")
+        list(APPEND AK_SRCS ${AK_AIRPLAY2_SRCS} ${AK_PAIR_AP_SRCS})
+        list(APPEND AK_INCLUDE_DIRS "s3/airplay2" "s3/airplay2/pair_ap")
+        # Upstream style; unused parameters and signed/unsigned compares are its own.
+        set_source_files_properties(${AK_PAIR_AP_SRCS} PROPERTIES
+            COMPILE_DEFINITIONS "PAIR_MBEDTLS=1"
+            COMPILE_OPTIONS "-Wno-sign-compare;-Wno-unused-parameter;-Wno-unused-function")
+    else()
+        # AirPlay 1 only: the RAOP receiver on its own port.
+        file(GLOB AK_AIRPLAY1_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/s3/airplay1/*.c")
+        list(APPEND AK_SRCS ${AK_AIRPLAY1_SRCS})
+    endif()
 endif()
 
 idf_component_register(

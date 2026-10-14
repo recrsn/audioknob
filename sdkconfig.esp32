@@ -3867,6 +3867,84 @@ CONFIG_CU_DIAGNOSTICS_COLOR_ALWAYS=y
 # end of CMake Utilities
 
 #
+# Audio Codec Configuration
+#
+
+#
+# Audio Decoder Configuration
+#
+# default:
+CONFIG_AUDIO_DECODER_AAC_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_MP3_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_G711_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_AMRNB_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_AMRWB_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_FLAC_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_OPUS_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_VORBIS_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_ADPCM_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_ALAC_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_PCM_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_SBC_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_LC3_SUPPORT=y
+# default:
+CONFIG_AUDIO_DECODER_G722_SUPPORT=y
+# end of Audio Decoder Configuration
+
+#
+# Audio Simple Decoder Configuration
+#
+# default:
+CONFIG_AUDIO_SIMPLE_DEC_WAV_SUPPORT=y
+# default:
+CONFIG_AUDIO_SIMPLE_DEC_M4A_SUPPORT=y
+# default:
+CONFIG_AUDIO_SIMPLE_DEC_TS_SUPPORT=y
+# default:
+CONFIG_AUDIO_SIMPLE_DEC_OGG_SUPPORT=y
+# end of Audio Simple Decoder Configuration
+
+#
+# Audio Encoder Configuration
+#
+# default:
+CONFIG_AUDIO_ENCODER_AAC_SUPPORT=y
+# default:
+CONFIG_AUDIO_ENCODER_G711_SUPPORT=y
+# default:
+CONFIG_AUDIO_ENCODER_AMRNB_SUPPORT=y
+# default:
+CONFIG_AUDIO_ENCODER_AMRWB_SUPPORT=y
+# default:
+CONFIG_AUDIO_ENCODER_OPUS_SUPPORT=y
+# default:
+CONFIG_AUDIO_ENCODER_ADPCM_SUPPORT=y
+# default:
+CONFIG_AUDIO_ENCODER_ALAC_SUPPORT=y
+# default:
+CONFIG_AUDIO_ENCODER_PCM_SUPPORT=y
+# default:
+CONFIG_AUDIO_ENCODER_SBC_SUPPORT=y
+# default:
+CONFIG_AUDIO_ENCODER_LC3_SUPPORT=y
+# default:
+CONFIG_AUDIO_ENCODER_G722_SUPPORT=y
+# end of Audio Encoder Configuration
+# end of Audio Codec Configuration
+
+#
 # ESP LCD TOUCH
 #
 # default:
@@ -3881,6 +3959,11 @@ CONFIG_ESP_LCD_TOUCH_MAX_BUTTONS=1
 # default:
 # CONFIG_ESP_LCD_TOUCH_CST816S_DISABLE_READ_ID is not set
 # end of ESP LCD TOUCH - CST816S
+
+#
+# libpng
+#
+# end of libpng
 
 #
 # mDNS

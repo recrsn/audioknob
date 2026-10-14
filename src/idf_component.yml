@@ -14,3 +14,8 @@ dependencies:
   espressif/esp_new_jpeg: "^1.0.2"
   # macOS Music sends AirPlay cover art as PNG.
   espressif/libpng: "^1.6.58~2"
+  # AirPlay 2's ALAC and AAC (buffered streams) decoders.
+  espressif/esp_audio_codec: "^2.6.2"
+  # AirPlay 2 pairing (Ed25519, X25519) and stream encryption
+  # (ChaCha20-Poly1305).
+  espressif/libsodium: "^1.0.22~1"
