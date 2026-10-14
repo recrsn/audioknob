@@ -364,6 +364,12 @@ static void handle_set_parameter(raop_ctx_t *ctx, const key_data_t *headers, con
     const char *ctype = kd_lookup(headers, "Content-Type");
     const char *p;
 
+    // Senders mark a track without art as image/none, usually with no body.
+    if (ctype && !strcasecmp(ctype, "image/none")) {
+        raop_event_t event = {.type = RAOP_EVENT_ARTWORK};
+        ctx->event_cb(&event);
+        return;
+    }
     if (!body) {
         return;
     }
@@ -378,7 +384,8 @@ static void handle_set_parameter(raop_ctx_t *ctx, const key_data_t *headers, con
             };
             ctx->event_cb(&event);
         }
-    } else if (ctype && !strcasecmp(ctype, "image/jpeg")) {
+    } else if (ctype && !strncasecmp(ctype, "image/", 6)) {
+        // JPEG from iOS, often PNG from macOS Music; the decoder sniffs which.
         raop_event_t event = {.type = RAOP_EVENT_ARTWORK, .artwork = {.data = (const uint8_t *)body, .len = len}};
         ctx->event_cb(&event);
     } else if ((p = strcasestr(body, "volume:"))) {
@@ -534,7 +541,7 @@ raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], raop_event_cb_t 
 
     // Advertised capabilities: ALAC only (no raw PCM decoder here) at
     // 44.1k/16/stereo over UDP, RSA-encrypted or clear, text metadata and
-    // JPEG artwork (no progress).
+    // JPEG/PNG artwork (no progress).
     const mdns_txt_item_t txt[] = {
         {"txtvers", "1"}, {"am", "AudioKnob"}, {"tp", "UDP"},  {"sm", "false"}, {"sv", "false"},
         {"ek", "1"},      {"et", "0,1"},       {"md", "0,1"},    {"cn", "1"},   {"ch", "2"},

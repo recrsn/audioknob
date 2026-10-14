@@ -23,7 +23,7 @@ typedef enum {
     RAOP_EVENT_STALLED,        // no RTP traffic for 30 s
     RAOP_EVENT_VOLUME,
     RAOP_EVENT_METADATA,
-    RAOP_EVENT_ARTWORK,        // JPEG cover art for the current track
+    RAOP_EVENT_ARTWORK,        // JPEG/PNG cover art for the current track; len 0 = none
 } raop_event_type_t;
 
 typedef struct {

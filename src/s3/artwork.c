@@ -1,9 +1,12 @@
 #include "artwork.h"
 
+#include <string.h>
+
 #include <stdatomic.h>
 #include <stdlib.h>
 
 #include "esp_heap_caps.h"
+#include "artwork_png.h"
 #include "esp_jpeg_dec.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -115,26 +118,40 @@ artwork_slot_t *artwork_slot_create(void) {
     return slot;
 }
 
-bool artwork_slot_set(artwork_slot_t *slot, const uint8_t *jpeg, size_t len) {
-    if (!len) {
-        artwork_slot_clear(slot);
-        return true;
-    }
+static bool is_png(const uint8_t *data, size_t len) {
+    static const uint8_t sig[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'};
+    return len >= sizeof(sig) && memcmp(data, sig, sizeof(sig)) == 0;
+}
 
+static bool decode_jpeg(const uint8_t *jpeg, size_t len, uint16_t *out) {
     int w, h;
     uint16_t *pixels = decode_scaled(jpeg, len, &w, &h);
     if (!pixels) {
         return false;
     }
-    int back = !slot->front;
-    resample(pixels, w, h, slot->buf[back]);
+    resample(pixels, w, h, out);
     heap_caps_free(pixels);
+    ESP_LOGI(TAG, "decoded %dx%d from %u bytes", w, h, (unsigned)len);
+    return true;
+}
+
+bool artwork_slot_set(artwork_slot_t *slot, const uint8_t *image, size_t len) {
+    if (!len) {
+        artwork_slot_clear(slot);
+        return true;
+    }
+
+    int back = !slot->front;
+    bool ok = is_png(image, len) ? artwork_png_decode(image, len, slot->buf[back])
+                                 : decode_jpeg(image, len, slot->buf[back]);
+    if (!ok) {
+        return false;
+    }
 
     xSemaphoreTake(slot->lock, portMAX_DELAY);
     slot->front = back;
     slot->version = atomic_fetch_add(&s_next_version, 1);
     xSemaphoreGive(slot->lock);
-    ESP_LOGI(TAG, "decoded %dx%d from %u bytes", w, h, (unsigned)len);
     return true;
 }
 

@@ -3811,6 +3811,13 @@ CONFIG_ESP_LCD_TOUCH_MAX_BUTTONS=1
 # end of ESP LCD TOUCH - CST816S
 
 #
+# libpng
+#
+# default:
+CONFIG_LIBPNG_PREFER_PSRAM=y
+# end of libpng
+
+#
 # mDNS
 #
 # default:
