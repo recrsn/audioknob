@@ -6,6 +6,7 @@
 #include "airplay_player.h"
 #include "artwork.h"
 #include "audio_source.h"
+#include "device_name.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -19,12 +20,11 @@
 #define CTRL_PAUSE BIT3
 #define CTRL_NEXT BIT4
 #define CTRL_PREV BIT5
+#define CTRL_RENAME BIT6
 
 // mbedtls key parsing in raop_create() plus blocking DACP HTTP.
 #define CTRL_STACK_SIZE 6144
 #define CTRL_TASK_PRIO 3
-
-#define MDNS_HOSTNAME "audioknob"
 
 static const char *TAG = "airplay";
 
@@ -118,12 +118,22 @@ static bool on_raop_event(const raop_event_t *event) {
     return true;
 }
 
+// Hostname and default instance name follow the device name, so the
+// settings page is at http://<hostname>.local/.
+static void advertise_name(char name[DEVICE_NAME_MAX + 1]) {
+    char hostname[64];
+    device_name_get(name, DEVICE_NAME_MAX + 1);
+    device_name_hostname(hostname, sizeof(hostname));
+    mdns_hostname_set(hostname);
+    mdns_instance_name_set(name);
+}
+
 static void start_receiver(void) {
     ESP_ERROR_CHECK(mdns_init());
-    mdns_hostname_set(MDNS_HOSTNAME);
-    mdns_instance_name_set(CONFIG_AK_AIRPLAY_NAME);
+    char name[DEVICE_NAME_MAX + 1];
+    advertise_name(name);
 
-    s_raop = raop_create(CONFIG_AK_AIRPLAY_NAME, s_mac, on_raop_event, airplay_player_push);
+    s_raop = raop_create(name, s_mac, on_raop_event, airplay_player_push);
     if (!s_raop) {
         ESP_LOGE(TAG, "AirPlay receiver failed to start");
     }
@@ -140,6 +150,12 @@ static void ctrl_task(void *arg) {
         }
         if (!s_raop) {
             continue;
+        }
+
+        if (bits & CTRL_RENAME) {
+            char name[DEVICE_NAME_MAX + 1];
+            advertise_name(name);
+            raop_set_name(s_raop, name);
         }
 
         if ((bits & CTRL_PAUSE) && !raop_remote_command(s_raop, "pause")) {
@@ -205,6 +221,10 @@ void airplay_adjust_volume(int steps) {
     set_volume((uint8_t)volume);
     s_pending_volume = (uint8_t)volume;
     xTaskNotify(s_ctrl_task, CTRL_VOLUME, eSetBits);
+}
+
+void airplay_rename(void) {
+    xTaskNotify(s_ctrl_task, CTRL_RENAME, eSetBits);
 }
 
 void airplay_toggle_play_pause(void) {

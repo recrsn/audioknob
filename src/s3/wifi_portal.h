@@ -5,9 +5,10 @@
 #include <stdint.h>
 
 // Captive portal for first-time WiFi setup: a DNS server that resolves every
-// name to the setup AP, and an HTTP server whose setup page lists nearby
-// networks and takes a password. Phones probing for captive portals get
-// redirected to that page, so it opens by itself after joining the AP.
+// name to the setup AP, and an HTTP server whose setup page takes the device
+// name and lists nearby networks to pick from. Phones probing for captive
+// portals get redirected to that page, so it opens by itself after joining
+// the AP.
 // Knows nothing about WiFi state -- everything goes through ops.
 
 typedef struct {

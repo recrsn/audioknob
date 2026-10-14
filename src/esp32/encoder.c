@@ -2,7 +2,6 @@
 
 #include <stdbool.h>
 
-#include "app_state.h"
 #include "avrcp_controller.h"
 #include "avrcp_target.h"
 #include "driver/gpio.h"
@@ -71,13 +70,7 @@ static void encoder_task(void *arg) {
         int steps = accum / ENC_COUNTS_PER_STEP;
         if (steps != 0) {
             accum -= steps * ENC_COUNTS_PER_STEP;
-            int volume = (int)app_state_get().volume + steps;
-            if (volume < 0) {
-                volume = 0;
-            } else if (volume > 100) {
-                volume = 100;
-            }
-            avrcp_target_set_local_volume((uint8_t)volume);
+            avrcp_target_step_volume(steps);
         }
 
         bool pressed_now = gpio_get_level(ENC_A_GPIO) == 0 && gpio_get_level(ENC_B_GPIO) == 0;

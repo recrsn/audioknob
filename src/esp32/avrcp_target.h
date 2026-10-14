@@ -16,3 +16,6 @@ void avrcp_target_bt_event(esp_avrc_tg_cb_event_t event, esp_avrc_tg_cb_param_t 
 // Called by the encoder when the knob changes volume locally (0-100).
 // Updates app_state and notifies the connected controller, if any.
 void avrcp_target_set_local_volume(uint8_t volume_pct);
+
+// Moves the local volume by steps percent, clamped to 0-100.
+void avrcp_target_step_volume(int steps);

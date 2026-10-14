@@ -15,6 +15,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "nvs.h"
+#include "device_name.h"
 #include "nvs_flash.h"
 #include "wifi_portal.h"
 
@@ -22,7 +23,6 @@
 #define NVS_KEY_SSID "ssid"
 #define NVS_KEY_PASSWORD "password"
 
-#define SETUP_AP_PREFIX "AudioKnob-"
 #define SETUP_AP_PASSWORD_LEN 8
 #define SETUP_AP_MAX_CLIENTS 4
 
@@ -41,6 +41,7 @@
 static const char *TAG = "wifi";
 
 static wifi_got_ip_cb_t s_on_got_ip;
+static esp_netif_t *s_sta_netif;
 static SemaphoreHandle_t s_lock;
 static TaskHandle_t s_setup_task;
 
@@ -227,19 +228,32 @@ static const wifi_portal_ops_t s_portal_ops = {
 
 // --- Setup mode ------------------------------------------------------------
 
+// WIFI: join codes backslash-escape \ ; , : and ".
+static void qr_escape(const char *in, char *out, size_t len) {
+    size_t n = 0;
+    for (; *in && n + 2 < len; in++) {
+        if (strchr("\\;,:\"", *in)) {
+            out[n++] = '\\';
+        }
+        out[n++] = *in;
+    }
+    out[n] = '\0';
+}
+
+// The hotspot is named after the device (an SSID holds DEVICE_NAME_MAX
+// bytes), so the network to join matches what the screen shows.
 static void make_setup_credentials(void) {
     static const char alphabet[] = "abcdefghjkmnpqrstuvwxyz23456789";  // no 0/o, 1/l/i
-    uint8_t mac[6];
-    esp_wifi_get_mac(WIFI_IF_AP, mac);
+    char ssid_escaped[2 * DEVICE_NAME_MAX + 1];
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    snprintf(s_setup.ap_ssid, sizeof(s_setup.ap_ssid), SETUP_AP_PREFIX "%02X%02X", mac[4], mac[5]);
+    device_name_get(s_setup.ap_ssid, sizeof(s_setup.ap_ssid));
     for (int i = 0; i < SETUP_AP_PASSWORD_LEN; i++) {
         s_setup.ap_password[i] = alphabet[esp_random() % (sizeof(alphabet) - 1)];
     }
     s_setup.ap_password[SETUP_AP_PASSWORD_LEN] = '\0';
-    // Both fields are alphanumeric/'-', so no WIFI: escaping is needed.
-    snprintf(s_setup.qr_payload, sizeof(s_setup.qr_payload), "WIFI:T:WPA;S:%s;P:%s;;", s_setup.ap_ssid,
+    qr_escape(s_setup.ap_ssid, ssid_escaped, sizeof(ssid_escaped));
+    snprintf(s_setup.qr_payload, sizeof(s_setup.qr_payload), "WIFI:T:WPA;S:%s;P:%s;;", ssid_escaped,
              s_setup.ap_password);
     xSemaphoreGive(s_lock);
 }
@@ -392,7 +406,7 @@ void wifi_start(wifi_got_ip_cb_t on_got_ip) {
     nvs_init();
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    s_sta_netif = esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t init_cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&init_cfg));
@@ -417,6 +431,29 @@ void wifi_start(wifi_got_ip_cb_t on_got_ip) {
     } else {
         xTaskNotifyGive(s_setup_task);
     }
+}
+
+bool wifi_get_station(char *ssid, size_t ssid_len, char *ip, size_t ip_len) {
+    wifi_ap_record_t ap;
+    esp_netif_ip_info_t info;
+    if (s_setup_mode || !s_sta_netif || esp_wifi_sta_get_ap_info(&ap) != ESP_OK ||
+        esp_netif_get_ip_info(s_sta_netif, &info) != ESP_OK || !info.ip.addr) {
+        return false;
+    }
+    snprintf(ssid, ssid_len, "%s", (const char *)ap.ssid);
+    esp_ip4addr_ntoa(&info.ip, ip, ip_len);
+    return true;
+}
+
+void wifi_forget(void) {
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_erase_all(nvs);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+    ESP_LOGI(TAG, "credentials erased; restarting into setup");
+    esp_restart();
 }
 
 bool wifi_get_setup_info(wifi_setup_info_t *out) {

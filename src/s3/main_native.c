@@ -1,9 +1,15 @@
 // Desktop entry point for the LVGL native emulator target (env:native).
 // Mirrors main.c's role on real hardware, but drives an SDL window instead
 // of the QSPI LCD, so the UI in ui.c can be iterated on without flashing.
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
+#include <unistd.h>
 
+#include "lights.h"
 #include "lvgl.h"
+#include "tz.h"
 #include "ui.h"
 
 #define WINDOW_WIDTH  360
@@ -17,19 +23,99 @@ static void clock_tick_cb(lv_timer_t *timer) {
     ui_update_clock(true, &local_time);
 }
 
-// Stands in for the hardware knob: Up/Down arrows turn it and Enter presses
-// it; the mouse wheel (turn + middle-click) works too. Everything lands here
-// through one focused, invisible object.
+// Settings live in memory only. "Automatic" timezone means the host's own
+// zone, read from /etc/localtime, since there's no IP lookup here.
+static ui_settings_t s_settings = {
+    .brightness = 80,
+    .clock_24h = true,
+    .haptics = true,
+    .tz_auto = true,
+    .device_name = "AudioKnob-K7MXQ2PA",
+    .hostname = "audioknob-k7mxq2pa",
+    .wifi_ssid = "Sample",
+    .ip = "192.168.1.50",
+    .version = "native",
+};
+
+static void host_zone(char *out, size_t len) {
+    char link[256];
+    ssize_t n = readlink("/etc/localtime", link, sizeof(link) - 1);
+    out[0] = '\0';
+    if (n > 0) {
+        link[n] = '\0';
+        const char *zone = strstr(link, "zoneinfo/");
+        snprintf(out, len, "%s", zone ? zone + strlen("zoneinfo/") : "");
+    }
+}
+
+static void on_setting(ui_setting_t setting, int value, const char *zone) {
+    switch (setting) {
+    case UI_SETTING_BRIGHTNESS:
+        s_settings.brightness = (uint8_t)value;
+        break;
+    case UI_SETTING_CLOCK_24H:
+        s_settings.clock_24h = value;
+        break;
+    case UI_SETTING_FAHRENHEIT:
+        s_settings.fahrenheit = value;
+        break;
+    case UI_SETTING_HAPTICS:
+        s_settings.haptics = value;
+        break;
+    case UI_SETTING_TIMEZONE:
+        s_settings.tz_auto = zone == NULL;
+        if (zone && tz_apply(zone)) {
+            snprintf(s_settings.tz_name, sizeof(s_settings.tz_name), "%s", zone);
+        } else {
+            unsetenv("TZ");
+            tzset();
+            host_zone(s_settings.tz_name, sizeof(s_settings.tz_name));
+        }
+        break;
+    case UI_SETTING_FORGET_WIFI:
+        printf("settings: forget WiFi (no-op on native)\n");
+        break;
+    }
+    ui_update_settings(&s_settings);
+}
+
+// Fixed sample so the Weather page can be laid out without a network; the
+// place name says so.
+static void show_sample_weather(void) {
+    ui_weather_t w = {
+        .valid = true,
+        .place = "Sample data",
+        .temp_c = 27.4f,
+        .high_c = 31.0f,
+        .low_c = 21.2f,
+        .code = 2,
+        .is_day = true,
+        .hours = {{15, 28.1f, 2, true}, {16, 27.0f, 80, true}, {17, 25.6f, 95, true}, {18, 24.2f, 3, false}},
+    };
+    ui_update_weather(&w);
+}
+
+// Stands in for the hardware knob: Up/Down arrows turn it, Enter presses it
+// and holding Enter (or Esc) long-presses it; the mouse wheel (turn +
+// middle-click) works too. Everything lands here through one focused,
+// invisible object.
 static void knob_key_cb(lv_event_t *e) {
-    if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_SHORT_CLICKED) {
         ui_knob_press();
+        return;
+    }
+    if (code == LV_EVENT_LONG_PRESSED) {
+        ui_knob_long_press();
         return;
     }
     // In edit mode the wheel's turns arrive as LEFT/RIGHT; on the keyboard
     // those stay unmapped.
     bool wheel = lv_indev_get_type(lv_indev_active()) == LV_INDEV_TYPE_ENCODER;
     uint32_t key = lv_event_get_key(e);
-    if (key == LV_KEY_UP || (wheel && key == LV_KEY_RIGHT)) {
+    if (key == LV_KEY_ESC) {
+        ui_knob_long_press();
+    } else if (key == LV_KEY_UP || (wheel && key == LV_KEY_RIGHT)) {
         ui_knob_rotate(1);
     } else if (key == LV_KEY_DOWN || (wheel && key == LV_KEY_LEFT)) {
         ui_knob_rotate(-1);
@@ -42,7 +128,8 @@ static void knob_emulation_create(void) {
     lv_obj_remove_style_all(sink);
     lv_obj_set_size(sink, 0, 0);
     lv_obj_add_event_cb(sink, knob_key_cb, LV_EVENT_KEY, NULL);
-    lv_obj_add_event_cb(sink, knob_key_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(sink, knob_key_cb, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(sink, knob_key_cb, LV_EVENT_LONG_PRESSED, NULL);
     lv_group_add_obj(group, sink);
     // Edit mode makes encoder turns arrive as LEFT/RIGHT keys instead of
     // moving focus.
@@ -59,6 +146,11 @@ int main(void) {
     lv_sdl_mouse_create();
 
     ui_init();
+    host_zone(s_settings.tz_name, sizeof(s_settings.tz_name));
+    ui_update_settings(&s_settings);
+    ui_set_settings_handler(on_setting);
+    lights_ui_start();
+    show_sample_weather();
     knob_emulation_create();
     lv_timer_create(clock_tick_cb, 1000, NULL);
 

@@ -4,13 +4,18 @@
 #include "airplay.h"
 #include "audio_out.h"
 #include "audio_source.h"
+#include "device_name.h"
 #include "esp_log.h"
 #include "haptic.h"
 #include "knob.h"
 #include "lcd_driver.h"
+#include "lights.h"
 #include "lvgl.h"
 #include "ntp.h"
+#include "online.h"
+#include "settings_ui.h"
 #include "uart_link.h"
+#include "web_settings.h"
 #include "ui.h"
 #include "wifi.h"
 
@@ -77,20 +82,41 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
         ui_update_wireless(&state, &track);
     }
 
+    static uint32_t weather_version;
+    ui_weather_t weather;
+    uint32_t v = online_get_weather(&weather);
+    if (v != weather_version) {
+        weather_version = v;
+        ui_update_weather(&weather);
+    }
+
     time_t now = time(NULL);
     struct tm local_time;
     localtime_r(&now, &local_time);
     ui_update_clock(ntp_is_synced(), &local_time);
 }
 
-// The timer/stopwatch screens claim the knob first; otherwise it drives
-// AirPlay when that's in front. Runs on the knob task, hence the lock.
+// The app pages (lights, timers, settings) claim the knob first; otherwise
+// it drives the volume of whichever source is in front. Runs on the knob
+// task, hence the lock.
 static void on_knob_rotate(int steps) {
     lcd_driver_lvgl_lock();
     bool used = ui_knob_rotate(steps);
     lcd_driver_lvgl_unlock();
-    if (!used && airplay_in_front()) {
+    if (used) {
+        return;
+    }
+    if (airplay_in_front()) {
         airplay_adjust_volume(steps);
+        return;
+    }
+    wireless_state_t esp32;
+    if (uart_link_get_latest(&esp32) && esp32.connected) {
+        // A detent at a time, so Bluetooth moves 1% per step just like AirPlay.
+        protocol_cmd_t cmd = steps > 0 ? CMD_VOLUME_UP : CMD_VOLUME_DOWN;
+        for (int i = steps > 0 ? steps : -steps; i > 0; i--) {
+            uart_link_send_command(cmd);
+        }
     }
 }
 
@@ -101,6 +127,13 @@ static void on_knob_press(void) {
     if (!used && airplay_in_front()) {
         airplay_toggle_play_pause();
     }
+}
+
+// Always the UI's: it opens the launcher, or goes home from it.
+static void on_knob_long_press(void) {
+    lcd_driver_lvgl_lock();
+    ui_knob_long_press();
+    lcd_driver_lvgl_unlock();
 }
 
 static void on_transport(ui_transport_t button) {
@@ -124,12 +157,24 @@ static void on_transport(ui_transport_t button) {
     uart_link_send_command(cmds[button]);
 }
 
-static void on_timer_alert(bool ringing) {
-    if (ringing) {
+static void on_alert(bool ringing) {
+    if (ringing && settings_ui_haptics()) {
         haptic_alarm_start();
     } else {
         haptic_alarm_stop();
     }
+}
+
+static void on_network_up(const uint8_t mac[6]) {
+    airplay_network_up(mac);
+    online_network_up();
+    web_settings_start();
+}
+
+// Runs at init and on the web server's task after a rename.
+static void on_device_name(const char *name) {
+    uart_link_set_device_name(name);
+    airplay_rename();
 }
 
 static void on_source_pick(ui_source_t source) {
@@ -156,16 +201,21 @@ void app_main(void) {
 
     lcd_driver_init();
     haptic_init(lcd_driver_i2c_bus());
+    online_start();
+    settings_ui_init();
+    device_name_init(on_device_name);
     lcd_driver_lvgl_lock();
     ui_init();
     ui_set_transport_handler(on_transport);
     ui_set_source_handler(on_source_pick);
-    ui_set_timer_alert_handler(on_timer_alert);
+    ui_set_alert_handler(on_alert);
+    settings_ui_start();
+    lights_ui_start();
     lv_timer_create(state_poll_timer_cb, 33, NULL);
     lcd_driver_lvgl_unlock();
 
-    knob_start(on_knob_rotate, on_knob_press);
+    knob_start(on_knob_rotate, on_knob_press, on_knob_long_press);
 
-    wifi_start(airplay_network_up);
+    wifi_start(on_network_up);
     ntp_start();
 }

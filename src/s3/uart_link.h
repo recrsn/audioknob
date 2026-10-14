@@ -29,3 +29,7 @@ const uint16_t *uart_link_get_artwork(uint32_t *version);
 // Sends a MSG_COMMAND frame to the ESP32. Fire-and-forget: there is no
 // ACK; the effect shows up in the next STATE_UPDATE. Safe from any task.
 void uart_link_send_command(protocol_cmd_t cmd);
+
+// Sends the Bluetooth device name now, and again whenever the ESP32
+// reappears on the link after a reset. Safe from any task.
+void uart_link_set_device_name(const char *name);

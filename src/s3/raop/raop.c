@@ -496,6 +496,12 @@ static void rtsp_thread(void *arg) {
     }
 }
 
+// AirPlay 1 instance names are "<MAC>@<speaker name>".
+static void instance_name(const raop_ctx_t *ctx, const char *name, char *out, size_t len) {
+    const uint8_t *mac = ctx->mac;
+    snprintf(out, len, "%02X%02X%02X%02X%02X%02X@%s", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], name);
+}
+
 raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], raop_event_cb_t event_cb, raop_pcm_cb_t pcm_cb) {
     raop_ctx_t *ctx = calloc(1, sizeof(raop_ctx_t));
     if (!ctx) {
@@ -535,8 +541,7 @@ raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], raop_event_cb_t 
         {"ss", "16"},     {"sr", "44100"},     {"vn", "3"},
     };
     char instance[96];
-    snprintf(instance, sizeof(instance), "%02X%02X%02X%02X%02X%02X@%s", mac[0], mac[1], mac[2], mac[3], mac[4],
-             mac[5], name);
+    instance_name(ctx, name, instance, sizeof(instance));
     if (mdns_service_add(instance, "_raop", "_tcp", RTSP_PORT, (mdns_txt_item_t *)txt, sizeof(txt) / sizeof(txt[0])) !=
         ESP_OK) {
         ESP_LOGE(TAG, "cannot register mDNS service");
@@ -620,4 +625,14 @@ bool raop_remote_volume(raop_ctx_t *ctx, float volume) {
     float db = volume > 0.0f ? (volume - 1.0f) * 30.0f : -144.0f;
     snprintf(command, sizeof(command), "setproperty?dmcp.device-volume=%0.4f", db);
     return raop_remote_command(ctx, command);
+}
+
+void raop_set_name(raop_ctx_t *ctx, const char *name) {
+    char instance[96];
+    instance_name(ctx, name, instance, sizeof(instance));
+    if (mdns_service_instance_name_set("_raop", "_tcp", instance) != ESP_OK) {
+        ESP_LOGW(TAG, "cannot rename mDNS service");
+        return;
+    }
+    ESP_LOGI(TAG, "AirPlay receiver renamed \"%s\"", name);
 }

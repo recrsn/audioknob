@@ -21,6 +21,10 @@ set(AK_REQUIRES
     esp_netif
     esp_event
     esp_http_server
+    # Weather and IP geolocation over HTTPS (online.c), app version for About.
+    esp_http_client
+    json
+    esp_app_format
     lwip
     mbedtls
     mdns

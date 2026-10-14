@@ -59,6 +59,9 @@ typedef struct raop_ctx_s raop_ctx_t;
 // lives for the life of the firmware.
 raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], raop_event_cb_t event_cb, raop_pcm_cb_t pcm_cb);
 
+// Re-advertises under a new name; a session in progress is unaffected.
+void raop_set_name(raop_ctx_t *ctx, const char *name);
+
 // Drops the current session (if any) within ~100 ms. Safe from any task,
 // including from inside the event callback.
 void raop_abort(raop_ctx_t *ctx);

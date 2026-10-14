@@ -1,11 +1,15 @@
 #include "bt_gap.h"
 
+#include <stdio.h>
+#include <string.h>
+
 #include "esp_bt.h"
 #include "esp_bt_device.h"
 #include "esp_bt_main.h"
 #include "esp_gap_bt_api.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "protocol.h"
 
 static const char *TAG = "bt_gap";
 
@@ -76,4 +80,15 @@ void bt_gap_set_discoverable(bool discoverable) {
     } else {
         esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
     }
+}
+
+void bt_gap_set_name(const char *name) {
+    static char s_name[DEVICE_NAME_MAX + 1];
+    // The S3 resends on every link resync; only log real changes.
+    if (!strcmp(s_name, name)) {
+        return;
+    }
+    snprintf(s_name, sizeof(s_name), "%s", name);
+    esp_bt_gap_set_device_name(s_name);
+    ESP_LOGI(TAG, "device name \"%s\"", s_name);
 }

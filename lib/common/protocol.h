@@ -15,10 +15,17 @@ typedef enum {
     MSG_STATE_UPDATE = 0x01,
     // 0x02 was MSG_NTP_SYNC, retired when NTP moved to the S3's own WiFi.
     MSG_TRACK_INFO = 0x03,
-    MSG_COMMAND = 0x04,  // S3 -> ESP32; every other type flows ESP32 -> S3
+    MSG_COMMAND = 0x04,  // S3 -> ESP32
     MSG_ART_CHUNK = 0x05,
     MSG_ART_END = 0x06,
+    MSG_DEVICE_NAME = 0x07,  // S3 -> ESP32; every other type flows ESP32 -> S3
 } protocol_msg_type_t;
+
+// MSG_DEVICE_NAME's payload is the name's UTF-8 bytes, no NUL, 1 to
+// DEVICE_NAME_MAX of them. The S3 owns the name (it's also the AirPlay name
+// and setup hotspot SSID); the ESP32 advertises it over Bluetooth. Sent on
+// every change and whenever the ESP32 reappears on the link.
+#define DEVICE_NAME_MAX 32
 
 typedef enum {
     SOURCE_AIRPLAY = 0,
@@ -51,6 +58,9 @@ typedef enum {
     CMD_PLAY_PAUSE = 0x02,
     CMD_NEXT = 0x03,
     CMD_PREV = 0x04,
+    // One S3 knob detent of Bluetooth volume, while A2DP is in front.
+    CMD_VOLUME_UP = 0x05,
+    CMD_VOLUME_DOWN = 0x06,
 } protocol_cmd_t;
 
 typedef struct __attribute__((packed)) {

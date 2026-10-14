@@ -1,5 +1,6 @@
 #include "uart_link.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "driver/uart.h"
@@ -25,6 +26,9 @@
 #define ART_BUF_SIZE (128 * 1024)
 // The JPEG decode runs on this task when an image completes.
 #define RX_TASK_STACK 6144
+// The ESP32 resyncs state every ~1s, so a longer silence means it reset
+// (or wasn't up yet) and has lost the device name.
+#define PEER_LOST_MS 3000
 
 static const char *TAG = "uart_link";
 
@@ -33,6 +37,8 @@ static wireless_state_t s_latest_state;
 static bool s_has_state;
 static track_info_t s_latest_track;
 static bool s_has_track;
+static char s_device_name[DEVICE_NAME_MAX + 1];
+static TickType_t s_last_state_tick;
 
 // Bluetooth cover art being received, in PSRAM. Only the RX task touches it.
 static artwork_slot_t *s_art;
@@ -74,12 +80,35 @@ static void handle_art_end(const art_end_t *end) {
     s_art_valid = false;
 }
 
+static void send_frame(uint8_t type, const void *payload, uint8_t len) {
+    uint8_t frame[PROTOCOL_MAX_FRAME];
+    size_t frame_len = protocol_encode(type, payload, len, frame);
+    // The driver's TX ring serialises concurrent callers.
+    uart_write_bytes(UART_PORT, frame, frame_len);
+}
+
+static void send_device_name(void) {
+    char name[DEVICE_NAME_MAX + 1];
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    memcpy(name, s_device_name, sizeof(name));
+    xSemaphoreGive(s_state_mutex);
+    if (name[0]) {
+        send_frame(MSG_DEVICE_NAME, name, strlen(name));
+    }
+}
+
 static void handle_frame(uint8_t type, const uint8_t *payload, uint8_t len) {
     if (type == MSG_STATE_UPDATE && len == sizeof(wireless_state_t)) {
+        TickType_t now = xTaskGetTickCount();
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         memcpy(&s_latest_state, payload, sizeof(s_latest_state));
+        bool peer_back = !s_has_state || now - s_last_state_tick > pdMS_TO_TICKS(PEER_LOST_MS);
         s_has_state = true;
+        s_last_state_tick = now;
         xSemaphoreGive(s_state_mutex);
+        if (peer_back) {
+            send_device_name();
+        }
         return;
     }
 
@@ -193,8 +222,12 @@ const uint16_t *uart_link_get_artwork(uint32_t *version) {
 
 void uart_link_send_command(protocol_cmd_t cmd) {
     command_t command = {.cmd = cmd};
-    uint8_t frame[PROTOCOL_MAX_FRAME];
-    size_t len = protocol_encode(MSG_COMMAND, &command, sizeof(command), frame);
-    // The driver's TX ring serialises concurrent callers.
-    uart_write_bytes(UART_PORT, frame, len);
+    send_frame(MSG_COMMAND, &command, sizeof(command));
+}
+
+void uart_link_set_device_name(const char *name) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    snprintf(s_device_name, sizeof(s_device_name), "%s", name);
+    xSemaphoreGive(s_state_mutex);
+    send_device_name();
 }

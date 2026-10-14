@@ -13,12 +13,6 @@ menu "AudioKnob"
         string "Fallback WiFi password (s3 target)"
         default ""
 
-    config AK_AIRPLAY_NAME
-        string "AirPlay speaker name"
-        default "AudioKnob"
-        help
-            Shown in the sender's AirPlay picker (e.g. iOS Control Center).
-
     config AK_LCD_PCLK_MHZ
         int "LCD QSPI clock (MHz, s3 target)"
         depends on IDF_TARGET_ESP32S3
@@ -33,5 +27,14 @@ menu "AudioKnob"
         depends on IDF_TARGET_ESP32S3
         range 5 100
         default 40
+
+    config AK_LVGL_PERF_LOG
+        bool "Benchmark LVGL rendering (s3 target)"
+        depends on IDF_TARGET_ESP32S3
+        default n
+        help
+            Redraws the whole active screen on every refresh and logs fps,
+            frame time and internal RAM headroom every 5 s. For measuring
+            rendering changes only: it keeps the CPU and display busy.
 
 endmenu

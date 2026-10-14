@@ -1,17 +1,16 @@
 #include "wifi_portal.h"
 
-#include <ctype.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "esp_heap_caps.h"
+#include "device_name.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
+#include "web_page.h"
 
 #define DNS_PORT 53
 #define DNS_MAX_PACKET 512
@@ -19,8 +18,7 @@
 #define DNS_TTL_S 60
 
 #define MAX_NETWORKS 20
-#define PAGE_SIZE 8192  // PSRAM: setup pages aren't speed-critical
-#define FORM_MAX 512
+#define FORM_MAX 1024
 
 static const char *TAG = "wifi_portal";
 
@@ -91,167 +89,96 @@ static void dns_task(void *arg) {
     }
 }
 
-// --- HTML helpers ----------------------------------------------------------
-
-typedef struct {
-    char *buf;
-    size_t len;
-} page_t;
-
-static void page_append(page_t *page, const char *fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    int n = vsnprintf(page->buf + page->len, PAGE_SIZE - page->len, fmt, args);
-    va_end(args);
-    if (n > 0) {
-        page->len += (size_t)n < PAGE_SIZE - page->len ? (size_t)n : PAGE_SIZE - page->len - 1;
-    }
-}
-
-// SSIDs are attacker-controlled (anyone can broadcast one), so escape them.
-static void page_append_escaped(page_t *page, const char *text) {
-    for (; *text && page->len < PAGE_SIZE - 8; text++) {
-        switch (*text) {
-        case '<': page_append(page, "&lt;"); break;
-        case '>': page_append(page, "&gt;"); break;
-        case '&': page_append(page, "&amp;"); break;
-        case '"': page_append(page, "&quot;"); break;
-        case '\'': page_append(page, "&#39;"); break;
-        default: page->buf[page->len++] = *text; page->buf[page->len] = '\0'; break;
-        }
-    }
-}
-
-static void page_begin(page_t *page, const char *head_extra) {
-    page_append(page,
-                "<!doctype html><html><head><meta charset=\"utf-8\">"
-                "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
-                "<title>AudioKnob setup</title>%s<style>"
-                "body{font-family:-apple-system,system-ui,sans-serif;background:#0b0b10;color:#eee;"
-                "max-width:420px;margin:0 auto;padding:24px 16px}"
-                "h1{font-size:22px;margin:0 0 16px}label{display:block;margin:14px 0 6px;color:#aaa}"
-                "select,input{width:100%%;box-sizing:border-box;padding:12px;font-size:16px;border-radius:10px;"
-                "border:1px solid #333;background:#16161e;color:#eee}"
-                "button{width:100%%;margin-top:20px;padding:14px;font-size:17px;border:0;border-radius:10px;"
-                "background:#4ea1ff;color:#fff}a{color:#4ea1ff}p{line-height:1.5}"
-                "</style></head><body>",
-                head_extra);
-}
-
-static esp_err_t page_send(httpd_req_t *req, page_t *page) {
-    page_append(page, "</body></html>");
-    httpd_resp_set_type(req, "text/html; charset=utf-8");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_send(req, page->buf, page->len);
-}
-
-// In-place application/x-www-form-urlencoded decode.
-static void url_decode(char *s) {
-    char *out = s;
-    for (; *s; s++) {
-        if (*s == '+') {
-            *out++ = ' ';
-        } else if (*s == '%' && isxdigit((unsigned char)s[1]) && isxdigit((unsigned char)s[2])) {
-            char hex[3] = {s[1], s[2], '\0'};
-            *out++ = (char)strtol(hex, NULL, 16);
-            s += 2;
-        } else {
-            *out++ = *s;
-        }
-    }
-    *out = '\0';
-}
-
 // --- Handlers --------------------------------------------------------------
+
+static void name_field(web_page_t *page) {
+    char name[DEVICE_NAME_MAX + 1];
+    device_name_get(name, sizeof(name));
+    web_page_append(page, "<label for=\"name\">Device name</label><input id=\"name\" name=\"name\" maxlength=\"%d\" "
+                          "required value=\"",
+                    DEVICE_NAME_MAX);
+    web_page_append_escaped(page, name);
+    web_page_append(page, "\"><p class=\"hint\">How it shows up in AirPlay and Bluetooth lists. "
+                          "You can change it later from Settings on the device.</p>");
+}
 
 static esp_err_t root_handler(httpd_req_t *req) {
     char query[32] = "";
     bool refresh = httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK && strstr(query, "rescan");
 
     wifi_network_t *networks = calloc(MAX_NETWORKS, sizeof(wifi_network_t));
-    page_t page = {.buf = heap_caps_malloc(PAGE_SIZE, MALLOC_CAP_SPIRAM)};
-    if (!networks || !page.buf) {
+    web_page_t page;
+    if (!networks || !web_page_begin(&page, "AudioKnob setup", "")) {
         free(networks);
-        free(page.buf);
         return httpd_resp_send_500(req);
     }
-    page.buf[0] = '\0';
     size_t count = s_ops->scan(networks, MAX_NETWORKS, refresh);
 
-    page_begin(&page, "");
-    page_append(&page, "<h1>Connect AudioKnob to WiFi</h1><form method=\"post\" action=\"/connect\">"
-                       "<label for=\"ssid\">Network</label><select id=\"ssid\" name=\"ssid\">");
+    web_page_append(&page, "<h1>Set up AudioKnob</h1><form method=\"post\" action=\"/connect\">");
+    name_field(&page);
+    web_page_append(&page, "<label for=\"ssid\">WiFi network</label><select id=\"ssid\" name=\"ssid\">");
     for (size_t i = 0; i < count; i++) {
-        page_append(&page, "<option value=\"");
-        page_append_escaped(&page, networks[i].ssid);
-        page_append(&page, "\">");
-        page_append_escaped(&page, networks[i].ssid);
-        page_append(&page, "%s</option>", networks[i].secure ? "" : " (open)");
+        web_page_append(&page, "<option value=\"");
+        web_page_append_escaped(&page, networks[i].ssid);
+        web_page_append(&page, "\">");
+        web_page_append_escaped(&page, networks[i].ssid);
+        web_page_append(&page, "%s</option>", networks[i].secure ? "" : " (open)");
     }
-    page_append(&page, "</select>"
-                       "<label for=\"other\">Or a hidden network</label>"
-                       "<input id=\"other\" name=\"other\" autocapitalize=\"none\" autocorrect=\"off\">"
-                       "<label for=\"password\">Password</label>"
-                       "<input id=\"password\" name=\"password\" type=\"password\">"
-                       "<button type=\"submit\">Connect</button></form>"
-                       "<p><a href=\"/?rescan=1\">Scan again</a></p>");
+    web_page_append(&page, "</select>"
+                           "<label for=\"other\">Or a hidden network</label>"
+                           "<input id=\"other\" name=\"other\" autocapitalize=\"none\" autocorrect=\"off\">"
+                           "<label for=\"password\">Password</label>"
+                           "<input id=\"password\" name=\"password\" type=\"password\">"
+                           "<button type=\"submit\">Connect</button></form>"
+                           "<p><a href=\"/?rescan=1\">Scan again</a></p>");
 
-    esp_err_t err = page_send(req, &page);
     free(networks);
-    free(page.buf);
-    return err;
+    return web_page_send(req, &page);
 }
 
 static esp_err_t connect_handler(httpd_req_t *req) {
     char form[FORM_MAX + 1];
-    int total = 0;
-    while (total < req->content_len && total < FORM_MAX) {
-        int n = httpd_req_recv(req, form + total, FORM_MAX - total);
-        if (n <= 0) {
-            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad form");
-        }
-        total += n;
+    if (!web_read_form(req, form, sizeof(form))) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad form");
     }
-    form[total] = '\0';
 
-    char ssid[33 * 3] = "", other[33 * 3] = "", password[65 * 3] = "";
-    httpd_query_key_value(form, "ssid", ssid, sizeof(ssid));
-    httpd_query_key_value(form, "other", other, sizeof(other));
-    httpd_query_key_value(form, "password", password, sizeof(password));
-    url_decode(ssid);
-    url_decode(other);
-    url_decode(password);
+    char name[DEVICE_NAME_MAX * 3 + 1], ssid[33 * 3], other[33 * 3], password[65 * 3];
+    web_form_value(form, "name", name, sizeof(name));
+    web_form_value(form, "ssid", ssid, sizeof(ssid));
+    web_form_value(form, "other", other, sizeof(other));
+    web_form_value(form, "password", password, sizeof(password));
 
     const char *chosen = other[0] ? other : ssid;
     if (!chosen[0] || strlen(chosen) > 32 || strlen(password) > 64) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid network name or password");
     }
+    // The setup hotspot keeps its SSID until the restart that follows a
+    // successful connection, which then advertises the new name.
+    if (name[0] && !device_name_set(name)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid device name");
+    }
     s_ops->submit(chosen, password);
-
-    httpd_resp_set_status(req, "303 See Other");
-    httpd_resp_set_hdr(req, "Location", "/status");
-    return httpd_resp_send(req, NULL, 0);
+    return web_redirect(req, "/status");
 }
 
 static esp_err_t status_handler(httpd_req_t *req) {
-    page_t page = {.buf = heap_caps_malloc(PAGE_SIZE, MALLOC_CAP_SPIRAM)};
-    if (!page.buf) {
+    web_page_t page;
+    if (!web_page_begin(&page, "AudioKnob setup", "<meta http-equiv=\"refresh\" content=\"2\">")) {
         return httpd_resp_send_500(req);
     }
-    page.buf[0] = '\0';
 
     char status[96];
     s_ops->status(status, sizeof(status));
 
-    page_begin(&page, "<meta http-equiv=\"refresh\" content=\"2\">");
-    page_append(&page, "<h1>AudioKnob</h1><p>");
-    page_append_escaped(&page, status);
-    page_append(&page, "</p><p>The device screen shows the same progress. Once it connects it restarts "
-                       "and this setup network goes away.</p><p><a href=\"/\">Back</a></p>");
-
-    esp_err_t err = page_send(req, &page);
-    free(page.buf);
-    return err;
+    char name[DEVICE_NAME_MAX + 1];
+    device_name_get(name, sizeof(name));
+    web_page_append(&page, "<h1>");
+    web_page_append_escaped(&page, name);
+    web_page_append(&page, "</h1><p>");
+    web_page_append_escaped(&page, status);
+    web_page_append(&page, "</p><p>The device screen shows the same progress. Once it connects it restarts "
+                           "and this setup network goes away.</p><p><a href=\"/\">Back</a></p>");
+    return web_page_send(req, &page);
 }
 
 // Everything else (including iOS/Android captive-portal probes) goes to the

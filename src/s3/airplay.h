@@ -27,6 +27,10 @@ void airplay_get_state(wireless_state_t *state, track_info_t *track);
 // sender has provided none. version changes whenever the bitmap does.
 const uint16_t *airplay_get_artwork(uint32_t *version);
 
+// Re-advertises under the current device_name_get(). Non-blocking; a no-op
+// until the network is up (the receiver then starts with the new name).
+void airplay_rename(void);
+
 // Local controls. Non-blocking: DACP requests go out on the control task.
 void airplay_adjust_volume(int steps);
 void airplay_toggle_play_pause(void);

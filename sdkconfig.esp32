@@ -780,8 +780,6 @@ CONFIG_PARTITION_TABLE_MD5=y
 CONFIG_AK_WIFI_SSID=""
 # default:
 CONFIG_AK_WIFI_PASSWORD=""
-# default:
-CONFIG_AK_AIRPLAY_NAME="AudioKnob"
 # end of AudioKnob
 
 #

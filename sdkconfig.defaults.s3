@@ -30,3 +30,13 @@ CONFIG_LWIP_UDP_RECVMBOX_SIZE=64
 # PSRAM. AirPlay's RSA handshake (once per session) and mDNS data don't.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 CONFIG_MDNS_MEMORY_ALLOC_SPIRAM=y
+
+# -Og left LVGL's software renderer ~1.5x slower; page swipes redraw the
+# whole screen every frame.
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+# The board's Boya flash does QIO; DIO halves code/rodata fetch bandwidth on
+# every cache miss.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+# 64-byte D-cache lines halve the misses when streaming PSRAM (full-screen
+# image blits: the wallpaper and page-swipe snapshots) at no RAM cost.
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y

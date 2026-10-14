@@ -49,18 +49,26 @@ typedef enum {
 // until a stream starts or the user swipes home.
 void ui_set_source_handler(void (*handler)(ui_source_t source));
 
-// Knob input for screens the UI owns outright (timer, stopwatch). Returns
-// false when the active screen has no use for it, leaving the caller to
-// apply it elsewhere (volume, play/pause). Call with the LVGL lock held.
+// Knob input for what the UI owns outright: the launcher and the app pages
+// (lights, timer, tomato, stopwatch, settings).
+// Returns false when the active screen has no use for it, leaving the caller
+// to apply it elsewhere (volume, play/pause). Call with the LVGL lock held.
 bool ui_knob_rotate(int steps);
 bool ui_knob_press(void);
+// Opens the app launcher, or closes it to the clock; never falls through.
+void ui_knob_long_press(void);
 
-// Called on the LVGL task when the timer starts ringing (true) and when the
-// alert is dismissed (false), so hardware can add a buzz; must not block.
-void ui_set_timer_alert_handler(void (*handler)(bool ringing));
+// Called on the LVGL task when a countdown (timer, tomato) starts ringing
+// (true) and once nothing rings any more (false), so hardware can add a
+// buzz; must not block.
+void ui_set_alert_handler(void (*handler)(bool ringing));
 
+#ifdef AK_USB_AUDIO
 // Pushes USB UAC2 volume/mute/playback state into the USB now-playing screen.
+// USB audio isn't implemented, so the screen is compiled out without
+// AK_USB_AUDIO.
 void ui_update_usb(uint8_t volume, bool muted, bool playing);
+#endif
 
 // Pushes the current local time into the idle screen. local_time is ignored
 // (the screen shows its unsynced placeholder) unless synced is true --
@@ -72,3 +80,81 @@ void ui_update_clock(bool synced, const struct tm *local_time);
 // screen that idle/back navigation returns to. Cheap to call every poll:
 // the QR is only regenerated when qr_payload changes.
 void ui_show_wifi_setup(const char *qr_payload, const char *ssid, const char *password, const char *status);
+
+#define UI_WEATHER_HOURS 4
+
+// Temperatures are Celsius; the UI converts per the units setting. Codes are
+// WMO weather interpretation codes, as Open-Meteo reports them.
+typedef struct {
+    bool valid; // false: nothing to show yet, `status` says why
+    char status[48];
+    char place[32];
+    float temp_c;
+    float high_c;
+    float low_c;
+    uint8_t code;
+    bool is_day;
+    struct {
+        uint8_t hour; // local, 0-23
+        float temp_c;
+        uint8_t code;
+        bool is_day;
+    } hours[UI_WEATHER_HOURS];
+} ui_weather_t;
+
+// Pushes the weather page's data; call when it changes, not every poll.
+void ui_update_weather(const ui_weather_t *weather);
+
+#define UI_LIGHTS_MAX 6
+
+typedef struct {
+    char name[24];
+    bool reachable;
+    bool on;
+    uint8_t brightness; // 1-100 %
+} ui_light_t;
+
+// Pushes every light's state; cheap to call every poll (ignored unless
+// something changed).
+void ui_update_lights(const ui_light_t *lights, int count);
+
+typedef struct {
+    void (*set_power)(int index, bool on);
+    void (*set_brightness)(int index, uint8_t pct);
+} ui_lights_handler_t;
+
+// Called on the LVGL task when the user changes a light; must not block.
+// The change shows once a ui_update_lights() reflects it.
+void ui_set_lights_handler(const ui_lights_handler_t *handler);
+
+typedef struct {
+    uint8_t brightness; // backlight, 5-100 %
+    bool clock_24h;
+    bool fahrenheit;
+    bool haptics;
+    bool tz_auto;      // following the IP-detected zone
+    char tz_name[40];  // zone in effect; "" while still unknown
+    char device_name[33];
+    char hostname[64]; // mDNS, without ".local"
+    char wifi_ssid[33]; // "" when not connected
+    char ip[16];
+    char version[32];
+    uint32_t free_internal_kb;
+    uint32_t free_psram_kb;
+} ui_settings_t;
+
+// Pushes the settings page's values; cheap to call every poll.
+void ui_update_settings(const ui_settings_t *settings);
+
+typedef enum {
+    UI_SETTING_BRIGHTNESS, // value: 5-100
+    UI_SETTING_CLOCK_24H,  // value: 0/1
+    UI_SETTING_FAHRENHEIT, // value: 0/1
+    UI_SETTING_HAPTICS,    // value: 0/1
+    UI_SETTING_TIMEZONE,   // zone: a tz_db name, or NULL for automatic
+    UI_SETTING_FORGET_WIFI,
+} ui_setting_t;
+
+// Called on the LVGL task when the user changes a setting; must not block.
+// The handler applies and persists it, then pushes ui_update_settings().
+void ui_set_settings_handler(void (*handler)(ui_setting_t setting, int value, const char *zone));

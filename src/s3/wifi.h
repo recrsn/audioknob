@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // WiFi for the S3 -- per spec.md's Shared Resource Arbitration the only
@@ -24,6 +25,14 @@ typedef struct {
     char qr_payload[128];  // standard "WIFI:T:WPA;S:...;P:...;;" join code
     char status[96];
 } wifi_setup_info_t;
+
+// The joined network's name and this device's address. False while not
+// connected (or in setup mode).
+bool wifi_get_station(char *ssid, size_t ssid_len, char *ip, size_t ip_len);
+
+// Erases the saved credentials and restarts. A build with
+// CONFIG_AK_WIFI_SSID set falls back to that; otherwise it boots into setup.
+void wifi_forget(void);
 
 // Copies the setup-mode details for display. False when not in setup mode.
 bool wifi_get_setup_info(wifi_setup_info_t *out);

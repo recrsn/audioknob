@@ -1,9 +1,10 @@
 #pragma once
 
-// Shared between ui.c (screens, navigation), ui_tools.c (timer and
-// stopwatch content) and ui_wallpaper.c. Not part of the public UI API in ui.h.
+// Shared between ui.c (screens, navigation), the app pages (ui_tools.c and
+// the ui_<app>.c files) and ui_wallpaper.c. Not part of the public UI API.
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "lvgl.h"
 
@@ -18,16 +19,49 @@ lv_obj_t *ui_round_button_create(lv_obj_t *parent, const char *symbol, int32_t s
 // The idle screen's pre-dithered ambient glow, covering the whole display.
 lv_obj_t *ui_wallpaper_create(lv_obj_t *parent);
 
-// Fills both screens, which ui.c owns along with their navigation chrome.
-// on_alert(true) runs when the countdown reaches zero, so ui.c can bring the
-// timer screen forward from wherever the user is; on_alert(false) when the
-// alert is dismissed.
-void ui_tools_build(lv_obj_t *timer_screen, lv_obj_t *stopwatch_screen, void (*on_alert)(bool ringing));
+#include "ui.h"
 
-bool ui_timer_alerting(void);
-void ui_timer_dismiss_alert(void);
+// The app pages, in launcher order (clockwise from the top).
+typedef enum {
+    UI_APP_LIGHTS,
+    UI_APP_TIMER,
+    UI_APP_TOMATO,
+    UI_APP_STOPWATCH,
+    UI_APP_WEATHER,
+    UI_APP_SETTINGS,
+    UI_APP_COUNT,
+} ui_app_t;
 
-// Return false when the knob isn't used in the tool's current state.
-bool ui_timer_knob_rotate(int steps);
-void ui_timer_knob_press(void);
-void ui_stopwatch_knob_press(void);
+typedef struct {
+    const char *name;
+    const char *icon; // an icons_48/icons_20 glyph
+    lv_color_t tint;
+} ui_app_info_t;
+
+// Fills the app pages, which ui.c owns along with their navigation chrome.
+// on_alert(screen, true) runs when a countdown on `screen` (timer, tomato)
+// reaches zero, so ui.c can bring it forward from wherever the user is;
+// on_alert(screen, false) when that alert is dismissed.
+void ui_tools_build(lv_obj_t *const screens[UI_APP_COUNT], void (*on_alert)(lv_obj_t *screen, bool ringing));
+
+// The last settings pushed by ui_update_settings() (clock format, units).
+const ui_settings_t *ui_settings_current(void);
+
+ui_app_info_t ui_tools_info(ui_app_t app);
+// The app whose page `screen` is, or -1.
+int ui_tools_app_of(lv_obj_t *screen);
+// What's in progress on `app` -- a countdown's time left, a stopwatch's
+// time -- for the clock's chips and the launcher; false when nothing is.
+bool ui_tools_status(ui_app_t app, char *buf, size_t len);
+
+// Current conditions for the clock face: an icons_20 glyph and the
+// temperature in the configured unit. False until weather has arrived.
+bool ui_weather_glance(const char **icon, char *temp, size_t len);
+
+bool ui_tools_alerting(void);
+void ui_tools_dismiss(lv_obj_t *screen);
+
+// Knob input for an app page; false when that page (or its current state)
+// has no use for it, or `screen` isn't a tool page.
+bool ui_tools_knob_rotate(lv_obj_t *screen, int steps);
+bool ui_tools_knob_press(lv_obj_t *screen);

@@ -4,12 +4,18 @@
 #include "avrcp_target.h"
 #include "bt_app_core.h"
 #include "bt_gap.h"
+#include "driver/gpio.h"
 #include "encoder.h"
 #include "esp_avrc_api.h"
 #include "esp_log.h"
 #include "state_sync.h"
 
 static const char *TAG = "esp32";
+
+// PCM5100A XSMT: low soft-mutes the DAC for both sources, since the S3's
+// I2S reaches it through the same CH445P. Nothing on the board pulls it
+// high; the factory firmware drove it.
+#define DAC_XSMT_GPIO GPIO_NUM_32
 
 static void on_command(protocol_cmd_t cmd) {
     switch (cmd) {
@@ -31,13 +37,29 @@ static void on_command(protocol_cmd_t cmd) {
     case CMD_PREV:
         avrcp_controller_prev();
         break;
+    case CMD_VOLUME_UP:
+        avrcp_target_step_volume(1);
+        break;
+    case CMD_VOLUME_DOWN:
+        avrcp_target_step_volume(-1);
+        break;
     default:
         ESP_LOGW(TAG, "unknown command 0x%02x", cmd);
         break;
     }
 }
 
+static void dac_unmute(void) {
+    gpio_config_t cfg = {
+        .pin_bit_mask = 1ULL << DAC_XSMT_GPIO,
+        .mode = GPIO_MODE_OUTPUT,
+    };
+    ESP_ERROR_CHECK(gpio_config(&cfg));
+    ESP_ERROR_CHECK(gpio_set_level(DAC_XSMT_GPIO, 1));
+}
+
 void app_main(void) {
+    dac_unmute();
     app_state_init();
     bt_app_task_start_up();
 
@@ -55,8 +77,8 @@ void app_main(void) {
     a2dp_sink_init();
 
     encoder_start();
-    state_sync_start(on_command);
+    state_sync_start(on_command, bt_gap_set_name);
 
     bt_gap_set_discoverable(true);
-    ESP_LOGI(TAG, "A2DP sink ready, discoverable as \"" AK_BT_DEVICE_NAME "\"");
+    ESP_LOGI(TAG, "A2DP sink ready");
 }

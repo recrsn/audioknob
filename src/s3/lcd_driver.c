@@ -43,14 +43,23 @@
 #define LCD_BITS_PER_PIXEL 16
 
 // One partial-redraw buffer, a sixth of the screen, in internal DMA RAM like
-// Waveshare's own firmware: at 80 MHz a flush takes ~1 ms, too short for a
-// second buffer's render/flush overlap to be worth its internal RAM.
+// Waveshare's own firmware. A second one would let rendering overlap the
+// flush DMA (page swipes measured 37 -> 45 fps) but costs ~43 KB of internal
+// RAM that AirPlay's session setup needs.
 #define LVGL_DRAW_BUF_LINES 60
 
 // lv_timer_handler()'s "next due" hint, clamped: the floor yields to
 // lower-priority tasks, the ceiling keeps touch polling responsive.
 #define LVGL_TASK_MIN_DELAY_MS 2
 #define LVGL_TASK_MAX_DELAY_MS 10
+
+// Core 1, away from WiFi/lwIP on core 0, and above the knob and UART tasks
+// so input-driven redraws aren't held up. Kept below AirPlay's RTP (8) and
+// player (15) tasks on the same core: a full-screen render takes ~27 ms,
+// and audio must never wait on it.
+#define LVGL_TASK_STACK 8192
+#define LVGL_TASK_PRIO 7
+#define LVGL_TASK_CORE 1
 
 // Waveshare's PWM: 25 kHz is above audible coil whine; 7 bits is plenty.
 #define BLK_LEDC_TIMER    LEDC_TIMER_0
@@ -83,8 +92,6 @@ static bool notify_flush_ready(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_ev
 
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
     esp_lcd_panel_handle_t panel = (esp_lcd_panel_handle_t)lv_display_get_user_data(disp);
-    // LVGL renders little-endian RGB565; the panel takes it big-endian.
-    lv_draw_sw_rgb565_swap(px_map, lv_area_get_size(area));
     esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px_map);
 }
 
@@ -103,10 +110,119 @@ static void lvgl_tick_cb(void *arg) {
     lv_tick_inc(2);
 }
 
+#if CONFIG_AK_LVGL_PERF_LOG
+// LVGL has no public way to enumerate screens; this debug mode reads them.
+#include "lvgl_private.h"
+
+// Each screen gets one full window, then one per visible top-level child
+// with that child hidden, so the log shows what each part costs to draw.
+#define PERF_FULL_WINDOW_US  (3 * 1000 * 1000)
+#define PERF_CHILD_WINDOW_US (2 * 1000 * 1000)
+
+static int64_t s_refr_start_us;
+static int64_t s_perf_window_start_us;
+static uint32_t s_perf_frames;
+static int64_t s_perf_total_us;
+static int64_t s_perf_max_us;
+static int s_perf_child = -1; // -1: whole screen, else the hidden child
+static double s_perf_full_ms;
+
+static int perf_screen_index(lv_display_t *disp) {
+    for (uint32_t i = 0; i < disp->screen_cnt; i++) {
+        if (disp->screens[i] == lv_screen_active()) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+// Index 0 is LVGL's default screen, which the UI never shows.
+static void perf_next_screen(lv_display_t *disp) {
+    int next = perf_screen_index(disp) + 1;
+    if (next <= 0 || (uint32_t)next >= disp->screen_cnt) {
+        next = 1;
+    }
+    lv_screen_load(disp->screens[next]);
+}
+
+// Hides the next visible child after s_perf_child; false once none are left.
+static bool perf_hide_next_child(lv_obj_t *screen) {
+    int count = (int)lv_obj_get_child_count(screen);
+    for (int i = s_perf_child + 1; i < count; i++) {
+        lv_obj_t *child = lv_obj_get_child(screen, i);
+        if (!lv_obj_is_hidden(child)) {
+            s_perf_child = i;
+            lv_obj_set_hidden(child, true);
+            return true;
+        }
+    }
+    s_perf_child = -1;
+    return false;
+}
+
+static void perf_log_window(lv_display_t *disp, double avg_ms) {
+    lv_obj_t *screen = lv_screen_active();
+    int index = perf_screen_index(disp);
+    if (s_perf_child < 0) {
+        s_perf_full_ms = avg_ms;
+        ESP_LOGI(TAG, "perf: screen %d: %.1f ms/frame (%.1f max), internal free %u KB (min %u KB)", index, avg_ms,
+                 s_perf_max_us / 1000.0, heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
+                 heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL) / 1024);
+        return;
+    }
+    lv_obj_t *child = lv_obj_get_child(screen, s_perf_child);
+    lv_area_t a;
+    lv_obj_get_coords(child, &a);
+    ESP_LOGI(TAG, "perf: screen %d child %d %s %dx%d: costs %.1f ms", index, s_perf_child,
+             lv_obj_get_class(child)->name ? lv_obj_get_class(child)->name : "?", (int)lv_area_get_width(&a),
+             (int)lv_area_get_height(&a), s_perf_full_ms - avg_ms);
+    lv_obj_set_hidden(child, false);
+}
+
+static void perf_refr_cb(lv_event_t *e) {
+    int64_t now = esp_timer_get_time();
+    if (lv_event_get_code(e) == LV_EVENT_REFR_START) {
+        s_refr_start_us = now;
+        return;
+    }
+    int64_t frame_us = now - s_refr_start_us;
+    s_perf_frames++;
+    s_perf_total_us += frame_us;
+    if (frame_us > s_perf_max_us) {
+        s_perf_max_us = frame_us;
+    }
+    int64_t window_us = s_perf_child < 0 ? PERF_FULL_WINDOW_US : PERF_CHILD_WINDOW_US;
+    if (now - s_perf_window_start_us < window_us) {
+        return;
+    }
+
+    lv_display_t *disp = lv_event_get_target(e);
+    perf_log_window(disp, s_perf_total_us / 1000.0 / (s_perf_frames ? s_perf_frames : 1));
+    if (!perf_hide_next_child(lv_screen_active())) {
+        perf_next_screen(disp);
+    }
+    // Idle app pages go home on their own; this keeps each one up.
+    lv_display_trigger_activity(disp);
+    s_perf_window_start_us = now;
+    s_perf_frames = 0;
+    s_perf_total_us = 0;
+    s_perf_max_us = 0;
+}
+
+static void perf_init(lv_display_t *disp) {
+    lv_display_add_event_cb(disp, perf_refr_cb, LV_EVENT_REFR_START, NULL);
+    lv_display_add_event_cb(disp, perf_refr_cb, LV_EVENT_REFR_READY, NULL);
+    s_perf_window_start_us = esp_timer_get_time();
+}
+#endif
+
 static void lvgl_task(void *arg) {
     (void)arg;
     while (1) {
         lcd_driver_lvgl_lock();
+#if CONFIG_AK_LVGL_PERF_LOG
+        lv_obj_invalidate(lv_screen_active());
+#endif
         uint32_t idle_ms = lv_timer_handler();
         lcd_driver_lvgl_unlock();
         if (idle_ms < LVGL_TASK_MIN_DELAY_MS) {
@@ -138,7 +254,9 @@ static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
 static lv_display_t *lvgl_display_init(esp_lcd_panel_handle_t panel_handle, esp_lcd_panel_io_handle_t io_handle) {
     lv_display_t *disp = lv_display_create(LCD_H_RES, LCD_V_RES);
     lv_display_set_user_data(disp, panel_handle);
-    lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
+    // The panel takes big-endian RGB565; rendering it directly saves swapping
+    // every flushed pixel on the CPU.
+    lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
 
     size_t buf_px = (size_t)LCD_H_RES * LVGL_DRAW_BUF_LINES;
@@ -211,7 +329,8 @@ static void touch_init(lv_display_t *disp) {
         .rst_gpio_num = PIN_TP_RST,
         .int_gpio_num = PIN_TP_INT,
         .levels = {.reset = 0, .interrupt = 0},
-        .flags = {.swap_xy = 0, .mirror_x = 0, .mirror_y = 0},
+        // Matches the panel's 180° rotation in lcd_driver_init().
+        .flags = {.swap_xy = 0, .mirror_x = 1, .mirror_y = 1},
     };
     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_cst816s(tp_io_handle, &tp_cfg, &s_touch_handle));
 
@@ -255,9 +374,15 @@ void lcd_driver_init(void) {
     ESP_ERROR_CHECK(esp_lcd_new_panel_st77916(io_handle, &panel_cfg, &panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_handle));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel_handle));
+    // The panel is mounted upside down relative to the knob's natural
+    // orientation; mirroring both axes in MADCTL rotates it 180° for free.
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_handle, true, true));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_handle, true));
 
     lv_display_t *disp = lvgl_display_init(panel_handle, io_handle);
+#if CONFIG_AK_LVGL_PERF_LOG
+    perf_init(disp);
+#endif
 
     const esp_timer_create_args_t tick_timer_args = {
         .callback = lvgl_tick_cb,
@@ -269,7 +394,7 @@ void lcd_driver_init(void) {
 
     touch_init(disp);
 
-    xTaskCreate(lvgl_task, "lvgl", 8192, NULL, 4, NULL);
+    xTaskCreatePinnedToCore(lvgl_task, "lvgl", LVGL_TASK_STACK, NULL, LVGL_TASK_PRIO, NULL, LVGL_TASK_CORE);
 
     ESP_LOGI(TAG, "LCD + touch initialized (%dx%d, %d MHz QSPI)", LCD_H_RES, LCD_V_RES, CONFIG_AK_LCD_PCLK_MHZ);
 }

@@ -25,6 +25,7 @@
 
 static const char *TAG = "state_sync";
 static state_sync_command_cb_t s_on_command;
+static state_sync_name_cb_t s_on_device_name;
 
 static void send_frame(uint8_t type, const void *payload, uint8_t len) {
     uint8_t frame[PROTOCOL_MAX_FRAME];
@@ -98,6 +99,11 @@ static void command_rx_task(void *arg) {
             } else if (result == PROTOCOL_FEED_FRAME) {
                 if (parser.type == MSG_COMMAND && parser.len == sizeof(command_t)) {
                     s_on_command((protocol_cmd_t)parser.payload[0]);
+                } else if (parser.type == MSG_DEVICE_NAME && parser.len && parser.len <= DEVICE_NAME_MAX) {
+                    char name[DEVICE_NAME_MAX + 1];
+                    memcpy(name, parser.payload, parser.len);
+                    name[parser.len] = '\0';
+                    s_on_device_name(name);
                 } else {
                     ESP_LOGW(TAG, "unhandled frame: type=0x%02x len=%d", parser.type, parser.len);
                 }
@@ -106,8 +112,9 @@ static void command_rx_task(void *arg) {
     }
 }
 
-void state_sync_start(state_sync_command_cb_t on_command) {
+void state_sync_start(state_sync_command_cb_t on_command, state_sync_name_cb_t on_device_name) {
     s_on_command = on_command;
+    s_on_device_name = on_device_name;
 
     uart_config_t cfg = {
         .baud_rate = PROTOCOL_UART_BAUD,

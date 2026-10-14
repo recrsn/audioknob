@@ -58,6 +58,12 @@ void avrcp_target_bt_event(esp_avrc_tg_cb_event_t event, esp_avrc_tg_cb_param_t 
     bt_app_work_dispatch((bt_app_cb_t)handle_event, event, param, sizeof(esp_avrc_tg_cb_param_t), NULL, NULL);
 }
 
+void avrcp_target_step_volume(int steps) {
+    int volume = (int)app_state_get().volume + steps;
+    volume = volume < 0 ? 0 : (volume > 100 ? 100 : volume);
+    avrcp_target_set_local_volume((uint8_t)volume);
+}
+
 void avrcp_target_set_local_volume(uint8_t volume_pct) {
     app_state_set_volume(volume_pct);
 

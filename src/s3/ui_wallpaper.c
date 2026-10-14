@@ -79,6 +79,10 @@ static uint16_t dither_rgb565(rgbf_t c, int x, int y) {
 }
 
 lv_obj_t *ui_wallpaper_create(lv_obj_t *parent) {
+    // Matching the display's byte order keeps the blit a plain memcpy.
+    lv_color_format_t cf = lv_display_get_color_format(NULL) == LV_COLOR_FORMAT_RGB565_SWAPPED
+                               ? LV_COLOR_FORMAT_RGB565_SWAPPED
+                               : LV_COLOR_FORMAT_RGB565;
     // Plain malloc, not lv_malloc: ~250 KB won't fit LVGL's pool, and on the
     // S3 large allocations land in PSRAM. Lives as long as the idle screen.
     static lv_image_dsc_t dsc;
@@ -98,14 +102,15 @@ lv_obj_t *ui_wallpaper_create(lv_obj_t *parent) {
     for (int32_t y = 0; y < h; y++) {
         for (int32_t x = 0; x < w; x++) {
             rgbf_t c = composite_pixel(blobs, sizeof(blobs) / sizeof(blobs[0]), (float)x + 0.5f, (float)y + 0.5f);
-            px[y * w + x] = dither_rgb565(c, x, y);
+            uint16_t v = dither_rgb565(c, x, y);
+            px[y * w + x] = cf == LV_COLOR_FORMAT_RGB565_SWAPPED ? (uint16_t)(v << 8 | v >> 8) : v;
         }
     }
 
     dsc = (lv_image_dsc_t){
         .header = {
             .magic = LV_IMAGE_HEADER_MAGIC,
-            .cf = LV_COLOR_FORMAT_RGB565,
+            .cf = cf,
             .w = w,
             .h = h,
             .stride = w * sizeof(uint16_t),

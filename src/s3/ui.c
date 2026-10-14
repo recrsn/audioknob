@@ -3,8 +3,10 @@
 #include "fonts.h"
 #include "icons.h"
 #include "ui_internal.h"
+#include "ui_launcher.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Screens are display-only for state that another MCU owns (wireless
@@ -21,8 +23,15 @@
 // devices land on an idle/clock screen and switch to a now-playing screen
 // on their own the moment a source starts playing, then fall back to idle
 // when it stops -- they don't make you pick a mode first. ui_update_*()
-// drives that switch; the swipe-up pill on each now-playing screen is the
-// only manual navigation: it sends the screen home while the source keeps playing.
+// drives that switch; the swipe-up pill on each now-playing screen sends it
+// home while the source keeps playing, and the audio chip at the top of the
+// clock and every app page brings it back.
+//
+// Apps live in the launcher (ui_launcher.c), opened by a long knob press
+// anywhere or a tap on the clock; a second long press, a tap off its icons,
+// or the pill on an app page goes home. An idle app page drops home on its own, and the clock
+// shows chips for whatever is still in progress, so getting back to a
+// running timer doesn't need the launcher.
 
 #define ART_TILE_SIZE 132
 #define RING_SIZE     344
@@ -47,10 +56,12 @@
 #define WIRELESS_WAIT_TITLE_Y         62
 #define WIRELESS_WAIT_SUBTITLE_Y      82
 
+#ifdef AK_USB_AUDIO
 #define USB_STATUS_ROW_Y (-126)
 #define USB_TILE_Y        (-33)
 #define USB_TRANSPORT_Y   71
 #define USB_TITLE_Y        118
+#endif
 
 #define TRANSPORT_PRIMARY_SIZE   48
 #define TRANSPORT_SECONDARY_SIZE 40
@@ -83,11 +94,17 @@ typedef struct {
     lv_obj_t *wait_subtitle;
 
     // Shown once connected.
+    // The tile is never shown itself: it is snapshotted into tile_img when
+    // its tint or art changes (see tile_bake()).
     lv_obj_t *tile;
     lv_obj_t *tile_icon;
     lv_obj_t *art;
     lv_image_dsc_t art_dsc;
     uint32_t art_version;
+    lv_obj_t *tile_img;
+    lv_draw_buf_t *tile_baked;
+    uint32_t baked_art_version;
+    lv_color_t baked_tint;
     lv_obj_t *transport;
     lv_obj_t *prev_icon;
     lv_obj_t *play_icon;
@@ -96,6 +113,7 @@ typedef struct {
     lv_obj_t *subtitle_label;
 } wireless_screen_t;
 
+#ifdef AK_USB_AUDIO
 typedef struct {
     lv_obj_t *screen;
     lv_obj_t *ring;
@@ -105,9 +123,8 @@ typedef struct {
     lv_obj_t *play_icon;
     lv_obj_t *next_icon;
 } usb_screen_t;
+#endif
 
-// Lock-screen now-playing glance: shown on the clock while a source keeps
-// playing in the background after a swipe home (mock-react's .lock-source).
 typedef struct {
     lv_obj_t *screen;
     lv_obj_t *items[2];  // indexed by ui_source_t
@@ -117,13 +134,39 @@ typedef struct {
     lv_obj_t *screen;
     lv_obj_t *time_label;
     lv_obj_t *date_label;
-    lv_obj_t *source_row;
-    lv_obj_t *source_icon;
-    lv_obj_t *source_label;
-    lv_obj_t *track_title;
-    lv_obj_t *track_subtitle;
-    lv_obj_t *return_hint;
+    lv_obj_t *weather;
+    lv_obj_t *weather_icon;
+    lv_obj_t *weather_temp;
+    // One per app, shown while that app has something in progress.
+    lv_obj_t *chips[UI_APP_COUNT];
+    lv_obj_t *chip_labels[UI_APP_COUNT];
 } idle_screen_t;
+
+// What's playing, kept from the last ui_update_wireless()/ui_update_usb()
+// for the audio chip.
+typedef struct {
+    bool wireless_connected;
+    bool wireless_playing;
+#ifdef AK_USB_AUDIO
+    bool usb_playing;
+#endif
+    bool wireless_airplay;
+    char wireless_text[64];
+} audio_state_t;
+
+// The audio chip: a persistent "back to what's playing" pill at the top of
+// the clock and every app page, on lv_layer_top() so one widget serves them
+// all.
+typedef struct {
+    lv_obj_t *chip;
+    lv_obj_t *icon;     // AirPlay/Bluetooth
+#ifdef AK_USB_AUDIO
+    lv_obj_t *usb_icon; // LV_SYMBOL_USB has no image asset
+#endif
+    lv_obj_t *label;
+    lv_obj_t *target;   // the source screen a tap goes to
+    bool dim;
+} audio_chip_t;
 
 typedef struct {
     lv_obj_t *screen;
@@ -135,23 +178,26 @@ typedef struct {
 
 static idle_screen_t idle_screen;
 static wireless_screen_t wireless_screen;
+#ifdef AK_USB_AUDIO
 static usb_screen_t usb_screen;
+#endif
 static wifi_setup_screen_t wifi_setup_screen;
 static switch_screen_t switch_screen;
+static audio_state_t s_audio;
+static audio_chip_t audio_chip;
 
-// Horizontal swipes page between the clock and the tools that live beside it.
-enum { PAGE_CLOCK, PAGE_TIMER, PAGE_STOPWATCH, PAGE_COUNT };
-static lv_obj_t *s_pages[PAGE_COUNT];
+static lv_obj_t *s_apps[UI_APP_COUNT];
+// Where the launcher's selection starts when not opened from an app page.
+static ui_app_t s_last_app;
 
 // Where the home swipe and "playback stopped" return to: the clock normally,
 // the WiFi setup QR while setup is pending.
 static lv_obj_t *s_home;
 
-// The user swiped a playing source into the background: idle/clock stays on
-// screen (with a glance at what's playing) until a tap, or until a source
-// newly starts playing. s_source_screen is where that tap returns to.
+// The user sent a playing source into the background (swiped home, or
+// opened an app): it stays there until the audio chip is tapped or a source
+// newly starts playing.
 static bool s_homed;
-static lv_obj_t *s_source_screen;
 static void (*s_transport_handler)(ui_transport_t);
 static void (*s_source_handler)(ui_source_t);
 
@@ -175,33 +221,49 @@ static void transport_click_cb(lv_event_t *e) {
     }
 }
 
+static void audio_chip_refresh(void);
+
 // Avoids re-loading (and restarting screen-load animations for) a screen
 // that's already active, since ui_update_*() calls this on every state push.
+// Any real navigation closes the launcher.
 static void show_screen(lv_obj_t *target) {
     if (lv_screen_active() != target) {
+        launcher_hide();
         lv_screen_load(target);
+        audio_chip_refresh();
     }
+}
+
+static void go_home(void) {
+    s_homed = true;
+    s_pinned = false;
+    launcher_hide();
+    show_screen(s_home);
 }
 
 static void swipe_home_cb(lv_event_t *e) {
     if (lv_event_get_code(e) == LV_EVENT_GESTURE && lv_indev_get_gesture_dir(lv_indev_active()) != LV_DIR_TOP) {
         return;
     }
+    go_home();
+}
+
+// Opening an app sends a playing source to the background, as a swipe home
+// would; otherwise the next state push would bring it straight back.
+static void open_app(ui_app_t app) {
+    s_last_app = app;
     s_homed = true;
     s_pinned = false;
-    show_screen(s_home);
+    show_screen(s_apps[app]);
+}
+
+static void open_launcher(void) {
+    int app = ui_tools_app_of(lv_screen_active());
+    launcher_show(app >= 0 ? (ui_app_t)app : s_last_app);
 }
 
 static void switch_back_cb(lv_event_t *e);
 static void open_switch_cb(lv_event_t *e);
-
-static void return_to_source_cb(lv_event_t *e) {
-    (void)e;
-    if (s_homed && s_source_screen) {
-        s_homed = false;
-        show_screen(s_source_screen);
-    }
-}
 
 // Shared by every source: surfaces `screen` while `playing`, falls back to
 // home when it stops, and respects an in-progress swipe home. A fresh
@@ -215,10 +277,9 @@ static void surface_source(lv_obj_t *screen, bool playing, bool *was_playing) {
     *was_playing = playing;
 
     if (playing) {
-        s_source_screen = screen;
         // The switch screen is user-opened and a ringing timer must be seen;
         // state pushes must not yank either away.
-        if (!s_homed && lv_screen_active() != switch_screen.screen && !ui_timer_alerting()) {
+        if (!s_homed && lv_screen_active() != switch_screen.screen && !ui_tools_alerting()) {
             show_screen(screen);
         }
     } else if (lv_screen_active() == screen && !s_pinned) {
@@ -253,7 +314,12 @@ static void home_zone_create(lv_obj_t *parent, lv_event_cb_t cb) {
     lv_obj_set_size(pill, 46, 4);
     lv_obj_set_style_radius(pill, 2, 0);
     lv_obj_set_style_bg_color(pill, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(pill, LV_OPA_30, 0);
+    lv_obj_set_style_bg_opa(pill, LV_OPA_60, 0);
+    // Pages may draw under it (the tool dials), so it carries its own
+    // contrast instead of relying on a dark backdrop.
+    lv_obj_set_style_outline_width(pill, 2, 0);
+    lv_obj_set_style_outline_color(pill, lv_color_black(), 0);
+    lv_obj_set_style_outline_opa(pill, LV_OPA_50, 0);
     lv_obj_align(pill, LV_ALIGN_BOTTOM_MID, 0, -14);
 }
 
@@ -435,34 +501,6 @@ void ui_set_visible(lv_obj_t *obj, bool visible) {
     }
 }
 
-// `source` NULL hides the whole glance (nothing playing). Only the clock
-// screen shows it, so it's safe to refresh on every state push.
-static void glance_update(bool show, const char *source, lv_color_t tint, const char *title, const char *subtitle) {
-    bool has_title = show && title && title[0];
-    bool has_subtitle = show && subtitle && subtitle[0];
-    ui_set_visible(idle_screen.source_row, show);
-    ui_set_visible(idle_screen.track_title, has_title);
-    ui_set_visible(idle_screen.track_subtitle, has_subtitle);
-    ui_set_visible(idle_screen.return_hint, show);
-    if (!show) {
-        return;
-    }
-    char upper[24];
-    size_t i = 0;
-    for (; source[i] && i < sizeof(upper) - 1; i++) {
-        upper[i] = (source[i] >= 'a' && source[i] <= 'z') ? source[i] - 'a' + 'A' : source[i];
-    }
-    upper[i] = '\0';
-    ui_label_set_text(idle_screen.source_label, upper);
-    lv_obj_set_style_image_recolor(idle_screen.source_icon, tint, 0);
-    if (has_title) {
-        ui_label_set_text(idle_screen.track_title, title);
-    }
-    if (has_subtitle) {
-        ui_label_set_text(idle_screen.track_subtitle, subtitle);
-    }
-}
-
 static lv_obj_t *glance_label_create(lv_obj_t *parent, const lv_font_t *font, lv_opa_t opa) {
     lv_obj_t *label = lv_label_create(parent);
     lv_obj_set_width(label, 240);
@@ -474,14 +512,55 @@ static lv_obj_t *glance_label_create(lv_obj_t *parent, const lv_font_t *font, lv
     return label;
 }
 
+#define CLOCK_CHIPS_Y   (-34)
+#define CLOCK_CHIP_GAP  6
+
+static void clock_tap_cb(lv_event_t *e) {
+    (void)e;
+    open_launcher();
+}
+
+static void clock_chip_cb(lv_event_t *e) {
+    open_app((ui_app_t)(intptr_t)lv_event_get_user_data(e));
+}
+
+static void clock_weather_cb(lv_event_t *e) {
+    (void)e;
+    open_app(UI_APP_WEATHER);
+}
+
+// A small tappable pill: an icons_20 glyph plus a label, which is returned.
+static lv_obj_t *clock_pill_create(lv_obj_t *parent, const char *icon, lv_color_t tint, lv_event_cb_t cb,
+                                   void *user_data) {
+    lv_obj_t *pill = flex_row_create(parent, 4, 0);
+    lv_obj_set_style_pad_hor(pill, 10, 0);
+    lv_obj_set_style_pad_ver(pill, 3, 0);
+    lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(pill, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(pill, 20, 0);
+    lv_obj_add_flag(pill, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(pill, 6);
+    lv_obj_add_event_cb(pill, cb, LV_EVENT_CLICKED, user_data);
+
+    lv_obj_t *glyph = lv_label_create(pill);
+    lv_label_set_text(glyph, icon);
+    lv_obj_set_style_text_font(glyph, &icons_20, 0);
+    lv_obj_set_style_text_color(glyph, tint, 0);
+
+    lv_obj_t *label = lv_label_create(pill);
+    lv_obj_set_style_text_font(label, &inter_semi_13, 0);
+    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    return label;
+}
+
 static void idle_screen_build(void) {
     idle_screen.screen = screen_create();
-    lv_obj_add_event_cb(idle_screen.screen, return_to_source_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(idle_screen.screen, clock_tap_cb, LV_EVENT_CLICKED, NULL);
 
     ui_wallpaper_create(idle_screen.screen);
 
     // Everything stacks in one centered column (mock's .clock-idle), so the
-    // glance rows can show or hide without re-pinning the clock.
+    // weather pill can show or hide without re-pinning the clock.
     lv_obj_t *col = lv_obj_create(idle_screen.screen);
     lv_obj_remove_style_all(col);
     lv_obj_remove_flag(col, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
@@ -491,21 +570,44 @@ static void idle_screen_build(void) {
     lv_obj_set_style_pad_row(col, 5, 0);
     lv_obj_center(col);
 
-    idle_screen.source_row = flex_row_create(col, 6, 0);
-    idle_screen.source_icon = icon_create(idle_screen.source_row, &icon_airplay, 13, lv_color_white());
-    idle_screen.source_label = status_label_create(idle_screen.source_row);
-    lv_obj_set_style_text_font(idle_screen.source_label, &inter_semi_11, 0);
-    lv_obj_set_style_text_opa(idle_screen.source_label, LV_OPA_60, 0);
-
     idle_screen.date_label = glance_label_create(col, &inter_semi_13, LV_OPA_60);
     idle_screen.time_label = glance_label_create(col, &inter_bold_52, LV_OPA_COVER);
-    idle_screen.track_title = glance_label_create(col, &inter_semi_14, LV_OPA_90);
-    idle_screen.track_subtitle = glance_label_create(col, &inter_med_12, LV_OPA_50);
-    idle_screen.return_hint = glance_label_create(col, &inter_med_12, LV_OPA_50);
-    lv_label_set_text(idle_screen.return_hint, "Tap to return");
+
+    idle_screen.weather_temp = clock_pill_create(col, ICON_CLOUD, lv_color_hex(0xffc35a), clock_weather_cb, NULL);
+    idle_screen.weather = lv_obj_get_parent(idle_screen.weather_temp);
+    idle_screen.weather_icon = lv_obj_get_child(idle_screen.weather, 0);
+    lv_obj_add_flag(idle_screen.weather, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *chips = flex_row_create(idle_screen.screen, CLOCK_CHIP_GAP, 0);
+    lv_obj_remove_flag(chips, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(chips, LV_ALIGN_BOTTOM_MID, 0, CLOCK_CHIPS_Y);
+    for (int i = 0; i < UI_APP_COUNT; i++) {
+        ui_app_info_t info = ui_tools_info((ui_app_t)i);
+        idle_screen.chip_labels[i] = clock_pill_create(chips, info.icon, info.tint, clock_chip_cb, (void *)(intptr_t)i);
+        idle_screen.chips[i] = lv_obj_get_parent(idle_screen.chip_labels[i]);
+        lv_obj_add_flag(idle_screen.chips[i], LV_OBJ_FLAG_HIDDEN);
+    }
 
     ui_update_clock(false, NULL);
-    glance_update(false, NULL, lv_color_white(), NULL, NULL);
+}
+
+// Polled: what's in progress changes every second, the weather every 15 min.
+static void idle_screen_refresh(void) {
+    char buf[16];
+    for (int i = 0; i < UI_APP_COUNT; i++) {
+        bool busy = ui_tools_status((ui_app_t)i, buf, sizeof(buf));
+        ui_set_visible(idle_screen.chips[i], busy);
+        if (busy) {
+            ui_label_set_text(idle_screen.chip_labels[i], buf);
+        }
+    }
+    const char *icon;
+    bool have_weather = ui_weather_glance(&icon, buf, sizeof(buf));
+    ui_set_visible(idle_screen.weather, have_weather);
+    if (have_weather) {
+        ui_label_set_text(idle_screen.weather_icon, icon);
+        ui_label_set_text(idle_screen.weather_temp, buf);
+    }
 }
 
 static void wireless_screen_build(void) {
@@ -559,6 +661,11 @@ static void wireless_screen_build(void) {
     lv_obj_center(wireless_screen.art);
     lv_obj_add_flag(wireless_screen.art, LV_OBJ_FLAG_HIDDEN);
 
+    lv_obj_add_flag(wireless_screen.tile, LV_OBJ_FLAG_HIDDEN);
+    wireless_screen.tile_img = lv_image_create(wireless_screen.screen);
+    lv_obj_align(wireless_screen.tile_img, LV_ALIGN_CENTER, 0, WIRELESS_TILE_Y);
+    lv_obj_move_to_index(wireless_screen.tile_img, lv_obj_get_index(wireless_screen.tile) + 1);
+
     wireless_screen.transport = flex_row_create(wireless_screen.screen, TRANSPORT_GAP, WIRELESS_TRANSPORT_Y);
     wireless_screen.prev_icon = ui_round_button_create(wireless_screen.transport, LV_SYMBOL_PREV,
                                                        TRANSPORT_SECONDARY_SIZE, &lv_font_montserrat_16, true);
@@ -593,6 +700,7 @@ static void wireless_screen_build(void) {
     ui_update_wireless(&idle_state, &no_track);
 }
 
+#ifdef AK_USB_AUDIO
 static void usb_screen_build(void) {
     usb_screen.screen = screen_create();
     usb_screen.backdrop = backdrop_create(usb_screen.screen);
@@ -635,6 +743,7 @@ static void usb_screen_build(void) {
 
     ui_update_usb(0, false, false);
 }
+#endif
 
 #define SWITCH_TITLE_Y     (-110)
 #define SWITCH_LIST_Y      4
@@ -733,105 +842,229 @@ static void switch_screen_build(void) {
     home_zone_create(switch_screen.screen, switch_back_cb);
 }
 
-#define PAGE_DOTS_Y  (-32)
-#define PAGE_DOT     6
-#define PAGE_ANIM_MS 220
+static void (*s_alert_handler)(bool ringing);
+static bool s_ringing;
 
-static void page_swipe_cb(lv_event_t *e) {
-    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
-    lv_obj_t *screen = lv_event_get_current_target(e);
-    int page = 0;
-    while (page < PAGE_COUNT && s_pages[page] != screen) {
-        page++;
-    }
-    if (dir == LV_DIR_LEFT && page < PAGE_COUNT - 1) {
-        lv_screen_load_anim(s_pages[page + 1], LV_SCREEN_LOAD_ANIM_MOVE_LEFT, PAGE_ANIM_MS, 0, false);
-    } else if (dir == LV_DIR_RIGHT && page > 0 && page < PAGE_COUNT) {
-        lv_screen_load_anim(s_pages[page - 1], LV_SCREEN_LOAD_ANIM_MOVE_RIGHT, PAGE_ANIM_MS, 0, false);
-    }
+void ui_set_alert_handler(void (*handler)(bool ringing)) {
+    s_alert_handler = handler;
 }
 
-static void page_dots_create(lv_obj_t *parent, int active) {
-    lv_obj_t *row = flex_row_create(parent, PAGE_DOT, 0);
-    lv_obj_remove_flag(row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_align(row, LV_ALIGN_BOTTOM_MID, 0, PAGE_DOTS_Y);
-    for (int i = 0; i < PAGE_COUNT; i++) {
-        lv_obj_t *dot = lv_obj_create(row);
-        lv_obj_remove_style_all(dot);
-        lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_size(dot, PAGE_DOT, PAGE_DOT);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(dot, lv_color_white(), 0);
-        lv_obj_set_style_bg_opa(dot, i == active ? LV_OPA_80 : LV_OPA_30, 0);
-    }
-}
-
-static void (*s_timer_alert_handler)(bool ringing);
-
-void ui_set_timer_alert_handler(void (*handler)(bool ringing)) {
-    s_timer_alert_handler = handler;
-}
-
-static void timer_alert_cb(bool ringing) {
+// Timer and tomato can ring at once; the handler hears only the edges of
+// "anything ringing".
+static void tool_alert_cb(lv_obj_t *screen, bool ringing) {
     if (ringing) {
-        show_screen(s_pages[PAGE_TIMER]);
+        launcher_hide();
+        show_screen(screen);
     }
-    if (s_timer_alert_handler) {
-        s_timer_alert_handler(ringing);
-    }
-}
-
-// Paging away is acknowledgement enough; a timer left ringing off-screen
-// would also keep surface_source() from showing a new stream.
-static void timer_unloaded_cb(lv_event_t *e) {
-    (void)e;
-    ui_timer_dismiss_alert();
-}
-
-static void pages_build(void) {
-    s_pages[PAGE_CLOCK] = idle_screen.screen;
-    s_pages[PAGE_TIMER] = screen_create();
-    s_pages[PAGE_STOPWATCH] = screen_create();
-    ui_tools_build(s_pages[PAGE_TIMER], s_pages[PAGE_STOPWATCH], timer_alert_cb);
-    lv_obj_add_event_cb(s_pages[PAGE_TIMER], timer_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
-
-    for (int i = 0; i < PAGE_COUNT; i++) {
-        lv_obj_add_event_cb(s_pages[i], page_swipe_cb, LV_EVENT_GESTURE, NULL);
-        page_dots_create(s_pages[i], i);
-        if (i != PAGE_CLOCK) {
-            home_zone_create(s_pages[i], swipe_home_cb);
+    bool any = ui_tools_alerting();
+    if (any != s_ringing) {
+        s_ringing = any;
+        if (s_alert_handler) {
+            s_alert_handler(any);
         }
     }
 }
 
+// Paging away is acknowledgement enough; a countdown left ringing off-screen
+// would also keep surface_source() from showing a new stream.
+static void tool_unloaded_cb(lv_event_t *e) {
+    ui_tools_dismiss(lv_event_get_current_target(e));
+}
+
+static void apps_build(void) {
+    for (int i = 0; i < UI_APP_COUNT; i++) {
+        s_apps[i] = screen_create();
+    }
+    ui_tools_build(s_apps, tool_alert_cb);
+
+    for (int i = 0; i < UI_APP_COUNT; i++) {
+        home_zone_create(s_apps[i], swipe_home_cb);
+        lv_obj_add_event_cb(s_apps[i], tool_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
+    }
+}
+
+#define AUDIO_CHIP_Y      16
+#define AUDIO_CHIP_TEXT_W 100
+
+static lv_obj_t *audio_screen(void) {
+    if (s_audio.wireless_playing) {
+        return wireless_screen.screen;
+    }
+#ifdef AK_USB_AUDIO
+    if (s_audio.usb_playing) {
+        return usb_screen.screen;
+    }
+#endif
+    return s_audio.wireless_connected ? wireless_screen.screen : NULL;
+}
+
+// Only where the user went from the audio, not on the source screens
+// themselves or the setup QR.
+static bool audio_chip_wanted(void) {
+    lv_obj_t *active = lv_screen_active();
+    return audio_chip.target && !launcher_visible() &&
+           (active == idle_screen.screen || ui_tools_app_of(active) >= 0);
+}
+
+// A content-sized label wraps rather than dots, so the label is one line
+// tall and its width is set per text: the text's own, up to a cap.
+static void audio_chip_set_text(const char *text) {
+    if (strcmp(lv_label_get_text(audio_chip.label), text) == 0) {
+        return;
+    }
+    lv_point_t size;
+    lv_text_get_size(&size, text, lv_obj_get_style_text_font(audio_chip.label, 0), 0, 0, LV_COORD_MAX,
+                     LV_TEXT_FLAG_NONE);
+    lv_obj_set_width(audio_chip.label, LV_MIN(size.x, AUDIO_CHIP_TEXT_W));
+    lv_label_set_text(audio_chip.label, text);
+}
+
+// Runs on every state push; each setter below skips no-op changes.
+static void audio_chip_refresh(void) {
+    if (!audio_chip.chip) {
+        return;
+    }
+    lv_obj_t *target = audio_screen();
+    audio_chip.target = target;
+    ui_set_visible(audio_chip.chip, audio_chip_wanted());
+    if (!target) {
+        return;
+    }
+
+#ifdef AK_USB_AUDIO
+    bool usb = target == usb_screen.screen;
+    ui_set_visible(audio_chip.usb_icon, usb);
+#else
+    bool usb = false;
+#endif
+    ui_set_visible(audio_chip.icon, !usb);
+    if (!usb) {
+        const lv_image_dsc_t *src = s_audio.wireless_airplay ? &icon_airplay : &icon_bluetooth;
+        if (lv_image_get_src(audio_chip.icon) != src) {
+            lv_image_set_src(audio_chip.icon, src);
+            lv_obj_set_style_image_recolor(audio_chip.icon, lv_color_hex(s_audio.wireless_airplay ? 0x4ea1ff : 0x7c6cff),
+                                           0);
+        }
+    }
+    audio_chip_set_text(usb ? "USB Audio" : s_audio.wireless_text);
+
+    // Paused but still connected reads dimmer than playing.
+#ifdef AK_USB_AUDIO
+    bool dim = usb ? !s_audio.usb_playing : !s_audio.wireless_playing;
+#else
+    bool dim = !s_audio.wireless_playing;
+#endif
+    if (dim != audio_chip.dim) {
+        audio_chip.dim = dim;
+        lv_obj_set_style_text_opa(audio_chip.label, dim ? LV_OPA_50 : LV_OPA_COVER, 0);
+    }
+}
+
+static void audio_chip_cb(lv_event_t *e) {
+    (void)e;
+    if (audio_chip.target) {
+        s_homed = false;
+        // Paused audio would otherwise drop straight back home.
+        s_pinned = true;
+        show_screen(audio_chip.target);
+    }
+}
+
+static void audio_chip_build(void) {
+    lv_obj_t *chip = status_pill_create(lv_layer_top(), 0);
+    lv_obj_align(chip, LV_ALIGN_TOP_MID, 0, AUDIO_CHIP_Y);
+    lv_obj_add_flag(chip, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_ext_click_area(chip, 8);
+    lv_obj_add_event_cb(chip, audio_chip_cb, LV_EVENT_CLICKED, NULL);
+    audio_chip.chip = chip;
+
+    audio_chip.icon = icon_create(chip, &icon_airplay, STATUS_ICON_SIZE, lv_color_hex(0x4ea1ff));
+#ifdef AK_USB_AUDIO
+    audio_chip.usb_icon = lv_label_create(chip);
+    lv_label_set_text(audio_chip.usb_icon, LV_SYMBOL_USB);
+    lv_obj_set_style_text_font(audio_chip.usb_icon, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(audio_chip.usb_icon, lv_color_hex(0x2dd4bf), 0);
+#endif
+
+    audio_chip.label = status_label_create(chip);
+    lv_obj_set_style_text_color(audio_chip.label, lv_color_white(), 0);
+    lv_label_set_long_mode(audio_chip.label, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_height(audio_chip.label, lv_font_get_line_height(&inter_med_13));
+}
+
+static void launcher_visibility_cb(void) {
+    audio_chip_refresh();
+}
+
+#define NAV_TICK_MS     250
+#define APP_IDLE_HOME_MS 30000
+
+static void nav_tick_cb(lv_timer_t *t) {
+    (void)t;
+    lv_obj_t *active = lv_screen_active();
+    if (active == idle_screen.screen) {
+        idle_screen_refresh();
+        return;
+    }
+    // A page left alone goes home, unless it's showing progress the user
+    // may be watching; the clock's chips lead back to it either way.
+    int app = ui_tools_app_of(active);
+    char buf[16];
+    if (app >= 0 && !launcher_visible() && !ui_tools_status((ui_app_t)app, buf, sizeof(buf)) &&
+        lv_display_get_inactive_time(NULL) >= APP_IDLE_HOME_MS) {
+        go_home();
+    }
+}
+
+// The knob doesn't go through an LVGL input device, so it has to report its
+// own activity for the idle timeout.
+static void knob_activity(void) {
+    lv_display_trigger_activity(NULL);
+}
+
 bool ui_knob_rotate(int steps) {
-    return lv_screen_active() == s_pages[PAGE_TIMER] && ui_timer_knob_rotate(steps);
+    knob_activity();
+    if (launcher_visible()) {
+        launcher_rotate(steps);
+        return true;
+    }
+    return ui_tools_knob_rotate(lv_screen_active(), steps);
 }
 
 bool ui_knob_press(void) {
-    lv_obj_t *active = lv_screen_active();
-    if (active == s_pages[PAGE_TIMER]) {
-        ui_timer_knob_press();
+    knob_activity();
+    if (launcher_visible()) {
+        launcher_activate();
         return true;
     }
-    if (active == s_pages[PAGE_STOPWATCH]) {
-        ui_stopwatch_knob_press();
-        return true;
+    return ui_tools_knob_press(lv_screen_active());
+}
+
+void ui_knob_long_press(void) {
+    knob_activity();
+    if (launcher_visible()) {
+        go_home();
+    } else {
+        open_launcher();
     }
-    return false;
 }
 
 void ui_init(void) {
-    // idle_screen is the back-navigation target and the landing screen, so
-    // it must exist before the other screens wire their home swipe to it.
+    // The clock's chips take each app's icon and tint, so the apps go first.
+    apps_build();
     idle_screen_build();
     s_home = idle_screen.screen;
     wireless_screen_build();
+#ifdef AK_USB_AUDIO
     usb_screen_build();
+#endif
     switch_screen_build();
-    pages_build();
+    audio_chip_build();
+    launcher_build(open_app, go_home, launcher_visibility_cb);
+    lv_timer_create(nav_tick_cb, NAV_TICK_MS, NULL);
 
     lv_screen_load(s_home);
+    idle_screen_refresh();
 }
 
 static void update_artwork(const ui_track_info_t *track) {
@@ -859,6 +1092,31 @@ static void update_artwork(const ui_track_info_t *track) {
     lv_obj_invalidate(wireless_screen.art);
     lv_obj_remove_flag(wireless_screen.art, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(wireless_screen.tile_icon, LV_OBJ_FLAG_HIDDEN);
+}
+
+// A rounded, clipped, gradient tile costs a few ms per full frame to
+// rasterise, and it only changes with the source tint or the art. Its
+// snapshot keeps alpha so the antialiased corners blend over the backdrop
+// (ARGB8888: LVGL can't blend ARGB8565 onto the panel's swapped RGB565).
+static void tile_bake(lv_color_t tint) {
+    if (wireless_screen.tile_baked && wireless_screen.baked_art_version == wireless_screen.art_version &&
+        lv_color_eq(wireless_screen.baked_tint, tint)) {
+        return;
+    }
+    lv_obj_remove_flag(wireless_screen.tile, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_update_layout(wireless_screen.tile);
+    lv_draw_buf_t *baked = lv_snapshot_take(wireless_screen.tile, LV_COLOR_FORMAT_ARGB8888);
+    lv_obj_add_flag(wireless_screen.tile, LV_OBJ_FLAG_HIDDEN);
+    if (!baked) {
+        return;
+    }
+    lv_image_set_src(wireless_screen.tile_img, baked);
+    if (wireless_screen.tile_baked) {
+        lv_draw_buf_destroy(wireless_screen.tile_baked);
+    }
+    wireless_screen.tile_baked = baked;
+    wireless_screen.baked_art_version = wireless_screen.art_version;
+    wireless_screen.baked_tint = tint;
 }
 
 static void format_subtitle(const ui_track_info_t *track, char *out, size_t len) {
@@ -903,7 +1161,7 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     ui_set_visible(wireless_screen.wait_chip, waiting);
     ui_set_visible(wireless_screen.wait_title, waiting);
     ui_set_visible(wireless_screen.wait_subtitle, waiting);
-    ui_set_visible(wireless_screen.tile, !waiting);
+    ui_set_visible(wireless_screen.tile_img, !waiting);
     ui_set_visible(wireless_screen.transport, !waiting);
     ui_set_visible(wireless_screen.title_label, !waiting);
     ui_set_visible(wireless_screen.subtitle_label, !waiting);
@@ -926,16 +1184,18 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
         ui_label_set_text(wireless_screen.title_label, has_track ? track->title : source_name);
         ui_label_set_text(wireless_screen.subtitle_label, subtitle);
         update_artwork(track);
+        tile_bake(tint);
     }
 
+    s_audio.wireless_connected = state->connected;
+    s_audio.wireless_playing = state->playing;
+    s_audio.wireless_airplay = airplay;
+    snprintf(s_audio.wireless_text, sizeof(s_audio.wireless_text), "%s", has_track ? track->title : source_name);
     surface_source(wireless_screen.screen, state->playing, &was_playing);
-    if (state->playing) {
-        glance_update(!waiting, source_name, tint, has_track ? track->title : NULL, subtitle);
-    } else if (s_source_screen == wireless_screen.screen) {
-        glance_update(false, NULL, tint, NULL, NULL);
-    }
+    audio_chip_refresh();
 }
 
+#ifdef AK_USB_AUDIO
 void ui_update_usb(uint8_t volume, bool muted, bool playing) {
     static bool was_playing;
     ring_set_volume(usb_screen.ring, volume);
@@ -943,13 +1203,11 @@ void ui_update_usb(uint8_t volume, bool muted, bool playing) {
     ui_label_set_text(usb_screen.play_icon, muted ? LV_SYMBOL_MUTE : (playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));
     lv_obj_set_style_text_color(usb_screen.play_icon, muted ? lv_color_hex(0xff5a5a) : lv_color_white(), 0);
 
+    s_audio.usb_playing = playing;
     surface_source(usb_screen.screen, playing, &was_playing);
-    if (playing) {
-        glance_update(true, "USB Audio", lv_color_hex(0x2dd4bf), NULL, NULL);
-    } else if (s_source_screen == usb_screen.screen) {
-        glance_update(false, NULL, lv_color_white(), NULL, NULL);
-    }
+    audio_chip_refresh();
 }
+#endif
 
 void ui_update_clock(bool synced, const struct tm *local_time) {
     if (!synced || !local_time) {
@@ -958,15 +1216,20 @@ void ui_update_clock(bool synced, const struct tm *local_time) {
         return;
     }
 
+    // The clock font has digits and ':' only, so 12-hour time carries its
+    // AM/PM on the date line.
+    bool h24 = ui_settings_current()->clock_24h;
+    int hour = h24 ? local_time->tm_hour : (local_time->tm_hour % 12 ? local_time->tm_hour % 12 : 12);
     char buf[32];
-    strftime(buf, sizeof(buf), "%H:%M", local_time);
+    snprintf(buf, sizeof(buf), h24 ? "%02d:%02d" : "%d:%02d", hour, local_time->tm_min);
     ui_label_set_text(idle_screen.time_label, buf);
 
     // "Sun 4 Oct" like the mock; %d would zero-pad and %-d isn't portable.
     char weekday[8], month[8];
     strftime(weekday, sizeof(weekday), "%a", local_time);
     strftime(month, sizeof(month), "%b", local_time);
-    snprintf(buf, sizeof(buf), "%s %d %s", weekday, local_time->tm_mday, month);
+    snprintf(buf, sizeof(buf), "%s %d %s%s", weekday, local_time->tm_mday, month,
+             h24 ? "" : local_time->tm_hour < 12 ? " \xC2\xB7 AM" : " \xC2\xB7 PM");
     ui_label_set_text(idle_screen.date_label, buf);
 }
 
