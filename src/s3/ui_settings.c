@@ -5,17 +5,14 @@
 
 #include "tz.h"
 
-// A wheel: the selected row always sits in a fixed highlight at the middle
-// of the round screen, the list scrolls through it, and rows fade with
-// distance so the clipped top and bottom of the circle stay quiet. Rows are
-// grouped under section headers the selection skips. The knob moves the
-// selection and a press (or a tap on a row) acts on it: switches flip at
-// once, brightness, sleep and timezone enter an edit mode where the knob (or
-// the -/+ buttons that cover the rows below meanwhile) changes the value
-// until the next press/tap, and the name and web page rows (and turning
-// Auto location off) open a QR code for the device's web page, which has
-// every setting too (a name or a city can't be typed here). The Forget rows
-// ask first, on the full-screen confirmation.
+// A list under the title: the knob moves the selection (the list scrolls to
+// keep it near the middle) and a press, or a tap on a row, acts on it.
+// Switches flip at once; brightness, sleep and timezone are edited in place:
+// the knob changes the value and a cancel/apply strip covers the rows below
+// until one is tapped (a press applies too). The name and web page rows (and turning Auto location off) open a
+// QR code for the device's web page, which has every setting too (a name or
+// a city can't be typed here). The Forget rows ask first, on the
+// full-screen confirmation.
 
 #define SET_TINT        0x9a9aa4
 #define SET_ACCENT      0x4ea1ff
@@ -23,8 +20,9 @@
 #define SET_SWITCH_OFF  0x3a3a46
 #define SET_TITLE_Y     TOOL_TITLE_TOP_Y
 #define SET_LIST_W      272
-#define SET_LIST_H      236
-#define SET_LIST_Y      14
+// From just under the title to the home pill.
+#define SET_LIST_TOP    (UI_SAFE_TOP + 22)
+#define SET_LIST_H      (304 - SET_LIST_TOP)
 #define SET_ROW_H       48
 #define SET_HEADER_H    28
 #define SET_ROW_PAD     16
@@ -32,22 +30,20 @@
 #define SET_SWITCH_H    26
 #define SET_KNOB        22
 #define SET_LEVEL_W     52
-#define SET_FADE_ROWS   3   // rows from the middle to the faintest
+#define SET_FADE_ROWS   3   // rows from the selection to the faintest
 #define SET_FADE_MIN    40
 #define SET_BRIGHT_STEP 5
 #define SET_BRIGHT_MIN  5
+// The edit mode's cancel/apply strip, from under the edited row to the
+// list's end.
+#define SET_EDIT_GAP_TOP 4
+#define SET_EDIT_BTN    56
+#define SET_EDIT_GAP    32
+// Timezone picker position for "automatic", ahead of tz_db's entries.
+#define TZ_AUTO (-1)
 // Display sleep choices, seconds; the web page offers the same.
 static const uint16_t k_sleep_options[] = {0, 30, 60, 120, 300, 600, 1800, UI_SLEEP_MAX_S};
 #define SLEEP_OPTION_COUNT (int)(sizeof(k_sleep_options) / sizeof(k_sleep_options[0]))
-// Timezone picker position for "automatic", ahead of tz_db's entries.
-#define TZ_AUTO (-1)
-// The edit mode's -/+ buttons, below the highlight down to the list's end.
-#define SET_STEPPER_TOP  (SET_LIST_Y + SET_ROW_H / 2 + 6)
-#define SET_STEPPER_H    (SET_LIST_H / 2 - SET_ROW_H / 2 - 6)
-#define SET_STEP_SIZE    56
-#define SET_STEP_GAP     32
-// Held, the timezone steps faster the longer it's held: there are hundreds.
-#define SET_TZ_FAST_REPS 10
 #define SET_QR_SIZE     150
 #define SET_QR_Y        (-4)
 #define SET_QR_TITLE_Y  UI_SAFE_TOP_Y(20) // inter_semi_16, clear of the audio chip
@@ -151,21 +147,20 @@ static ui_settings_t s_settings = {
 
 static struct {
     lv_obj_t *list;
-    lv_obj_t *highlight;
     lv_obj_t *items[LAYOUT_COUNT];
     lv_obj_t *rows[ROW_COUNT];
     lv_obj_t *names[ROW_COUNT];
     lv_obj_t *values[ROW_COUNT];   // KIND_VALUE and KIND_LEVEL
     lv_obj_t *switches[ROW_COUNT]; // KIND_SWITCH: the track; its child is the knob
     lv_obj_t *level;               // brightness bar
-    lv_obj_t *stepper;             // the -/+ buttons, while editing
-    int step_reps;                 // long-press repeats of the held one
+    lv_obj_t *edit_bar;            // cancel/apply, while editing
     int selected;
     bool editing;
+    uint16_t edit_from;            // brightness or sleep_s when editing began
+    int tz_pick;                   // TZ_AUTO or a tz_db index, while editing the timezone
     lv_obj_t *qr_overlay; // while open
     lv_obj_t *qr;
     lv_obj_t *qr_url;
-    int tz_pick; // TZ_AUTO or a tz_db index, while editing the timezone
     void (*handler)(ui_setting_t setting, int value, const char *zone);
 } st;
 
@@ -349,18 +344,22 @@ static void render(void) {
     lv_bar_set_value(st.level, s_settings.brightness, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(st.level, lv_color_hex(st.editing && st.selected == ROW_BRIGHTNESS ? SET_ACCENT : 0xffffff),
                               LV_PART_INDICATOR);
-    ui_set_visible(st.stepper, st.editing);
-    lv_obj_set_style_bg_opa(st.highlight, st.editing ? 56 : 26, 0);
-    lv_obj_set_style_bg_color(st.highlight, lv_color_hex(st.editing ? SET_ACCENT : 0xffffff), 0);
+    for (int i = 0; i < ROW_COUNT; i++) {
+        bool selected = i == st.selected;
+        lv_obj_set_style_bg_opa(st.rows[i], selected ? (st.editing ? 56 : 26) : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_bg_color(st.rows[i], lv_color_hex(selected && st.editing ? SET_ACCENT : 0xffffff), 0);
+    }
+    ui_set_visible(st.edit_bar, st.editing);
 }
 
-// Rows fade with their distance from the middle. Labels and switches each
-// take their own opacity: a whole-row opa would render every row through a
-// layer.
+// Rows fade with their distance from the selection. Labels and switches
+// each take their own opacity: a whole-row opa would render every row
+// through a layer.
 static void fade(void) {
-    lv_area_t list_area;
-    lv_obj_get_coords(st.list, &list_area);
-    int32_t mid = (list_area.y1 + list_area.y2) / 2;
+    lv_obj_update_layout(st.list);
+    lv_area_t sel;
+    lv_obj_get_coords(st.rows[st.selected], &sel);
+    int32_t mid = (sel.y1 + sel.y2) / 2;
     for (size_t i = 0; i < LAYOUT_COUNT; i++) {
         lv_obj_t *item = st.items[i];
         if (lv_obj_has_flag(item, LV_OBJ_FLAG_HIDDEN)) {
@@ -381,17 +380,18 @@ static void fade(void) {
     }
 }
 
-// Brings a row to the highlight in the middle.
+// Scrolls a row toward the middle, as far as the list's ends allow: the
+// first rows stay where they are, under the title.
 static void center_row(int row, lv_anim_enable_t anim) {
     lv_obj_update_layout(st.list);
     lv_area_t list_area, row_area;
     lv_obj_get_coords(st.list, &list_area);
     lv_obj_get_coords(st.rows[row], &row_area);
-    int32_t offset = (row_area.y1 + row_area.y2) / 2 - (list_area.y1 + list_area.y2) / 2;
-    lv_obj_scroll_to_y(st.list, lv_obj_get_scroll_y(st.list) + offset, anim);
-    if (!anim) {
-        fade();
-    }
+    int32_t y = lv_obj_get_scroll_y(st.list);
+    int32_t target = y + (row_area.y1 + row_area.y2) / 2 - (list_area.y1 + list_area.y2) / 2;
+    int32_t max = y + lv_obj_get_scroll_bottom(st.list);
+    target = target < 0 ? 0 : target > max ? max : target;
+    lv_obj_scroll_to_y(st.list, target, anim);
 }
 
 static void select_row(int row, bool scroll) {
@@ -401,6 +401,7 @@ static void select_row(int row, bool scroll) {
     if (row != st.selected) {
         st.selected = row;
         render();
+        fade();
     }
     if (scroll) {
         center_row(row, LV_ANIM_ON);
@@ -480,10 +481,14 @@ static void qr_open(lv_obj_t *screen, const char *title) {
     qr_show_url();
 }
 
-// Leaving the page (e.g. for another app) closes the code.
+static void edit_end(bool apply);
+
+// Leaving the page (e.g. for another app) closes the code and cancels an
+// edit.
 static void screen_unloaded_cb(lv_event_t *e) {
     (void)e;
     qr_close();
+    edit_end(false);
 }
 
 void ui_settings_refresh(void) {
@@ -521,6 +526,43 @@ static void toggle_airplay(unsigned bit) {
     emit(UI_SETTING_AIRPLAY, (s_settings.airplay ^ bit) & (UI_AIRPLAY_1 | UI_AIRPLAY_2), NULL);
 }
 
+// Covers the rows below the edited one, which is settled in place first so
+// the strip lines up with it.
+static void edit_bar_place(void) {
+    center_row(st.selected, LV_ANIM_OFF);
+    lv_area_t row;
+    lv_obj_get_coords(st.rows[st.selected], &row);
+    int32_t top = row.y2 + SET_EDIT_GAP_TOP;
+    lv_obj_set_height(st.edit_bar, SET_LIST_TOP + SET_LIST_H - top);
+    lv_obj_align(st.edit_bar, LV_ALIGN_TOP_MID, 0, top);
+}
+
+static void edit_begin(void) {
+    edit_bar_place();
+    st.editing = true;
+    st.edit_from = st.selected == ROW_BRIGHTNESS ? s_settings.brightness : s_settings.sleep_s;
+    if (st.selected == ROW_TIMEZONE) {
+        st.tz_pick = s_settings.tz_auto ? TZ_AUTO : tz_db_find(s_settings.tz_name);
+    }
+}
+
+// Brightness and sleep change as the knob turns, so cancelling puts them
+// back; the timezone only takes effect once applied.
+static void edit_end(bool apply) {
+    if (!st.editing) {
+        return;
+    }
+    st.editing = false;
+    if (st.selected == ROW_TIMEZONE && apply) {
+        emit(UI_SETTING_TIMEZONE, 0, st.tz_pick == TZ_AUTO ? NULL : tz_db[st.tz_pick].name);
+    } else if (st.selected == ROW_BRIGHTNESS && !apply) {
+        emit(UI_SETTING_BRIGHTNESS, st.edit_from, NULL);
+    } else if (st.selected == ROW_SLEEP && !apply) {
+        emit(UI_SETTING_SLEEP, st.edit_from, NULL);
+    }
+    render();
+}
+
 // Run once their confirmation is accepted.
 static void forget_devices(void) {
     ui_pairing_request(UI_PAIRING_FORGET);
@@ -537,21 +579,14 @@ static void activate(void) {
         return;
     }
     if (st.editing) {
-        st.editing = false;
-        if (st.selected == ROW_TIMEZONE) {
-            emit(UI_SETTING_TIMEZONE, 0, st.tz_pick == TZ_AUTO ? NULL : tz_db[st.tz_pick].name);
-        }
-        render();
+        edit_end(true);
         return;
     }
     switch (st.selected) {
     case ROW_BRIGHTNESS:
     case ROW_SLEEP:
-        st.editing = true;
-        break;
     case ROW_TIMEZONE:
-        st.editing = true;
-        st.tz_pick = s->tz_auto ? TZ_AUTO : tz_db_find(s->tz_name);
+        edit_begin();
         break;
     case ROW_CLOCK:
         emit(UI_SETTING_CLOCK_24H, !s->clock_24h, NULL);
@@ -640,26 +675,22 @@ static bool settings_rotate(int steps) {
 static void row_click_cb(lv_event_t *e) {
     int row = (int)(intptr_t)lv_event_get_user_data(e);
     if (row != st.selected && st.editing) {
-        activate();
+        edit_end(true);
     }
     select_row(row, true);
     activate();
 }
 
-static void list_scroll_cb(lv_event_t *e) {
-    (void)e;
-    fade();
-}
-
-// A drag leaves the selection on whichever row it stopped nearest the
-// middle; snapping has already centred it.
+// A drag that takes the selection out of view moves it to the row nearest
+// the middle, so the knob carries on from what's on screen.
 static void list_scroll_end_cb(lv_event_t *e) {
     (void)e;
-    if (lv_obj_is_scrolling(st.list) || st.editing) {
+    lv_area_t list_area, a;
+    lv_obj_get_coords(st.list, &list_area);
+    lv_obj_get_coords(st.rows[st.selected], &a);
+    if (a.y1 >= list_area.y1 && a.y2 <= list_area.y2) {
         return;
     }
-    lv_area_t list_area;
-    lv_obj_get_coords(st.list, &list_area);
     int32_t mid = (list_area.y1 + list_area.y2) / 2;
     int best = st.selected;
     int32_t best_dist = INT32_MAX;
@@ -667,7 +698,6 @@ static void list_scroll_end_cb(lv_event_t *e) {
         if (!row_visible(i)) {
             continue;
         }
-        lv_area_t a;
         lv_obj_get_coords(st.rows[i], &a);
         int32_t dist = LV_ABS((a.y1 + a.y2) / 2 - mid);
         if (dist < best_dist) {
@@ -678,55 +708,40 @@ static void list_scroll_end_cb(lv_event_t *e) {
     select_row(best, false);
 }
 
-static void step_cb(lv_event_t *e) {
-    int dir = (int)(intptr_t)lv_event_get_user_data(e);
-    int steps = 1;
-    if (lv_event_get_code(e) == LV_EVENT_PRESSED) {
-        st.step_reps = 0;
-        return;
-    }
-    if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED_REPEAT && st.selected == ROW_TIMEZONE) {
-        steps += ++st.step_reps / SET_TZ_FAST_REPS;
-    }
-    if (st.editing) {
-        settings_rotate(dir * steps);
-    }
-}
-
-// A tap beside the buttons finishes editing, as a tap on the row does.
-static void stepper_click_cb(lv_event_t *e) {
+static void edit_cancel_cb(lv_event_t *e) {
     (void)e;
-    if (st.editing) {
-        activate();
-    }
+    edit_end(false);
 }
 
-static void step_button_create(lv_obj_t *parent, const char *symbol, int dir) {
-    lv_obj_t *btn = lv_obj_get_parent(ui_round_button_create(parent, symbol, SET_STEP_SIZE, &lv_font_montserrat_22, false));
+static void edit_apply_cb(lv_event_t *e) {
+    (void)e;
+    edit_end(true);
+}
+
+static lv_obj_t *edit_button_create(lv_obj_t *parent, const char *symbol, lv_event_cb_t cb) {
+    lv_obj_t *btn = lv_obj_get_parent(ui_round_button_create(parent, symbol, SET_EDIT_BTN, &lv_font_montserrat_22, false));
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(btn, SET_STEP_GAP / 4);
-    lv_obj_add_event_cb(btn, step_cb, LV_EVENT_PRESSED, (void *)(intptr_t)dir);
-    lv_obj_add_event_cb(btn, step_cb, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)dir);
-    lv_obj_add_event_cb(btn, step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)dir);
+    lv_obj_set_ext_click_area(btn, SET_EDIT_GAP / 4);
+    lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+    return btn;
 }
 
 // Opaque, so the rows it covers don't show through, and clickable, so taps
-// on it don't reach them.
-static void stepper_create(lv_obj_t *screen) {
-    st.stepper = lv_obj_create(screen);
-    lv_obj_remove_style_all(st.stepper);
-    lv_obj_remove_flag(st.stepper, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(st.stepper, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_size(st.stepper, SET_LIST_W, SET_STEPPER_H);
-    lv_obj_set_style_bg_color(st.stepper, lv_obj_get_style_bg_color(screen, 0), 0);
-    lv_obj_set_style_bg_opa(st.stepper, LV_OPA_COVER, 0);
-    lv_obj_set_flex_flow(st.stepper, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(st.stepper, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(st.stepper, SET_STEP_GAP, 0);
-    lv_obj_align(st.stepper, LV_ALIGN_CENTER, 0, SET_STEPPER_TOP + SET_STEPPER_H / 2);
-    lv_obj_add_event_cb(st.stepper, stepper_click_cb, LV_EVENT_CLICKED, NULL);
-    step_button_create(st.stepper, LV_SYMBOL_MINUS, -1);
-    step_button_create(st.stepper, LV_SYMBOL_PLUS, 1);
+// beside the buttons don't reach them.
+static void edit_bar_create(lv_obj_t *screen) {
+    st.edit_bar = lv_obj_create(screen);
+    lv_obj_remove_style_all(st.edit_bar);
+    lv_obj_remove_flag(st.edit_bar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(st.edit_bar, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_width(st.edit_bar, SET_LIST_W);
+    lv_obj_set_style_bg_color(st.edit_bar, lv_obj_get_style_bg_color(screen, 0), 0);
+    lv_obj_set_style_bg_opa(st.edit_bar, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(st.edit_bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(st.edit_bar, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(st.edit_bar, SET_EDIT_GAP, 0);
+    edit_button_create(st.edit_bar, LV_SYMBOL_CLOSE, edit_cancel_cb);
+    lv_obj_t *apply = edit_button_create(st.edit_bar, LV_SYMBOL_OK, edit_apply_cb);
+    lv_obj_set_style_bg_color(apply, lv_color_hex(SET_ACCENT), 0);
 }
 
 static lv_obj_t *label_create(lv_obj_t *parent, const lv_font_t *font, uint32_t color) {
@@ -788,8 +803,11 @@ static lv_obj_t *row_create(lv_obj_t *list, int index) {
     lv_obj_t *row = lv_obj_create(list);
     lv_obj_remove_style_all(row);
     lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SNAPPABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(row, lv_pct(100), SET_ROW_H);
+    // The selection's highlight.
+    lv_obj_set_style_radius(row, SET_ROW_H / 2, 0);
+    lv_obj_set_style_bg_color(row, lv_color_white(), 0);
     lv_obj_set_style_pad_hor(row, SET_ROW_PAD, 0);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -839,36 +857,25 @@ void settings_page_build(lv_obj_t *screen) {
     lv_obj_t *title = tool_title_create(screen, "SETTINGS", lv_color_hex(SET_TINT));
     lv_obj_align(title, LV_ALIGN_CENTER, 0, SET_TITLE_Y);
 
-    // Fixed in the middle; rows scroll through it.
-    st.highlight = lv_obj_create(screen);
-    lv_obj_remove_style_all(st.highlight);
-    lv_obj_remove_flag(st.highlight, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(st.highlight, SET_LIST_W, SET_ROW_H);
-    lv_obj_set_style_radius(st.highlight, SET_ROW_H / 2, 0);
-    lv_obj_align(st.highlight, LV_ALIGN_CENTER, 0, SET_LIST_Y);
-
     st.list = lv_obj_create(screen);
     lv_obj_remove_style_all(st.list);
     lv_obj_set_size(st.list, SET_LIST_W, SET_LIST_H);
     lv_obj_set_flex_flow(st.list, LV_FLEX_FLOW_COLUMN);
-    // Room for the first and last rows to reach the middle.
-    lv_obj_set_style_pad_ver(st.list, (SET_LIST_H - SET_ROW_H) / 2, 0);
     lv_obj_set_scroll_dir(st.list, LV_DIR_VER);
-    lv_obj_set_scroll_snap_y(st.list, LV_SCROLL_SNAP_CENTER);
     lv_obj_set_scrollbar_mode(st.list, LV_SCROLLBAR_MODE_OFF);
     lv_obj_remove_flag(st.list, LV_OBJ_FLAG_SCROLL_ELASTIC);
-    lv_obj_align(st.list, LV_ALIGN_CENTER, 0, SET_LIST_Y);
-    lv_obj_add_event_cb(st.list, list_scroll_cb, LV_EVENT_SCROLL, NULL);
+    lv_obj_align(st.list, LV_ALIGN_TOP_MID, 0, SET_LIST_TOP);
     lv_obj_add_event_cb(st.list, list_scroll_end_cb, LV_EVENT_SCROLL_END, NULL);
     for (size_t i = 0; i < LAYOUT_COUNT; i++) {
         st.items[i] = k_layout[i].row < 0 ? header_create(st.list, k_layout[i].header)
                                           : row_create(st.list, k_layout[i].row);
     }
     lv_obj_set_flag(st.rows[ROW_AIRPLAY2], LV_OBJ_FLAG_HIDDEN, !row_visible(ROW_AIRPLAY2));
-    stepper_create(screen);
+    edit_bar_create(screen);
     lv_obj_add_event_cb(screen, screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 
     st.selected = ROW_BRIGHTNESS;
     render();
+    fade();
     center_row(st.selected, LV_ANIM_OFF);
 }

@@ -151,6 +151,7 @@ typedef struct {
         lv_obj_t *card;
         lv_obj_t *thumb;
         lv_obj_t *icon;
+        lv_obj_t *idle_icon;
         lv_obj_t *art;
         lv_obj_t *title;
         lv_obj_t *subtitle;
@@ -276,13 +277,48 @@ static void open_app(ui_app_t app) {
     show_screen(s_apps[app]);
 }
 
-static void open_launcher(void) {
-    int app = ui_tools_app_of(lv_screen_active());
-    launcher_show(app >= 0 ? (ui_app_t)app : s_last_app);
-}
-
 static void switch_back_cb(lv_event_t *e);
 static void open_switch_cb(lv_event_t *e);
+static lv_obj_t *audio_screen(void);
+
+static bool on_audio_screen(void) {
+    lv_obj_t *active = lv_screen_active();
+#ifdef AK_USB_AUDIO
+    if (active == usb_screen.screen) {
+        return true;
+    }
+#endif
+    return active == wireless_screen.screen || active == switch_screen.screen;
+}
+
+// From an app page its own icon is selected, from the audio screens the
+// audio entry; from the clock, the app last opened.
+static void open_launcher(void) {
+    int app = ui_tools_app_of(lv_screen_active());
+    launcher_show(app >= 0 ? app : on_audio_screen() ? LAUNCHER_AUDIO : (int)s_last_app);
+}
+
+// What's playing, or with nothing connected, the source picker and from
+// there the "waiting for" instructions.
+static void open_audio(void) {
+    lv_obj_t *target = audio_screen();
+    if (!target) {
+        open_switch_cb(NULL);
+        return;
+    }
+    s_homed = false;
+    // Paused audio would otherwise drop straight back home.
+    s_pinned = true;
+    show_screen(target);
+}
+
+static void launcher_open(int entry) {
+    if (entry == LAUNCHER_AUDIO) {
+        open_audio();
+    } else {
+        open_app((ui_app_t)entry);
+    }
+}
 
 // Shared by every source: surfaces `screen` while `playing`, falls back to
 // home when it stops, and respects an in-progress swipe home. A fresh
@@ -563,16 +599,21 @@ static lv_obj_t *clock_pill_create(lv_obj_t *parent, const char *icon, lv_color_
 #define NP_THUMB      32
 #define NP_PLAY       32
 
-static void audio_chip_cb(lv_event_t *e);
 
-// The clock face's top complication, heading its column. Tapping it opens
-// the source's screen; its button plays/pauses without leaving the clock.
+static void np_card_cb(lv_event_t *e) {
+    (void)e;
+    open_audio();
+}
+
+// The clock face's top complication, heading its column: what's playing,
+// or with nothing connected, that the device is ready to. Its button
+// plays/pauses without leaving the clock.
 static void np_card_build(lv_obj_t *col) {
     lv_obj_t *card = lv_obj_create(col);
     lv_obj_remove_style_all(card);
     lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_event_cb(card, audio_chip_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(card, np_card_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_size(card, NP_CARD_W, NP_CARD_H);
     lv_obj_set_style_margin_bottom(card, FACE_COMP_GAP, 0);
     lv_obj_set_style_pad_all(card, NP_CARD_PAD, 0);
@@ -596,6 +637,11 @@ static void np_card_build(lv_obj_t *col) {
     idle_screen.np.thumb = thumb;
     idle_screen.np.icon = icon_create(thumb, &icon_airplay, 16, lv_color_white());
     lv_obj_center(idle_screen.np.icon);
+    idle_screen.np.idle_icon = lv_label_create(thumb);
+    lv_label_set_text(idle_screen.np.idle_icon, LV_SYMBOL_VOLUME_MAX);
+    lv_obj_set_style_text_font(idle_screen.np.idle_icon, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(idle_screen.np.idle_icon, lv_color_white(), 0);
+    lv_obj_center(idle_screen.np.idle_icon);
     idle_screen.np.art = lv_image_create(thumb);
     lv_image_set_inner_align(idle_screen.np.art, LV_IMAGE_ALIGN_STRETCH);
     lv_obj_set_size(idle_screen.np.art, NP_THUMB, NP_THUMB);
@@ -752,6 +798,9 @@ static void idle_screen_refresh(void) {
         snprintf(range, sizeof(range), "H %d\xC2\xB0  L %d\xC2\xB0", wx.high, wx.low);
         ui_label_set_text(idle_screen.weather_range, range);
     }
+    // The idle row lists the enabled sources, which Settings can change
+    // with no audio state push to refresh it.
+    audio_chip_refresh();
     ampm_place();
 }
 
@@ -1060,11 +1109,31 @@ static void audio_chip_set_text(const char *text) {
 
 // Like the audio chip, refreshed on every state push, so each setter skips
 // no-op changes.
+#define NP_IDLE_TINT 0x3a3a46
+
+// With nothing connected the row still says what the device is for.
+static void np_card_idle(void) {
+    lv_color_t tint = lv_color_hex(NP_IDLE_TINT);
+    if (!lv_color_eq(tint, idle_screen.np.tint)) {
+        idle_screen.np.tint = tint;
+        lv_obj_set_style_bg_color(idle_screen.np.thumb, tint, 0);
+    }
+    ui_set_visible(idle_screen.np.art, false);
+    ui_set_visible(idle_screen.np.icon, false);
+    ui_set_visible(idle_screen.np.idle_icon, true);
+    ui_set_visible(idle_screen.np.subtitle, false);
+    ui_set_visible(lv_obj_get_parent(idle_screen.np.play), false);
+    ui_label_set_text(idle_screen.np.title, "Ready to play");
+}
+
 static void np_card_refresh(lv_obj_t *target) {
-    ui_set_visible(idle_screen.np.card, target != NULL);
     if (!target) {
+        np_card_idle();
         return;
     }
+    ui_set_visible(lv_obj_get_parent(idle_screen.np.play), true);
+    ui_set_visible(idle_screen.np.idle_icon, false);
+    ui_set_visible(idle_screen.np.subtitle, true);
 #ifdef AK_USB_AUDIO
     bool usb = target == usb_screen.screen;
     bool playing = usb ? s_audio.usb_playing : s_audio.wireless_playing;
@@ -1143,12 +1212,7 @@ static void audio_chip_refresh(void) {
 
 static void audio_chip_cb(lv_event_t *e) {
     (void)e;
-    if (audio_chip.target) {
-        s_homed = false;
-        // Paused audio would otherwise drop straight back home.
-        s_pinned = true;
-        show_screen(audio_chip.target);
-    }
+    open_audio();
 }
 
 static void audio_chip_build(void) {
@@ -1169,6 +1233,21 @@ static void audio_chip_build(void) {
     lv_obj_set_style_text_color(audio_chip.label, lv_color_white(), 0);
     lv_label_set_long_mode(audio_chip.label, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_height(audio_chip.label, lv_font_get_line_height(&inter_med_13));
+}
+
+static bool launcher_audio_status(char *buf, size_t len) {
+    lv_obj_t *target = audio_screen();
+    if (!target) {
+        return false;
+    }
+#ifdef AK_USB_AUDIO
+    if (target == usb_screen.screen) {
+        snprintf(buf, len, "USB Audio");
+        return true;
+    }
+#endif
+    snprintf(buf, len, "%s", s_audio.wireless_text);
+    return true;
 }
 
 static void launcher_visibility_cb(void) {
@@ -1317,7 +1396,10 @@ void ui_init(void) {
 #endif
     switch_screen_build();
     audio_chip_build();
-    launcher_build(open_app, go_home, launcher_visibility_cb);
+    launcher_build(&(launcher_handlers_t){.open = launcher_open,
+                                          .dismissed = go_home,
+                                          .visibility_changed = launcher_visibility_cb,
+                                          .audio_status = launcher_audio_status});
     sleep_build();
     lv_timer_create(nav_tick_cb, NAV_TICK_MS, NULL);
 
