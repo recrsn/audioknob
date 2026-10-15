@@ -10,9 +10,6 @@
 #include "fonts.h"
 #include "ui_internal.h"
 
-#define TOOL_TITLE_Y         (-96)
-// A title as high as the chip safe area allows, for pages that need the room.
-#define TOOL_TITLE_TOP_Y     UI_SAFE_TOP_Y(14)
 #define TOOL_HINT_Y          44
 #define COUNTDOWN_RING_RANGE 1000
 

@@ -8,8 +8,6 @@
 #define LAUNCHER_NAME_Y    (-9)
 #define LAUNCHER_STATUS_Y  13
 #define LAUNCHER_STATUS_MS 250
-#define LAUNCHER_IDLE_ITEM 0x1c1c24
-#define LAUNCHER_AUDIO_TINT 0x4ea1ff
 
 // Ring positions, clockwise from the top: the audio entry, then the apps.
 #define LAUNCHER_COUNT (UI_APP_COUNT + 1)
@@ -37,7 +35,7 @@ static const char *entry_name(int pos) {
 }
 
 static lv_color_t entry_tint(int pos) {
-    return pos == 0 ? lv_color_hex(LAUNCHER_AUDIO_TINT) : ui_tools_info((ui_app_t)entry_at(pos)).tint;
+    return pos == 0 ? lv_color_hex(UI_TINT_AIRPLAY) : ui_tools_info((ui_app_t)entry_at(pos)).tint;
 }
 
 bool launcher_visible(void) {
@@ -59,8 +57,8 @@ static void status_timer_cb(lv_timer_t *t) {
 static void item_style(int pos, bool selected) {
     lv_color_t tint = entry_tint(pos);
     lv_obj_t *item = ln.items[pos];
-    lv_obj_set_style_bg_color(item, selected ? tint : lv_color_hex(LAUNCHER_IDLE_ITEM), 0);
-    lv_obj_set_style_bg_opa(item, selected ? LV_OPA_30 : LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(item, selected ? tint : lv_color_hex(UI_COLOR_SURFACE), 0);
+    lv_obj_set_style_bg_opa(item, selected ? UI_OPA_TINTED : LV_OPA_COVER, 0);
     lv_obj_set_style_border_opa(item, selected ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
 }
 
@@ -123,10 +121,10 @@ static void item_icon_create(lv_obj_t *item, int pos) {
     lv_obj_t *icon = lv_label_create(item);
     if (pos == 0) {
         lv_label_set_text(icon, LV_SYMBOL_VOLUME_MAX);
-        lv_obj_set_style_text_font(icon, &lv_font_montserrat_32, 0);
+        lv_obj_set_style_text_font(icon, UI_FONT_SYMBOL_XL, 0);
     } else {
         lv_label_set_text(icon, ui_tools_info((ui_app_t)entry_at(pos)).icon);
-        lv_obj_set_style_text_font(icon, &icons_48, 0);
+        lv_obj_set_style_text_font(icon, UI_FONT_ICON, 0);
     }
     lv_obj_set_style_text_color(icon, tint, 0);
     lv_obj_center(icon);
@@ -138,7 +136,7 @@ static lv_obj_t *item_create(int pos) {
     lv_obj_remove_flag(item, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(item, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(item, LAUNCHER_ITEM, LAUNCHER_ITEM);
-    lv_obj_set_style_radius(item, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_radius(item, UI_RADIUS_PILL, 0);
     lv_obj_set_style_border_width(item, 2, 0);
     lv_obj_set_style_border_color(item, entry_tint(pos), 0);
     lv_obj_add_event_cb(item, item_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)pos);
@@ -155,7 +153,7 @@ static lv_obj_t *item_create(int pos) {
 static lv_obj_t *center_label_create(lv_obj_t *parent, const lv_font_t *font, int32_t y) {
     lv_obj_t *label = lv_label_create(parent);
     lv_obj_set_style_text_font(label, font, 0);
-    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, y);
     return label;
 }
@@ -170,7 +168,7 @@ void launcher_build(const launcher_handlers_t *handlers) {
     lv_obj_remove_flag(ln.scrim, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(ln.scrim, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_size(ln.scrim, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_bg_color(ln.scrim, lv_color_hex(0x0b0b10), 0);
+    lv_obj_set_style_bg_color(ln.scrim, lv_color_hex(UI_COLOR_BG), 0);
     lv_obj_set_style_bg_opa(ln.scrim, LV_OPA_COVER, 0);
     lv_obj_add_event_cb(ln.scrim, scrim_click_cb, LV_EVENT_CLICKED, NULL);
 
@@ -187,11 +185,11 @@ void launcher_build(const launcher_handlers_t *handlers) {
     lv_obj_set_size(center, LAUNCHER_CENTER, LAUNCHER_CENTER);
     lv_obj_center(center);
 
-    ln.name = center_label_create(center, &inter_semi_16, LAUNCHER_NAME_Y);
-    ln.status = center_label_create(center, &inter_med_13, LAUNCHER_STATUS_Y);
+    ln.name = center_label_create(center, UI_FONT_TITLE, LAUNCHER_NAME_Y);
+    ln.status = center_label_create(center, UI_FONT_BODY, LAUNCHER_STATUS_Y);
     // A track title can run long; keep it to one line inside the ring (a
     // content-tall label wraps rather than dots).
-    lv_obj_set_size(ln.status, LAUNCHER_CENTER, lv_font_get_line_height(&inter_med_13));
+    lv_obj_set_size(ln.status, LAUNCHER_CENTER, lv_font_get_line_height(UI_FONT_BODY));
     lv_label_set_long_mode(ln.status, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(ln.status, LV_TEXT_ALIGN_CENTER, 0);
 

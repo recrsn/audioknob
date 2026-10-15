@@ -1,6 +1,5 @@
 #include "ui_tools.h"
 
-#define TIMER_TINT      0xff9f43
 #define TIMER_DEFAULT_S (5 * 60)
 #define TIMER_MAX_S     (99 * 60)
 
@@ -62,10 +61,10 @@ static void reset_cb(lv_event_t *e) {
 }
 
 void timer_page_build(lv_obj_t *screen) {
-    lv_color_t tint = lv_color_hex(TIMER_TINT);
+    lv_color_t tint = lv_color_hex(UI_TINT_TIMER);
     tool_page_register(screen, &(tool_page_desc_t){.name = "Timer",
                                                    .icon = ICON_HOURGLASS,
-                                                   .tint = TIMER_TINT,
+                                                   .tint = UI_TINT_TIMER,
                                                    .cd = &timer.cd,
                                                    .rotate = timer_rotate,
                                                    .press = timer_press});

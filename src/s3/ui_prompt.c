@@ -2,13 +2,11 @@
 
 #include "ui_tools.h"
 
-#define PROMPT_DIM       0x9a9aa4
 #define PROMPT_ICON_Y    (-104)
 #define PROMPT_ICON      28
 #define PROMPT_TITLE_Y   (-70)
 #define PROMPT_CODE_Y    (-14)
 #define PROMPT_BODY_Y    44
-#define PROMPT_BODY_W    240
 #define PROMPT_BUTTONS_Y 104
 
 static void scrim_cb(lv_event_t *e) {
@@ -40,7 +38,7 @@ void ui_prompt_build(ui_prompt_t *p, void (*on_cancel)(void), void (*on_accept)(
     p->scrim = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(p->scrim);
     lv_obj_set_size(p->scrim, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_bg_color(p->scrim, lv_color_black(), 0);
+    lv_obj_set_style_bg_color(p->scrim, lv_color_hex(UI_COLOR_BG), 0);
     lv_obj_set_style_bg_opa(p->scrim, LV_OPA_COVER, 0);
     lv_obj_add_flag(p->scrim, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(p->scrim, scrim_cb, LV_EVENT_CLICKED, (void *)on_scrim);
@@ -50,19 +48,19 @@ void ui_prompt_build(ui_prompt_t *p, void (*on_cancel)(void), void (*on_accept)(
     lv_obj_set_size(p->image, PROMPT_ICON, PROMPT_ICON);
     lv_obj_set_style_image_recolor_opa(p->image, LV_OPA_COVER, 0);
     lv_obj_align(p->image, LV_ALIGN_CENTER, 0, PROMPT_ICON_Y);
-    p->symbol = label_create(p->scrim, &lv_font_montserrat_22, 0xffffff, PROMPT_ICON_Y);
+    p->symbol = label_create(p->scrim, UI_FONT_SYMBOL_LG, UI_COLOR_TEXT, PROMPT_ICON_Y);
 
-    p->title = label_create(p->scrim, &inter_semi_16, 0xffffff, PROMPT_TITLE_Y);
-    p->code = label_create(p->scrim, &inter_tnum_52, 0xffffff, PROMPT_CODE_Y);
-    p->body = label_create(p->scrim, &inter_med_13, PROMPT_DIM, PROMPT_BODY_Y);
-    lv_obj_set_width(p->body, PROMPT_BODY_W);
+    p->title = label_create(p->scrim, UI_FONT_TITLE, UI_COLOR_TEXT, PROMPT_TITLE_Y);
+    p->code = label_create(p->scrim, UI_FONT_READING, UI_COLOR_TEXT, PROMPT_CODE_Y);
+    p->body = label_create(p->scrim, UI_FONT_BODY, UI_COLOR_TEXT_DIM, PROMPT_BODY_Y);
+    lv_obj_set_width(p->body, UI_TEXT_W);
     lv_label_set_long_mode(p->body, LV_LABEL_LONG_MODE_WRAP);
 
     p->buttons = tool_button_row_create(p->scrim);
     lv_obj_align(p->buttons, LV_ALIGN_CENTER, 0, PROMPT_BUTTONS_Y);
     p->cancel = lv_obj_get_parent(tool_button_create(p->buttons, "Cancel", button_cb));
     lv_obj_set_user_data(p->cancel, (void *)on_cancel);
-    lv_obj_t *accept = tool_primary_button_create(p->buttons, lv_color_white(), button_cb);
+    lv_obj_t *accept = tool_primary_button_create(p->buttons, lv_color_hex(UI_COLOR_TEXT), button_cb);
     ui_label_set_text(accept, LV_SYMBOL_OK);
     p->accept = lv_obj_get_parent(accept);
     lv_obj_set_user_data(p->accept, (void *)on_accept);

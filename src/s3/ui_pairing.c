@@ -9,7 +9,6 @@
 // ESP32 has its pairing window open. The ESP32 runs the state machine;
 // this only renders pairing_status_t and reports the user's answers.
 
-#define PAIR_TINT 0x7c6cff
 
 static struct {
     ui_prompt_t prompt;
@@ -107,7 +106,7 @@ static void render(void) {
     }
     bool waiting = s->state == PAIRING_OPEN || s->state == PAIRING_CONFIRM || s->state == PAIRING_PASSKEY;
     ui_prompt_render(&pr.prompt, &(ui_prompt_content_t){.image = &icon_bluetooth,
-                                                         .tint = PAIR_TINT,
+                                                         .tint = UI_TINT_BLUETOOTH,
                                                          .title = title,
                                                          .code = code,
                                                          .body = body,

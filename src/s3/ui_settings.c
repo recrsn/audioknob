@@ -14,18 +14,14 @@
 // a city can't be typed here). The Forget rows ask first, on the
 // full-screen confirmation.
 
-#define SET_TINT        0x9a9aa4
-#define SET_ACCENT      0x4ea1ff
-#define SET_DANGER      0xff7a7a
-#define SET_SWITCH_OFF  0x3a3a46
-#define SET_TITLE_Y     TOOL_TITLE_TOP_Y
+#define SET_TITLE_Y     UI_TITLE_TOP_Y
 #define SET_LIST_W      272
 // From just under the title to the home pill.
 #define SET_LIST_TOP    (UI_SAFE_TOP + 22)
 #define SET_LIST_H      (304 - SET_LIST_TOP)
 #define SET_ROW_H       48
 #define SET_HEADER_H    28
-#define SET_ROW_PAD     16
+#define SET_ROW_PAD     UI_SPACE_L
 #define SET_SWITCH_W    44
 #define SET_SWITCH_H    26
 #define SET_KNOB        22
@@ -36,8 +32,8 @@
 #define SET_BRIGHT_MIN  5
 // The edit mode's cancel/apply strip, from under the edited row to the
 // list's end.
-#define SET_EDIT_GAP_TOP 4
-#define SET_EDIT_BTN    56
+#define SET_EDIT_GAP_TOP UI_SPACE_XS
+#define SET_EDIT_BTN    UI_BUTTON_SIZE
 #define SET_EDIT_GAP    32
 // Timezone picker position for "automatic", ahead of tz_db's entries.
 #define TZ_AUTO (-1)
@@ -251,7 +247,7 @@ static bool switch_on(int row) {
 }
 
 static void switch_set(lv_obj_t *track, bool on) {
-    lv_obj_set_style_bg_color(track, lv_color_hex(on ? SET_ACCENT : SET_SWITCH_OFF), 0);
+    lv_obj_set_style_bg_color(track, lv_color_hex(on ? UI_COLOR_ACCENT : UI_COLOR_CONTROL), 0);
     lv_obj_align(lv_obj_get_child(track, 0), on ? LV_ALIGN_RIGHT_MID : LV_ALIGN_LEFT_MID, on ? -2 : 2, 0);
 }
 
@@ -334,20 +330,20 @@ static void render(void) {
         }
         value_text(i, buf, sizeof(buf));
         ui_label_set_text(st.values[i], buf);
-        uint32_t color = i == ROW_FORGET || i == ROW_BT_FORGET ? SET_DANGER : st.editing && st.selected == i ? SET_ACCENT : SET_TINT;
+        uint32_t color = i == ROW_FORGET || i == ROW_BT_FORGET ? UI_COLOR_DANGER : st.editing && st.selected == i ? UI_COLOR_ACCENT : UI_COLOR_TEXT_DIM;
         lv_obj_set_style_text_color(st.values[i], lv_color_hex(color), 0);
     }
-    lv_obj_set_style_text_color(st.names[ROW_FORGET], lv_color_hex(SET_DANGER), 0);
-    lv_obj_set_style_text_color(st.names[ROW_BT_FORGET], lv_color_hex(SET_DANGER), 0);
-    lv_obj_set_style_text_color(st.names[ROW_AIRPLAY1], lv_color_white(), 0);
+    lv_obj_set_style_text_color(st.names[ROW_FORGET], lv_color_hex(UI_COLOR_DANGER), 0);
+    lv_obj_set_style_text_color(st.names[ROW_BT_FORGET], lv_color_hex(UI_COLOR_DANGER), 0);
+    lv_obj_set_style_text_color(st.names[ROW_AIRPLAY1], lv_color_hex(UI_COLOR_TEXT), 0);
     ui_label_set_text(st.names[ROW_AIRPLAY1], s_settings.airplay2_available ? "AirPlay 1" : "AirPlay");
     lv_bar_set_value(st.level, s_settings.brightness, LV_ANIM_OFF);
-    lv_obj_set_style_bg_color(st.level, lv_color_hex(st.editing && st.selected == ROW_BRIGHTNESS ? SET_ACCENT : 0xffffff),
+    lv_obj_set_style_bg_color(st.level, lv_color_hex(st.editing && st.selected == ROW_BRIGHTNESS ? UI_COLOR_ACCENT : UI_COLOR_TEXT),
                               LV_PART_INDICATOR);
     for (int i = 0; i < ROW_COUNT; i++) {
         bool selected = i == st.selected;
-        lv_obj_set_style_bg_opa(st.rows[i], selected ? (st.editing ? 56 : 26) : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_bg_color(st.rows[i], lv_color_hex(selected && st.editing ? SET_ACCENT : 0xffffff), 0);
+        lv_obj_set_style_bg_opa(st.rows[i], selected ? (st.editing ? UI_OPA_EDITING : UI_OPA_SELECTED) : LV_OPA_TRANSP, 0);
+        lv_obj_set_style_bg_color(st.rows[i], lv_color_hex(selected && st.editing ? UI_COLOR_ACCENT : UI_COLOR_TEXT), 0);
     }
     ui_set_visible(st.edit_bar, st.editing);
 }
@@ -450,11 +446,11 @@ static void qr_click_cb(lv_event_t *e) {
 
 static lv_obj_t *qr_label(const lv_font_t *font, lv_opa_t opa, int32_t y) {
     lv_obj_t *label = lv_label_create(st.qr_overlay);
-    lv_obj_set_width(label, 240);
+    lv_obj_set_width(label, UI_TEXT_W);
     lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(label, font, 0);
-    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_set_style_text_opa(label, opa, 0);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, y);
     return label;
@@ -464,20 +460,20 @@ static void qr_open(lv_obj_t *screen, const char *title) {
     st.qr_overlay = lv_obj_create(screen);
     lv_obj_remove_style_all(st.qr_overlay);
     lv_obj_set_size(st.qr_overlay, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_bg_color(st.qr_overlay, lv_color_black(), 0);
+    lv_obj_set_style_bg_color(st.qr_overlay, lv_color_hex(UI_COLOR_BG), 0);
     lv_obj_set_style_bg_opa(st.qr_overlay, LV_OPA_COVER, 0);
     lv_obj_add_flag(st.qr_overlay, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(st.qr_overlay, qr_click_cb, LV_EVENT_CLICKED, NULL);
 
-    lv_label_set_text(qr_label(&inter_semi_16, LV_OPA_COVER, SET_QR_TITLE_Y), title);
+    lv_label_set_text(qr_label(UI_FONT_TITLE, LV_OPA_COVER, SET_QR_TITLE_Y), title);
     st.qr = lv_qrcode_create(st.qr_overlay);
     lv_qrcode_set_size(st.qr, SET_QR_SIZE);
     lv_qrcode_set_dark_color(st.qr, lv_color_black());
     lv_qrcode_set_light_color(st.qr, lv_color_white());
     lv_qrcode_set_quiet_zone(st.qr, true);
     lv_obj_align(st.qr, LV_ALIGN_CENTER, 0, SET_QR_Y);
-    lv_label_set_text(qr_label(&inter_med_13, LV_OPA_COVER, SET_QR_HINT_Y), "Scan on the same WiFi");
-    st.qr_url = qr_label(&inter_med_12, LV_OPA_60, SET_QR_URL_Y);
+    lv_label_set_text(qr_label(UI_FONT_BODY, LV_OPA_COVER, SET_QR_HINT_Y), "Scan on the same WiFi");
+    st.qr_url = qr_label(UI_FONT_CAPTION, UI_OPA_TEXT_MUTED, SET_QR_URL_Y);
     qr_show_url();
 }
 
@@ -719,7 +715,7 @@ static void edit_apply_cb(lv_event_t *e) {
 }
 
 static lv_obj_t *edit_button_create(lv_obj_t *parent, const char *symbol, lv_event_cb_t cb) {
-    lv_obj_t *btn = lv_obj_get_parent(ui_round_button_create(parent, symbol, SET_EDIT_BTN, &lv_font_montserrat_22, false));
+    lv_obj_t *btn = lv_obj_get_parent(ui_round_button_create(parent, symbol, SET_EDIT_BTN, UI_FONT_SYMBOL_LG, false));
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_ext_click_area(btn, SET_EDIT_GAP / 4);
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
@@ -741,7 +737,7 @@ static void edit_bar_create(lv_obj_t *screen) {
     lv_obj_set_style_pad_column(st.edit_bar, SET_EDIT_GAP, 0);
     edit_button_create(st.edit_bar, LV_SYMBOL_CLOSE, edit_cancel_cb);
     lv_obj_t *apply = edit_button_create(st.edit_bar, LV_SYMBOL_OK, edit_apply_cb);
-    lv_obj_set_style_bg_color(apply, lv_color_hex(SET_ACCENT), 0);
+    lv_obj_set_style_bg_color(apply, lv_color_hex(UI_COLOR_ACCENT), 0);
 }
 
 static lv_obj_t *label_create(lv_obj_t *parent, const lv_font_t *font, uint32_t color) {
@@ -756,20 +752,20 @@ static lv_obj_t *switch_create(lv_obj_t *row) {
     lv_obj_remove_style_all(track);
     lv_obj_remove_flag(track, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_size(track, SET_SWITCH_W, SET_SWITCH_H);
-    lv_obj_set_style_radius(track, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_radius(track, UI_RADIUS_PILL, 0);
     lv_obj_set_style_bg_opa(track, LV_OPA_COVER, 0);
     lv_obj_t *knob = lv_obj_create(track);
     lv_obj_remove_style_all(knob);
     lv_obj_remove_flag(knob, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(knob, SET_KNOB, SET_KNOB);
-    lv_obj_set_style_radius(knob, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(knob, lv_color_white(), 0);
+    lv_obj_set_style_radius(knob, UI_RADIUS_PILL, 0);
+    lv_obj_set_style_bg_color(knob, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_set_style_bg_opa(knob, LV_OPA_COVER, 0);
     return track;
 }
 
 static lv_obj_t *value_create(lv_obj_t *parent, int32_t width) {
-    lv_obj_t *value = label_create(parent, &inter_med_13, SET_TINT);
+    lv_obj_t *value = label_create(parent, UI_FONT_BODY, UI_COLOR_TEXT_DIM);
     lv_obj_set_width(value, width);
     lv_label_set_long_mode(value, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_RIGHT, 0);
@@ -783,16 +779,16 @@ static lv_obj_t *level_create(lv_obj_t *row, int index) {
     lv_obj_set_size(box, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(box, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(box, 8, 0);
+    lv_obj_set_style_pad_column(box, UI_SPACE_S, 0);
 
     st.level = lv_bar_create(box);
     lv_obj_remove_style_all(st.level);
     lv_obj_remove_flag(st.level, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(st.level, SET_LEVEL_W, 4);
     lv_bar_set_range(st.level, 0, 100);
-    lv_obj_set_style_radius(st.level, 2, 0);
-    lv_obj_set_style_radius(st.level, 2, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(st.level, lv_color_hex(SET_SWITCH_OFF), 0);
+    lv_obj_set_style_radius(st.level, UI_RADIUS_HAIRLINE, 0);
+    lv_obj_set_style_radius(st.level, UI_RADIUS_HAIRLINE, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(st.level, lv_color_hex(UI_COLOR_CONTROL), 0);
     lv_obj_set_style_bg_opa(st.level, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_opa(st.level, LV_OPA_COVER, LV_PART_INDICATOR);
     st.values[index] = value_create(box, LV_SIZE_CONTENT);
@@ -806,15 +802,15 @@ static lv_obj_t *row_create(lv_obj_t *list, int index) {
     lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(row, lv_pct(100), SET_ROW_H);
     // The selection's highlight.
-    lv_obj_set_style_radius(row, SET_ROW_H / 2, 0);
-    lv_obj_set_style_bg_color(row, lv_color_white(), 0);
+    lv_obj_set_style_radius(row, UI_RADIUS_PILL, 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_set_style_pad_hor(row, SET_ROW_PAD, 0);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_column(row, 12, 0);
+    lv_obj_set_style_pad_column(row, UI_SPACE_M, 0);
     lv_obj_add_event_cb(row, row_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 
-    st.names[index] = label_create(row, &inter_semi_16, 0xffffff);
+    st.names[index] = label_create(row, UI_FONT_TITLE, UI_COLOR_TEXT);
     lv_label_set_text(st.names[index], k_rows[index].name);
     switch (k_rows[index].kind) {
     case KIND_SWITCH:
@@ -839,9 +835,9 @@ static lv_obj_t *header_create(lv_obj_t *list, const char *text) {
     lv_obj_remove_flag(header, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(header, lv_pct(100), SET_HEADER_H);
     lv_obj_set_style_pad_hor(header, SET_ROW_PAD, 0);
-    lv_obj_set_style_pad_bottom(header, 4, 0);
-    lv_obj_t *label = label_create(header, &inter_semi_11, SET_TINT);
-    lv_obj_set_style_text_letter_space(label, 1, 0);
+    lv_obj_set_style_pad_bottom(header, UI_SPACE_XS, 0);
+    lv_obj_t *label = label_create(header, UI_FONT_OVERLINE, UI_COLOR_TEXT_DIM);
+    lv_obj_set_style_text_letter_space(label, UI_OVERLINE_SPACING, 0);
     lv_label_set_text(label, text);
     lv_obj_align(label, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     return header;
@@ -850,11 +846,11 @@ static lv_obj_t *header_create(lv_obj_t *list, const char *text) {
 void settings_page_build(lv_obj_t *screen) {
     tool_page_register(screen, &(tool_page_desc_t){.name = "Settings",
                                                    .icon = ICON_SETTINGS,
-                                                   .tint = SET_TINT,
+                                                   .tint = UI_COLOR_TEXT_DIM,
                                                    .rotate = settings_rotate,
                                                    .press = activate});
 
-    lv_obj_t *title = tool_title_create(screen, "SETTINGS", lv_color_hex(SET_TINT));
+    lv_obj_t *title = tool_title_create(screen, "SETTINGS", lv_color_hex(UI_COLOR_TEXT_DIM));
     lv_obj_align(title, LV_ALIGN_CENTER, 0, SET_TITLE_Y);
 
     st.list = lv_obj_create(screen);

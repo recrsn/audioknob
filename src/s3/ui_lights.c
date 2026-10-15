@@ -7,8 +7,6 @@
 // ring sets it, a tap on the bulb toggles it, a knob press (or a tap on the name) moves to the
 // next light.
 
-#define LIGHTS_TINT     0xffc35a
-#define LIGHTS_OFF      0x5a5a64
 #define LIGHTS_BULB_Y   (-44)
 #define LIGHTS_BULB     88
 #define LIGHTS_LEVEL_Y  28
@@ -52,7 +50,7 @@ static void render(void) {
     const ui_light_t *l = &lt.lights[lt.selected];
     bool lit = l->reachable && l->on;
     tool_ring_set(lt.ring, lit ? l->brightness : 0);
-    lv_obj_set_style_text_color(lt.bulb, lv_color_hex(lit ? LIGHTS_TINT : LIGHTS_OFF), 0);
+    lv_obj_set_style_text_color(lt.bulb, lv_color_hex(lit ? UI_TINT_LIGHTS : UI_COLOR_TEXT_FAINT), 0);
 
     // The big tabular font has digits and '%' only, so words drop to a
     // text font.
@@ -62,14 +60,14 @@ static void render(void) {
     } else {
         snprintf(buf, sizeof(buf), "%s", l->reachable ? "Off" : "--");
     }
-    lv_obj_set_style_text_font(lt.level, lit ? &inter_tnum_52 : &inter_semi_16, 0);
-    lv_obj_set_style_text_color(lt.level, lv_color_hex(lit ? 0xffffff : LIGHTS_OFF), 0);
+    lv_obj_set_style_text_font(lt.level, lit ? UI_FONT_READING : UI_FONT_TITLE, 0);
+    lv_obj_set_style_text_color(lt.level, lv_color_hex(lit ? UI_COLOR_TEXT : UI_COLOR_TEXT_FAINT), 0);
     ui_label_set_text(lt.level, buf);
     ui_label_set_text(lt.name, l->reachable ? l->name : "Unreachable");
 
     for (int i = 0; i < UI_LIGHTS_MAX; i++) {
         ui_set_visible(lt.dots[i], i < lt.count);
-        lv_obj_set_style_bg_opa(lt.dots[i], i == lt.selected ? LV_OPA_80 : LV_OPA_30, 0);
+        lv_obj_set_style_bg_opa(lt.dots[i], i == lt.selected ? UI_OPA_TEXT_SOFT : UI_OPA_DOT_OFF, 0);
     }
 }
 
@@ -180,35 +178,35 @@ static lv_obj_t *label_create(lv_obj_t *parent, const lv_font_t *font, uint32_t 
 void lights_page_build(lv_obj_t *screen) {
     tool_page_register(screen, &(tool_page_desc_t){.name = "Lights",
                                                    .icon = ICON_BULB,
-                                                   .tint = LIGHTS_TINT,
+                                                   .tint = UI_TINT_LIGHTS,
                                                    .rotate = lights_rotate,
                                                    .press = next_light});
 
-    lt.ring = tool_ring_create(screen, lv_color_hex(LIGHTS_TINT), 100);
+    lt.ring = tool_ring_create(screen, lv_color_hex(UI_TINT_LIGHTS), 100);
     tool_ring_touch_create(screen, ring_touch_cb, NULL);
-    tool_title_create(screen, "LIGHTS", lv_color_hex(LIGHTS_TINT));
+    tool_title_create(screen, "LIGHTS", lv_color_hex(UI_TINT_LIGHTS));
 
     lt.bulb_btn = lv_obj_create(screen);
     lv_obj_remove_style_all(lt.bulb_btn);
     lv_obj_remove_flag(lt.bulb_btn, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(lt.bulb_btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(lt.bulb_btn, LIGHTS_BULB, LIGHTS_BULB);
-    lv_obj_set_style_radius(lt.bulb_btn, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(lt.bulb_btn, lv_color_hex(0x1c1c24), 0);
+    lv_obj_set_style_radius(lt.bulb_btn, UI_RADIUS_PILL, 0);
+    lv_obj_set_style_bg_color(lt.bulb_btn, lv_color_hex(UI_COLOR_SURFACE), 0);
     lv_obj_set_style_bg_opa(lt.bulb_btn, LV_OPA_COVER, 0);
     lv_obj_align(lt.bulb_btn, LV_ALIGN_CENTER, 0, LIGHTS_BULB_Y);
     lv_obj_add_event_cb(lt.bulb_btn, bulb_cb, LV_EVENT_CLICKED, NULL);
     lt.bulb = lv_label_create(lt.bulb_btn);
-    lv_obj_set_style_text_font(lt.bulb, &icons_48, 0);
+    lv_obj_set_style_text_font(lt.bulb, UI_FONT_ICON, 0);
     lv_label_set_text(lt.bulb, ICON_BULB);
     lv_obj_center(lt.bulb);
 
     lt.level = tool_time_label_create(screen);
     lv_obj_align(lt.level, LV_ALIGN_CENTER, 0, LIGHTS_LEVEL_Y);
 
-    lt.name = label_create(screen, &inter_semi_16, 0xffffff, LIGHTS_NAME_Y);
+    lt.name = label_create(screen, UI_FONT_TITLE, UI_COLOR_TEXT, LIGHTS_NAME_Y);
     lv_obj_add_flag(lt.name, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(lt.name, 20);
+    lv_obj_set_ext_click_area(lt.name, (UI_TOUCH_MIN - lv_font_get_line_height(UI_FONT_TITLE)) / 2);
     lv_obj_add_event_cb(lt.name, name_cb, LV_EVENT_CLICKED, NULL);
 
     lt.dots_row = lv_obj_create(screen);
@@ -223,12 +221,12 @@ void lights_page_build(lv_obj_t *screen) {
         lv_obj_remove_style_all(dot);
         lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_size(dot, LIGHTS_DOT, LIGHTS_DOT);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
-        lv_obj_set_style_bg_color(dot, lv_color_hex(LIGHTS_TINT), 0);
+        lv_obj_set_style_radius(dot, UI_RADIUS_PILL, 0);
+        lv_obj_set_style_bg_color(dot, lv_color_hex(UI_TINT_LIGHTS), 0);
         lt.dots[i] = dot;
     }
 
-    lt.empty = label_create(screen, &inter_med_13, 0x9a9aa4, 0);
+    lt.empty = label_create(screen, UI_FONT_BODY, UI_COLOR_TEXT_DIM, 0);
     lv_label_set_text(lt.empty, "No lights found");
 
     render();

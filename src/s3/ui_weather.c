@@ -4,15 +4,13 @@
 #include <stdio.h>
 #include <string.h>
 
-#define WX_TITLE_Y    TOOL_TITLE_TOP_Y
+#define WX_TITLE_Y    UI_TITLE_TOP_Y
 #define WX_NOW_Y      (-52)
 #define WX_SKY_Y      (-2)
 #define WX_RANGE_Y    20
 #define WX_HOURS_Y    74
 #define WX_HOUR_W     52
-#define WX_HOUR_GAP   8
-#define WX_DIM        0x9a9aa4
-#define WX_ICON_TINT  0xffc35a
+#define WX_HOUR_GAP   UI_SPACE_S
 
 static struct {
     lv_obj_t *title;
@@ -181,31 +179,31 @@ static lv_obj_t *row_create(lv_obj_t *parent, lv_flex_flow_t flow, int32_t gap, 
 
 void weather_page_build(lv_obj_t *screen) {
     tool_page_register(screen, &(tool_page_desc_t){
-                                   .name = "Weather", .icon = ICON_PARTLY_DAY, .tint = WX_ICON_TINT, .tick = tick});
+                                   .name = "Weather", .icon = ICON_PARTLY_DAY, .tint = UI_TINT_WEATHER, .tick = tick});
 
-    wx.title = tool_title_create(screen, "WEATHER", lv_color_hex(WX_DIM));
+    wx.title = tool_title_create(screen, "WEATHER", lv_color_hex(UI_COLOR_TEXT_DIM));
     lv_obj_align(wx.title, LV_ALIGN_CENTER, 0, WX_TITLE_Y);
 
-    wx.now_row = row_create(screen, LV_FLEX_FLOW_ROW, 10, WX_NOW_Y);
-    wx.icon = label_create(wx.now_row, &icons_48, WX_ICON_TINT);
+    wx.now_row = row_create(screen, LV_FLEX_FLOW_ROW, UI_SPACE_M, WX_NOW_Y);
+    wx.icon = label_create(wx.now_row, UI_FONT_ICON, UI_TINT_WEATHER);
     wx.temp = tool_time_label_create(wx.now_row);
 
-    wx.sky = label_create(screen, &inter_semi_16, 0xffffff);
+    wx.sky = label_create(screen, UI_FONT_TITLE, UI_COLOR_TEXT);
     lv_obj_align(wx.sky, LV_ALIGN_CENTER, 0, WX_SKY_Y);
-    wx.range = label_create(screen, &inter_med_13, WX_DIM);
+    wx.range = label_create(screen, UI_FONT_BODY, UI_COLOR_TEXT_DIM);
     lv_obj_align(wx.range, LV_ALIGN_CENTER, 0, WX_RANGE_Y);
 
     wx.hours_row = row_create(screen, LV_FLEX_FLOW_ROW, WX_HOUR_GAP, WX_HOURS_Y);
     for (int i = 0; i < UI_WEATHER_HOURS; i++) {
-        lv_obj_t *col = row_create(wx.hours_row, LV_FLEX_FLOW_COLUMN, 4, 0);
+        lv_obj_t *col = row_create(wx.hours_row, LV_FLEX_FLOW_COLUMN, UI_SPACE_XS, 0);
         lv_obj_set_width(col, WX_HOUR_W);
-        wx.hour_time[i] = label_create(col, &inter_med_12, WX_DIM);
-        wx.hour_icon[i] = label_create(col, &icons_20, WX_ICON_TINT);
-        wx.hour_temp[i] = label_create(col, &inter_semi_13, 0xffffff);
+        wx.hour_time[i] = label_create(col, UI_FONT_CAPTION, UI_COLOR_TEXT_DIM);
+        wx.hour_icon[i] = label_create(col, UI_FONT_ICON_SM, UI_TINT_WEATHER);
+        wx.hour_temp[i] = label_create(col, UI_FONT_LABEL, UI_COLOR_TEXT);
     }
 
-    wx.status = label_create(screen, &inter_med_13, WX_DIM);
-    lv_obj_set_width(wx.status, 220);
+    wx.status = label_create(screen, UI_FONT_BODY, UI_COLOR_TEXT_DIM);
+    lv_obj_set_width(wx.status, UI_TEXT_W);
     lv_obj_set_style_text_align(wx.status, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(wx.status, LV_ALIGN_CENTER, 0, 0);
 

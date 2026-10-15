@@ -35,7 +35,6 @@
 // running timer doesn't need the launcher.
 
 #define ART_TILE_SIZE 132
-#define RING_SIZE     344
 
 // Y offsets (from screen center) extracted directly from the mock-react
 // reference's rendered layout (localhost:5173, getBoundingClientRect() on
@@ -69,12 +68,9 @@ _Static_assert(WIRELESS_TILE_Y == UI_BG_WIRELESS_TILE_Y, "regenerate backgrounds
 _Static_assert(USB_TILE_Y == UI_BG_USB_TILE_Y, "regenerate backgrounds");
 #endif
 
-#define TRANSPORT_PRIMARY_SIZE   60
-#define TRANSPORT_SECONDARY_SIZE 48
-#define TRANSPORT_GAP            16
+#define TRANSPORT_GAP UI_SPACE_L
 
-#define STATUS_ICON_SIZE   14
-#define CHIP_PAD_X 12
+#define STATUS_ICON_SIZE 14
 
 #define RING_VISIBLE_MS 1400
 #define RING_FADE_MS    300
@@ -82,9 +78,6 @@ _Static_assert(USB_TILE_Y == UI_BG_USB_TILE_Y, "regenerate backgrounds");
 #define HOME_ZONE_W 160
 #define HOME_ZONE_H 52
 
-// The panel is ~46 mm across, about 8 px/mm: small controls get their hit
-// area padded out to roughly 7 mm, a fingertip, past what they draw.
-#define TOUCH_EXT 12
 // LVGL only looks for a child under a touch inside its parent's bounds, so
 // a padded hit area sticking out of a content-sized container is cut off.
 // Padding the container as much as its children's hit areas reach puts
@@ -354,7 +347,7 @@ static void surface_source(lv_obj_t *screen, bool playing, bool *was_playing) {
 
 static lv_obj_t *screen_create(void) {
     lv_obj_t *scr = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(scr, lv_color_hex(0x0b0b10), 0);
+    lv_obj_set_style_bg_color(scr, lv_color_hex(UI_COLOR_BG), 0);
     lv_obj_set_style_pad_all(scr, 0, 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
     return scr;
@@ -377,7 +370,7 @@ static void home_zone_create(lv_obj_t *parent, lv_event_cb_t cb) {
     lv_obj_remove_style_all(pill);
     lv_obj_remove_flag(pill, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(pill, 46, 4);
-    lv_obj_set_style_radius(pill, 2, 0);
+    lv_obj_set_style_radius(pill, UI_RADIUS_HAIRLINE, 0);
     lv_obj_set_style_bg_color(pill, lv_color_white(), 0);
     lv_obj_set_style_bg_opa(pill, LV_OPA_60, 0);
     // Pages may draw under it (the tool dials), so it carries its own
@@ -422,13 +415,13 @@ static lv_obj_t *chip_create(lv_obj_t *parent, int32_t pad_column, lv_event_cb_t
     lv_obj_t *chip = flex_row_create(parent, pad_column, 0);
     lv_obj_set_height(chip, UI_CHIP_H);
     lv_obj_set_style_max_width(chip, UI_CHIP_MAX_W, 0);
-    lv_obj_set_style_pad_hor(chip, CHIP_PAD_X, 0);
-    lv_obj_set_style_radius(chip, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_pad_hor(chip, UI_CHIP_PAD_X, 0);
+    lv_obj_set_style_radius(chip, UI_RADIUS_PILL, 0);
     lv_obj_set_style_bg_color(chip, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(chip, 20, 0);
+    lv_obj_set_style_bg_opa(chip, UI_OPA_GLASS, 0);
     if (cb) {
         lv_obj_add_flag(chip, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(chip, TOUCH_EXT);
+        lv_obj_set_ext_click_area(chip, UI_TOUCH_EXT);
         lv_obj_add_event_cb(chip, cb, LV_EVENT_CLICKED, user_data);
     }
     return chip;
@@ -442,20 +435,20 @@ static void chip_align_top(lv_obj_t *chip) {
 // mock-react's .status-row.tappable: the pill is the only hint that it's
 // the source indicator.
 static lv_obj_t *status_pill_create(lv_obj_t *parent, lv_event_cb_t cb) {
-    return chip_create(parent, 6, cb, NULL);
+    return chip_create(parent, UI_SPACE_XS, cb, NULL);
 }
 
 static lv_obj_t *status_label_create(lv_obj_t *row) {
     lv_obj_t *label = lv_label_create(row);
-    lv_obj_set_style_text_color(label, lv_color_hex(0x9a9aa4), 0);
-    lv_obj_set_style_text_font(label, &inter_med_13, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_COLOR_TEXT_DIM), 0);
+    lv_obj_set_style_text_font(label, UI_FONT_BODY, 0);
     return label;
 }
 
 static lv_obj_t *marquee_label_create(lv_obj_t *parent, const lv_font_t *font, lv_color_t color) {
     lv_obj_t *label = lv_label_create(parent);
     lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
-    lv_obj_set_width(label, 240);
+    lv_obj_set_width(label, UI_TEXT_W);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(label, font, 0);
     lv_obj_set_style_text_color(label, color, 0);
@@ -475,17 +468,17 @@ lv_obj_t *ui_round_button_create(lv_obj_t *parent, const char *symbol, int32_t s
     lv_obj_remove_style_all(btn);
     lv_obj_remove_flag(btn, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(btn, size, size);
-    lv_obj_set_style_radius(btn, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(0x1c1c24), 0);
+    lv_obj_set_style_radius(btn, UI_RADIUS_PILL, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(UI_COLOR_SURFACE), 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
     if (dim) {
-        lv_obj_set_style_opa(btn, LV_OPA_40, 0);
+        lv_obj_set_style_opa(btn, UI_OPA_DISABLED, 0);
     }
 
     lv_obj_t *label = lv_label_create(btn);
     lv_label_set_text(label, symbol);
     lv_obj_set_style_text_font(label, font, 0);
-    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_center(label);
     return label;
 }
@@ -524,15 +517,15 @@ static void ring_set_volume(lv_obj_t *ring, uint8_t volume) {
 // full ring except a bottom gap for the home swipe zone.
 static lv_obj_t *volume_ring_create(lv_obj_t *parent, lv_color_t tint) {
     lv_obj_t *arc = lv_arc_create(parent);
-    lv_obj_set_size(arc, RING_SIZE, RING_SIZE);
+    lv_obj_set_size(arc, UI_RING_SIZE, UI_RING_SIZE);
     lv_arc_set_rotation(arc, 135);
     lv_arc_set_bg_angles(arc, 0, 270);
     lv_arc_set_range(arc, 0, 100);
     lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
-    lv_obj_set_style_arc_width(arc, 6, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(arc, 6, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(arc, lv_color_hex(0x1c1c24), LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, UI_RING_W, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(arc, UI_RING_W, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(arc, lv_color_hex(UI_COLOR_SURFACE), LV_PART_MAIN);
     lv_obj_set_style_arc_color(arc, tint, LV_PART_INDICATOR);
     lv_obj_set_style_opa(arc, LV_OPA_TRANSP, 0);
     lv_obj_center(arc);
@@ -557,16 +550,16 @@ void ui_set_visible(lv_obj_t *obj, bool visible) {
 
 static lv_obj_t *glance_label_create(lv_obj_t *parent, const lv_font_t *font, lv_opa_t opa) {
     lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_width(label, 240);
+    lv_obj_set_width(label, UI_TEXT_W);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(label, font, 0);
-    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_set_style_text_opa(label, opa, 0);
     return label;
 }
 
-#define CLOCK_CHIP_GAP  10
+#define CLOCK_CHIP_GAP UI_SPACE_S
 
 static void clock_tap_cb(lv_event_t *e) {
     (void)e;
@@ -585,30 +578,29 @@ static void clock_weather_cb(lv_event_t *e) {
 // A small tappable pill: an icons_20 glyph plus a label, which is returned.
 static lv_obj_t *clock_pill_create(lv_obj_t *parent, const char *icon, lv_color_t tint, lv_event_cb_t cb,
                                    void *user_data) {
-    lv_obj_t *pill = chip_create(parent, 4, cb, user_data);
+    lv_obj_t *pill = chip_create(parent, UI_SPACE_XS, cb, user_data);
 
     lv_obj_t *glyph = lv_label_create(pill);
     lv_label_set_text(glyph, icon);
-    lv_obj_set_style_text_font(glyph, &icons_20, 0);
+    lv_obj_set_style_text_font(glyph, UI_FONT_ICON_SM, 0);
     lv_obj_set_style_text_color(glyph, tint, 0);
 
     lv_obj_t *label = lv_label_create(pill);
-    lv_obj_set_style_text_font(label, &inter_semi_13, 0);
-    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(label, UI_FONT_LABEL, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_COLOR_TEXT), 0);
     return label;
 }
 
 // Space between the clock (date + time) and the complications above and
 // below it, on top of the column's own spacing.
-#define FACE_COMP_GAP 10
+#define FACE_COMP_GAP UI_SPACE_M
 
 #define NP_CARD_W     212
-#define NP_IDLE_GLYPH   0x4ea1ff
+#define NP_IDLE_GLYPH   UI_COLOR_ACCENT
 #define NP_IDLE_GLYPH_W 18
 #define NP_CARD_H     48
-#define NP_CARD_PAD   8
-#define NP_THUMB      32
-#define NP_PLAY       32
+#define NP_CARD_PAD   UI_SPACE_S
+#define NP_THUMB      UI_BUTTON_SIZE_XS
 
 
 static void np_card_cb(lv_event_t *e) {
@@ -628,11 +620,11 @@ static void np_card_build(lv_obj_t *col) {
     lv_obj_set_size(card, NP_CARD_W, NP_CARD_H);
     lv_obj_set_style_margin_bottom(card, FACE_COMP_GAP, 0);
     lv_obj_set_style_pad_all(card, NP_CARD_PAD, 0);
-    lv_obj_set_style_pad_column(card, 10, 0);
-    lv_obj_set_style_radius(card, NP_CARD_H / 2, 0);
+    lv_obj_set_style_pad_column(card, UI_SPACE_S, 0);
+    lv_obj_set_style_radius(card, UI_RADIUS_PILL, 0);
     // A bigger chip, not a panel: the clock stays the face.
     lv_obj_set_style_bg_color(card, lv_color_white(), 0);
-    lv_obj_set_style_bg_opa(card, 20, 0);
+    lv_obj_set_style_bg_opa(card, UI_OPA_GLASS, 0);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     idle_screen.np.card = card;
@@ -643,15 +635,15 @@ static void np_card_build(lv_obj_t *col) {
     lv_obj_remove_style_all(thumb);
     lv_obj_remove_flag(thumb, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_size(thumb, NP_THUMB, NP_THUMB);
-    lv_obj_set_style_radius(thumb, NP_THUMB / 2, 0);
+    lv_obj_set_style_radius(thumb, UI_RADIUS_PILL, 0);
     lv_obj_set_style_clip_corner(thumb, true, 0);
     lv_obj_set_style_bg_opa(thumb, LV_OPA_COVER, 0);
     idle_screen.np.thumb = thumb;
-    idle_screen.np.icon = icon_create(thumb, &icon_airplay, 16, lv_color_white());
+    idle_screen.np.icon = icon_create(thumb, &icon_airplay, 16, lv_color_hex(UI_COLOR_TEXT));
     lv_obj_center(idle_screen.np.icon);
     idle_screen.np.idle_icon = lv_label_create(thumb);
     lv_label_set_text(idle_screen.np.idle_icon, LV_SYMBOL_VOLUME_MAX);
-    lv_obj_set_style_text_font(idle_screen.np.idle_icon, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(idle_screen.np.idle_icon, UI_FONT_SYMBOL, 0);
     lv_obj_set_style_text_color(idle_screen.np.idle_icon, lv_color_hex(NP_IDLE_GLYPH), 0);
     lv_obj_center(idle_screen.np.idle_icon);
     idle_screen.np.art = lv_image_create(thumb);
@@ -666,7 +658,7 @@ static void np_card_build(lv_obj_t *col) {
     lv_obj_set_height(text, LV_SIZE_CONTENT);
     lv_obj_set_flex_grow(text, 1);
     lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(text, 1, 0);
+    lv_obj_set_style_pad_row(text, UI_SPACE_XXS, 0);
     idle_screen.np.title = lv_label_create(text);
     idle_screen.np.subtitle = lv_label_create(text);
     lv_obj_t *labels[] = {idle_screen.np.title, idle_screen.np.subtitle};
@@ -675,16 +667,16 @@ static void np_card_build(lv_obj_t *col) {
         lv_label_set_long_mode(labels[i], LV_LABEL_LONG_MODE_DOTS);
         lv_label_set_text(labels[i], "");
     }
-    lv_obj_set_style_text_font(idle_screen.np.title, &inter_semi_13, 0);
-    lv_obj_set_style_text_color(idle_screen.np.title, lv_color_white(), 0);
-    lv_obj_set_style_text_font(idle_screen.np.subtitle, &inter_med_12, 0);
-    lv_obj_set_style_text_color(idle_screen.np.subtitle, lv_color_hex(0x9a9aa4), 0);
+    lv_obj_set_style_text_font(idle_screen.np.title, UI_FONT_LABEL, 0);
+    lv_obj_set_style_text_color(idle_screen.np.title, lv_color_hex(UI_COLOR_TEXT), 0);
+    lv_obj_set_style_text_font(idle_screen.np.subtitle, UI_FONT_CAPTION, 0);
+    lv_obj_set_style_text_color(idle_screen.np.subtitle, lv_color_hex(UI_COLOR_TEXT_DIM), 0);
     // A content-tall label wraps rather than dots.
     for (int i = 0; i < 2; i++) {
         lv_obj_set_height(labels[i], lv_font_get_line_height(lv_obj_get_style_text_font(labels[i], 0)));
     }
 
-    idle_screen.np.play = ui_round_button_create(card, LV_SYMBOL_PLAY, NP_PLAY, &lv_font_montserrat_14, false);
+    idle_screen.np.play = ui_round_button_create(card, LV_SYMBOL_PLAY, UI_BUTTON_SIZE_XS, UI_FONT_SYMBOL_SM, false);
     lv_obj_t *btn = lv_obj_get_parent(idle_screen.np.play);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
     // Out to the card's edge, which is as far as LVGL looks for it; the
@@ -705,27 +697,27 @@ static void weather_complication_build(lv_obj_t *col) {
     lv_obj_set_flex_align(comp, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_margin_top(comp, FACE_COMP_GAP, 0);
     lv_obj_add_flag(comp, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_ext_click_area(comp, TOUCH_EXT);
+    lv_obj_set_ext_click_area(comp, UI_TOUCH_EXT);
     lv_obj_add_event_cb(comp, clock_weather_cb, LV_EVENT_CLICKED, NULL);
     idle_screen.weather = comp;
 
-    lv_obj_t *now = flex_row_create(comp, 6, 0);
+    lv_obj_t *now = flex_row_create(comp, UI_SPACE_S, 0);
     lv_obj_remove_flag(now, LV_OBJ_FLAG_CLICKABLE);
     idle_screen.weather_icon = lv_label_create(now);
-    lv_obj_set_style_text_font(idle_screen.weather_icon, &icons_20, 0);
-    lv_obj_set_style_text_color(idle_screen.weather_icon, lv_color_hex(0xffc35a), 0);
+    lv_obj_set_style_text_font(idle_screen.weather_icon, UI_FONT_ICON_SM, 0);
+    lv_obj_set_style_text_color(idle_screen.weather_icon, lv_color_hex(UI_TINT_WEATHER), 0);
     lv_label_set_text(idle_screen.weather_icon, ICON_CLOUD);
     idle_screen.weather_temp = lv_label_create(now);
-    lv_obj_set_style_text_font(idle_screen.weather_temp, &inter_semi_16, 0);
-    lv_obj_set_style_text_color(idle_screen.weather_temp, lv_color_white(), 0);
+    lv_obj_set_style_text_font(idle_screen.weather_temp, UI_FONT_TITLE, 0);
+    lv_obj_set_style_text_color(idle_screen.weather_temp, lv_color_hex(UI_COLOR_TEXT), 0);
     idle_screen.weather_sky = lv_label_create(now);
-    lv_obj_set_style_text_font(idle_screen.weather_sky, &inter_med_13, 0);
-    lv_obj_set_style_text_color(idle_screen.weather_sky, lv_color_white(), 0);
-    lv_obj_set_style_text_opa(idle_screen.weather_sky, LV_OPA_70, 0);
+    lv_obj_set_style_text_font(idle_screen.weather_sky, UI_FONT_BODY, 0);
+    lv_obj_set_style_text_color(idle_screen.weather_sky, lv_color_hex(UI_COLOR_TEXT), 0);
+    lv_obj_set_style_text_opa(idle_screen.weather_sky, UI_OPA_TEXT_MUTED, 0);
 
     idle_screen.weather_range = lv_label_create(comp);
-    lv_obj_set_style_text_font(idle_screen.weather_range, &inter_med_12, 0);
-    lv_obj_set_style_text_color(idle_screen.weather_range, lv_color_hex(0x9a9aa4), 0);
+    lv_obj_set_style_text_font(idle_screen.weather_range, UI_FONT_CAPTION, 0);
+    lv_obj_set_style_text_color(idle_screen.weather_range, lv_color_hex(UI_COLOR_TEXT_DIM), 0);
 }
 
 static void idle_screen_build(void) {
@@ -742,24 +734,24 @@ static void idle_screen_build(void) {
     lv_obj_set_size(col, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(col, 5, 0);
-    touch_pad(col, TOUCH_EXT);
+    lv_obj_set_style_pad_row(col, UI_SPACE_XS, 0);
+    touch_pad(col, UI_TOUCH_EXT);
     lv_obj_center(col);
 
     np_card_build(col);
-    idle_screen.date_label = glance_label_create(col, &inter_semi_16, LV_OPA_80);
+    idle_screen.date_label = glance_label_create(col, UI_FONT_TITLE, UI_OPA_TEXT_SOFT);
 
     // Content-wide so the time stays centered; AM/PM hangs off its right
     // edge on the digits' baseline, outside the column's layout.
     lv_obj_t *time = lv_label_create(col);
-    lv_obj_set_style_text_font(time, &inter_bold_52, 0);
-    lv_obj_set_style_text_color(time, lv_color_white(), 0);
+    lv_obj_set_style_text_font(time, UI_FONT_CLOCK, 0);
+    lv_obj_set_style_text_color(time, lv_color_hex(UI_COLOR_TEXT), 0);
     idle_screen.time_label = time;
     lv_obj_t *ampm = lv_label_create(col);
     lv_obj_add_flag(ampm, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    lv_obj_set_style_text_font(ampm, &inter_semi_16, 0);
-    lv_obj_set_style_text_color(ampm, lv_color_white(), 0);
-    lv_obj_set_style_text_opa(ampm, LV_OPA_80, 0);
+    lv_obj_set_style_text_font(ampm, UI_FONT_TITLE, 0);
+    lv_obj_set_style_text_color(ampm, lv_color_hex(UI_COLOR_TEXT), 0);
+    lv_obj_set_style_text_opa(ampm, UI_OPA_TEXT_SOFT, 0);
     lv_obj_add_flag(ampm, LV_OBJ_FLAG_HIDDEN);
     idle_screen.ampm_label = ampm;
 
@@ -767,9 +759,9 @@ static void idle_screen_build(void) {
 
     lv_obj_t *chips = flex_row_create(idle_screen.screen, CLOCK_CHIP_GAP, 0);
     lv_obj_remove_flag(chips, LV_OBJ_FLAG_CLICKABLE);
-    touch_pad(chips, TOUCH_EXT);
-    lv_obj_set_style_max_width(chips, UI_CHIP_MAX_W + 2 * TOUCH_EXT, 0);
-    lv_obj_align(chips, LV_ALIGN_BOTTOM_MID, 0, -UI_CHIP_INSET + TOUCH_EXT);
+    touch_pad(chips, UI_TOUCH_EXT);
+    lv_obj_set_style_max_width(chips, UI_CHIP_MAX_W + 2 * UI_TOUCH_EXT, 0);
+    lv_obj_align(chips, LV_ALIGN_BOTTOM_MID, 0, -UI_CHIP_INSET + UI_TOUCH_EXT);
     for (int i = 0; i < UI_APP_COUNT; i++) {
         ui_app_info_t info = ui_tools_info((ui_app_t)i);
         idle_screen.chip_labels[i] = clock_pill_create(chips, info.icon, info.tint, clock_chip_cb, (void *)(intptr_t)i);
@@ -787,8 +779,8 @@ static void ampm_place(void) {
         return;
     }
     lv_obj_update_layout(idle_screen.time_label);
-    lv_obj_align_to(idle_screen.ampm_label, idle_screen.time_label, LV_ALIGN_OUT_RIGHT_BOTTOM, 4,
-                    -(inter_bold_52.base_line - inter_semi_16.base_line));
+    lv_obj_align_to(idle_screen.ampm_label, idle_screen.time_label, LV_ALIGN_OUT_RIGHT_BOTTOM, UI_SPACE_XS,
+                    -(UI_FONT_CLOCK->base_line - UI_FONT_TITLE->base_line));
 }
 
 // Polled: what's in progress changes every second, the weather every 15 min.
@@ -826,12 +818,12 @@ static void wait_chip_click_cb(lv_event_t *e) {
 static void wireless_screen_build(void) {
     wireless_screen.screen = screen_create();
     ui_now_playing_bg_create(&wireless_screen.bg, wireless_screen.screen, UI_BG_AIRPLAY);
-    wireless_screen.ring = volume_ring_create(wireless_screen.screen, lv_color_hex(0x4ea1ff));
+    wireless_screen.ring = volume_ring_create(wireless_screen.screen, lv_color_hex(UI_TINT_AIRPLAY));
 
     // Y is set per-update (WIRELESS_STATUS_ROW_Y_CONNECTED vs. _WAITING) --
     // the mock's flex column re-centers around whichever block is showing.
     lv_obj_t *row = status_pill_create(wireless_screen.screen, open_switch_cb);
-    wireless_screen.source_icon = icon_create(row, &icon_airplay, STATUS_ICON_SIZE, lv_color_white());
+    wireless_screen.source_icon = icon_create(row, &icon_airplay, STATUS_ICON_SIZE, lv_color_hex(UI_COLOR_TEXT));
     wireless_screen.source_label = status_label_create(row);
 
     // -- waiting-for-connection state (mock's .wait-icon / np-meta) --
@@ -839,60 +831,60 @@ static void wireless_screen_build(void) {
     lv_obj_remove_flag(wireless_screen.wait_chip, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(wireless_screen.wait_chip, wait_chip_click_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_size(wireless_screen.wait_chip, WIRELESS_WAIT_CHIP_SIZE, WIRELESS_WAIT_CHIP_SIZE);
-    lv_obj_set_style_radius(wireless_screen.wait_chip, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_radius(wireless_screen.wait_chip, UI_RADIUS_PILL, 0);
     lv_obj_set_style_border_width(wireless_screen.wait_chip, 0, 0);
     lv_obj_set_style_pad_all(wireless_screen.wait_chip, 0, 0);
-    lv_obj_set_style_bg_color(wireless_screen.wait_chip, lv_color_hex(0x1c1c24), 0);
+    lv_obj_set_style_bg_color(wireless_screen.wait_chip, lv_color_hex(UI_COLOR_SURFACE), 0);
     lv_obj_align(wireless_screen.wait_chip, LV_ALIGN_CENTER, 0, WIRELESS_WAIT_ICON_Y);
     wireless_screen.wait_icon =
-        icon_create(wireless_screen.wait_chip, &icon_airplay, WIRELESS_WAIT_ICON_SIZE, lv_color_hex(0x9a9aa4));
+        icon_create(wireless_screen.wait_chip, &icon_airplay, WIRELESS_WAIT_ICON_SIZE, lv_color_hex(UI_COLOR_TEXT_DIM));
     lv_obj_center(wireless_screen.wait_icon);
 
     wireless_screen.wait_title = lv_label_create(wireless_screen.screen);
-    lv_obj_set_style_text_font(wireless_screen.wait_title, &inter_semi_16, 0);
-    lv_obj_set_style_text_color(wireless_screen.wait_title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(wireless_screen.wait_title, UI_FONT_TITLE, 0);
+    lv_obj_set_style_text_color(wireless_screen.wait_title, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_align(wireless_screen.wait_title, LV_ALIGN_CENTER, 0, WIRELESS_WAIT_TITLE_Y);
 
     // Montserrat runs wider than the mock's SF, so the longest hint doesn't
     // fit in one line; scrolling keeps the mock's single-line layout.
     wireless_screen.wait_subtitle =
-        marquee_label_create(wireless_screen.screen, &inter_med_13, lv_color_hex(0x9a9aa4));
+        marquee_label_create(wireless_screen.screen, UI_FONT_BODY, lv_color_hex(UI_COLOR_TEXT_DIM));
     lv_obj_align(wireless_screen.wait_subtitle, LV_ALIGN_CENTER, 0, WIRELESS_WAIT_SUBTITLE_Y);
 
     // -- connected / now-playing state --
     wireless_screen.tile_icon = lv_image_create(wireless_screen.screen);
     lv_image_set_src(wireless_screen.tile_icon, &icon_music_note);
-    lv_obj_set_style_image_recolor(wireless_screen.tile_icon, lv_color_white(), 0);
+    lv_obj_set_style_image_recolor(wireless_screen.tile_icon, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_set_style_image_recolor_opa(wireless_screen.tile_icon, LV_OPA_COVER, 0);
     lv_obj_align(wireless_screen.tile_icon, LV_ALIGN_CENTER, 0, WIRELESS_TILE_Y);
     wireless_screen.art = ui_now_playing_art_create(&wireless_screen.bg, wireless_screen.screen, WIRELESS_TILE_Y);
 
     wireless_screen.transport = flex_row_create(wireless_screen.screen, TRANSPORT_GAP, WIRELESS_TRANSPORT_Y);
-    touch_pad(wireless_screen.transport, TOUCH_EXT / 2);
+    touch_pad(wireless_screen.transport, UI_TOUCH_EXT / 2);
     wireless_screen.prev_icon = ui_round_button_create(wireless_screen.transport, LV_SYMBOL_PREV,
-                                                       TRANSPORT_SECONDARY_SIZE, &lv_font_montserrat_16, true);
+                                                       UI_BUTTON_SIZE_SM, UI_FONT_SYMBOL, true);
     wireless_screen.play_icon = ui_round_button_create(wireless_screen.transport, LV_SYMBOL_PLAY,
-                                                       TRANSPORT_PRIMARY_SIZE, &lv_font_montserrat_22, false);
+                                                       UI_BUTTON_SIZE, UI_FONT_SYMBOL_LG, false);
     wireless_screen.next_icon = ui_round_button_create(wireless_screen.transport, LV_SYMBOL_NEXT,
-                                                       TRANSPORT_SECONDARY_SIZE, &lv_font_montserrat_16, true);
+                                                       UI_BUTTON_SIZE_SM, UI_FONT_SYMBOL, true);
 
     static const ui_transport_t buttons[] = {UI_TRANSPORT_PREV, UI_TRANSPORT_PLAY_PAUSE, UI_TRANSPORT_NEXT};
     lv_obj_t *labels[] = {wireless_screen.prev_icon, wireless_screen.play_icon, wireless_screen.next_icon};
     for (int i = 0; i < 3; i++) {
         lv_obj_t *btn = lv_obj_get_parent(labels[i]);
         lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_ext_click_area(btn, TOUCH_EXT / 2);
+        lv_obj_set_ext_click_area(btn, UI_TOUCH_EXT / 2);
         lv_obj_set_style_opa(btn, LV_OPA_COVER, 0);
         lv_obj_add_event_cb(btn, transport_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)buttons[i]);
     }
 
-    wireless_screen.title_label = marquee_label_create(wireless_screen.screen, &inter_semi_16, lv_color_white());
+    wireless_screen.title_label = marquee_label_create(wireless_screen.screen, UI_FONT_TITLE, lv_color_hex(UI_COLOR_TEXT));
     lv_obj_align(wireless_screen.title_label, LV_ALIGN_CENTER, 0, WIRELESS_TITLE_Y);
 
     // .np-subtitle is 12.5px in the mock; LVGL's bundled Montserrat only ships
     // even sizes, so 12 is the closer of the two neighbors (vs. 14).
     wireless_screen.subtitle_label =
-        marquee_label_create(wireless_screen.screen, &inter_med_13, lv_color_hex(0x9a9aa4));
+        marquee_label_create(wireless_screen.screen, UI_FONT_BODY, lv_color_hex(UI_COLOR_TEXT_DIM));
     lv_obj_align(wireless_screen.subtitle_label, LV_ALIGN_CENTER, 0, WIRELESS_SUBTITLE_Y);
 
     home_zone_create(wireless_screen.screen, swipe_home_cb);
@@ -906,14 +898,14 @@ static void wireless_screen_build(void) {
 static void usb_screen_build(void) {
     usb_screen.screen = screen_create();
     ui_now_playing_bg_create(&usb_screen.bg, usb_screen.screen, UI_BG_USB);
-    usb_screen.ring = volume_ring_create(usb_screen.screen, lv_color_hex(0x2dd4bf));
+    usb_screen.ring = volume_ring_create(usb_screen.screen, lv_color_hex(UI_TINT_USB));
 
     lv_obj_t *row = status_pill_create(usb_screen.screen, NULL);
     chip_align_top(row);
     lv_obj_t *icon = lv_label_create(row);
     lv_label_set_text(icon, LV_SYMBOL_USB);
-    lv_obj_set_style_text_font(icon, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(icon, lv_color_hex(0x2dd4bf), 0);
+    lv_obj_set_style_text_font(icon, UI_FONT_SYMBOL_SM, 0);
+    lv_obj_set_style_text_color(icon, lv_color_hex(UI_TINT_USB), 0);
     lv_obj_t *label = status_label_create(row);
     lv_label_set_text(label, "USB Audio");
 
@@ -921,24 +913,24 @@ static void usb_screen_build(void) {
     // that one's reserved for the status row above.
     lv_obj_t *tile_icon = lv_label_create(usb_screen.screen);
     lv_label_set_text(tile_icon, LV_SYMBOL_VOLUME_MAX);
-    lv_obj_set_style_text_font(tile_icon, &lv_font_montserrat_32, 0);
-    lv_obj_set_style_text_color(tile_icon, lv_color_white(), 0);
+    lv_obj_set_style_text_font(tile_icon, UI_FONT_SYMBOL_XL, 0);
+    lv_obj_set_style_text_color(tile_icon, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_align(tile_icon, LV_ALIGN_CENTER, 0, USB_TILE_Y);
 
     lv_obj_t *transport = flex_row_create(usb_screen.screen, TRANSPORT_GAP, USB_TRANSPORT_Y);
-    touch_pad(transport, TOUCH_EXT / 2);
-    usb_screen.prev_icon = ui_round_button_create(transport, LV_SYMBOL_PREV, TRANSPORT_SECONDARY_SIZE,
-                                                  &lv_font_montserrat_16, true);
-    usb_screen.play_icon = ui_round_button_create(transport, LV_SYMBOL_PLAY, TRANSPORT_PRIMARY_SIZE,
-                                                  &lv_font_montserrat_22, false);
-    usb_screen.next_icon = ui_round_button_create(transport, LV_SYMBOL_NEXT, TRANSPORT_SECONDARY_SIZE,
-                                                  &lv_font_montserrat_16, true);
+    touch_pad(transport, UI_TOUCH_EXT / 2);
+    usb_screen.prev_icon = ui_round_button_create(transport, LV_SYMBOL_PREV, UI_BUTTON_SIZE_SM,
+                                                  UI_FONT_SYMBOL, true);
+    usb_screen.play_icon = ui_round_button_create(transport, LV_SYMBOL_PLAY, UI_BUTTON_SIZE,
+                                                  UI_FONT_SYMBOL_LG, false);
+    usb_screen.next_icon = ui_round_button_create(transport, LV_SYMBOL_NEXT, UI_BUTTON_SIZE_SM,
+                                                  UI_FONT_SYMBOL, true);
 
     // USB has no metadata channel, so the title slot just names the output.
     lv_obj_t *title = lv_label_create(usb_screen.screen);
     lv_label_set_text(title, "USB Audio");
-    lv_obj_set_style_text_font(title, &inter_semi_16, 0);
-    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(title, UI_FONT_TITLE, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, USB_TITLE_Y);
 
     home_zone_create(usb_screen.screen, swipe_home_cb);
@@ -947,27 +939,26 @@ static void usb_screen_build(void) {
 }
 #endif
 
-#define SWITCH_TITLE_Y     (-110)
 #define SWITCH_LIST_Y      4
 #define SWITCH_ITEM_W      220
-#define SWITCH_ITEM_GAP    14
+#define SWITCH_ITEM_GAP    UI_SPACE_M
 
 static const struct {
     const char *label;
     const lv_image_dsc_t *icon;
     uint32_t tint;
 } k_sources[] = {
-    [UI_SOURCE_AIRPLAY] = {"AirPlay", &icon_airplay, 0x4ea1ff},
-    [UI_SOURCE_BLUETOOTH] = {"Bluetooth", &icon_bluetooth, 0x7c6cff},
+    [UI_SOURCE_AIRPLAY] = {"AirPlay", &icon_airplay, UI_TINT_AIRPLAY},
+    [UI_SOURCE_BLUETOOTH] = {"Bluetooth", &icon_bluetooth, UI_TINT_BLUETOOTH},
 };
 
 static void switch_screen_refresh(void) {
     for (int i = 0; i < 2; i++) {
         bool active = i == (int)s_current_source;
-        lv_obj_set_style_bg_opa(switch_screen.items[i], active ? 26 : 15, 0);
+        lv_obj_set_style_bg_opa(switch_screen.items[i], active ? UI_OPA_SELECTED : UI_OPA_GLASS, 0);
         lv_obj_set_style_border_color(switch_screen.items[i], lv_color_hex(k_sources[i].tint), 0);
         lv_obj_set_style_border_opa(switch_screen.items[i], active ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
-        lv_obj_set_style_text_color(switch_screen.items[i], active ? lv_color_white() : lv_color_hex(0x9a9aa4), 0);
+        lv_obj_set_style_text_color(switch_screen.items[i], lv_color_hex(active ? UI_COLOR_TEXT : UI_COLOR_TEXT_DIM), 0);
     }
 }
 
@@ -1004,10 +995,10 @@ static void switch_screen_build(void) {
 
     lv_obj_t *title = lv_label_create(switch_screen.screen);
     lv_label_set_text(title, "SWITCH SOURCE");
-    lv_obj_set_style_text_font(title, &inter_semi_11, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0x5a5a64), 0);
-    lv_obj_set_style_text_letter_space(title, 1, 0);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, SWITCH_TITLE_Y);
+    lv_obj_set_style_text_font(title, UI_FONT_OVERLINE, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(UI_COLOR_TEXT_DIM), 0);
+    lv_obj_set_style_text_letter_space(title, UI_OVERLINE_SPACING, 0);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, UI_TITLE_TOP_Y);
 
     lv_obj_t *list = lv_obj_create(switch_screen.screen);
     lv_obj_remove_style_all(list);
@@ -1025,10 +1016,10 @@ static void switch_screen_build(void) {
         lv_obj_set_size(item, lv_pct(100), LV_SIZE_CONTENT);
         lv_obj_set_flex_flow(item, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(item, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_column(item, 12, 0);
-        lv_obj_set_style_pad_hor(item, 20, 0);
-        lv_obj_set_style_pad_ver(item, 18, 0);
-        lv_obj_set_style_radius(item, 20, 0);
+        lv_obj_set_style_pad_column(item, UI_SPACE_M, 0);
+        lv_obj_set_style_pad_hor(item, UI_SPACE_XL, 0);
+        lv_obj_set_style_pad_ver(item, UI_SPACE_L, 0);
+        lv_obj_set_style_radius(item, UI_RADIUS_CARD, 0);
         lv_obj_set_style_border_width(item, 1, 0);
         lv_obj_set_style_bg_color(item, lv_color_white(), 0);
         lv_obj_add_event_cb(item, source_pick_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
@@ -1036,7 +1027,7 @@ static void switch_screen_build(void) {
         icon_create(item, k_sources[i].icon, 20, lv_color_hex(k_sources[i].tint));
         lv_obj_t *label = lv_label_create(item);
         lv_label_set_text(label, k_sources[i].label);
-        lv_obj_set_style_text_font(label, &inter_semi_16, 0);
+        lv_obj_set_style_text_font(label, UI_FONT_TITLE, 0);
         switch_screen.items[i] = item;
     }
     switch_screen_refresh();
@@ -1087,7 +1078,7 @@ static void apps_build(void) {
 }
 
 // Whatever of the safe area the icon and padding leave.
-#define AUDIO_CHIP_TEXT_W (UI_CHIP_MAX_W - 2 * CHIP_PAD_X - STATUS_ICON_SIZE - 6)
+#define AUDIO_CHIP_TEXT_W (UI_CHIP_MAX_W - 2 * UI_CHIP_PAD_X - STATUS_ICON_SIZE - UI_SPACE_XS)
 
 static lv_obj_t *audio_screen(void) {
     if (s_audio.wireless_playing) {
@@ -1130,7 +1121,7 @@ static void np_card_set_quiet(bool quiet) {
         return;
     }
     idle_screen.np.quiet = quiet;
-    lv_obj_set_style_bg_opa(idle_screen.np.card, quiet ? LV_OPA_TRANSP : 20, 0);
+    lv_obj_set_style_bg_opa(idle_screen.np.card, quiet ? LV_OPA_TRANSP : UI_OPA_GLASS, 0);
     lv_obj_set_flex_align(idle_screen.np.card, quiet ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_bg_opa(idle_screen.np.thumb, quiet ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
@@ -1139,7 +1130,7 @@ static void np_card_set_quiet(bool quiet) {
     lv_obj_set_width(idle_screen.np.text, quiet ? LV_SIZE_CONTENT : 0);
     lv_obj_set_width(idle_screen.np.title, quiet ? LV_SIZE_CONTENT : lv_pct(100));
     lv_obj_set_width(idle_screen.np.subtitle, quiet ? LV_SIZE_CONTENT : lv_pct(100));
-    lv_obj_set_style_text_opa(idle_screen.np.title, quiet ? LV_OPA_70 : LV_OPA_COVER, 0);
+    lv_obj_set_style_text_opa(idle_screen.np.title, quiet ? UI_OPA_TEXT_MUTED : LV_OPA_COVER, 0);
     ui_set_visible(idle_screen.np.idle_icon, quiet);
     ui_set_visible(idle_screen.np.subtitle, !quiet);
     ui_set_visible(lv_obj_get_parent(idle_screen.np.play), !quiet);
@@ -1166,7 +1157,7 @@ static void np_card_refresh(lv_obj_t *target) {
     bool usb = false;
     bool playing = s_audio.wireless_playing;
 #endif
-    lv_color_t tint = lv_color_hex(usb ? 0x2dd4bf : s_audio.wireless_airplay ? 0x4ea1ff : 0x7c6cff);
+    lv_color_t tint = lv_color_hex(usb ? UI_TINT_USB : s_audio.wireless_airplay ? UI_TINT_AIRPLAY : UI_TINT_BLUETOOTH);
     if (!lv_color_eq(tint, idle_screen.np.tint)) {
         idle_screen.np.tint = tint;
         lv_obj_set_style_bg_color(idle_screen.np.thumb, tint, 0);
@@ -1217,7 +1208,7 @@ static void audio_chip_refresh(void) {
         const lv_image_dsc_t *src = s_audio.wireless_airplay ? &icon_airplay : &icon_bluetooth;
         if (lv_image_get_src(audio_chip.icon) != src) {
             lv_image_set_src(audio_chip.icon, src);
-            lv_obj_set_style_image_recolor(audio_chip.icon, lv_color_hex(s_audio.wireless_airplay ? 0x4ea1ff : 0x7c6cff),
+            lv_obj_set_style_image_recolor(audio_chip.icon, lv_color_hex(s_audio.wireless_airplay ? UI_TINT_AIRPLAY : UI_TINT_BLUETOOTH),
                                            0);
         }
     }
@@ -1231,7 +1222,7 @@ static void audio_chip_refresh(void) {
 #endif
     if (dim != audio_chip.dim) {
         audio_chip.dim = dim;
-        lv_obj_set_style_text_opa(audio_chip.label, dim ? LV_OPA_50 : LV_OPA_COVER, 0);
+        lv_obj_set_style_text_opa(audio_chip.label, dim ? UI_OPA_TEXT_MUTED : LV_OPA_COVER, 0);
     }
 }
 
@@ -1246,18 +1237,18 @@ static void audio_chip_build(void) {
     lv_obj_add_flag(chip, LV_OBJ_FLAG_HIDDEN);
     audio_chip.chip = chip;
 
-    audio_chip.icon = icon_create(chip, &icon_airplay, STATUS_ICON_SIZE, lv_color_hex(0x4ea1ff));
+    audio_chip.icon = icon_create(chip, &icon_airplay, STATUS_ICON_SIZE, lv_color_hex(UI_TINT_AIRPLAY));
 #ifdef AK_USB_AUDIO
     audio_chip.usb_icon = lv_label_create(chip);
     lv_label_set_text(audio_chip.usb_icon, LV_SYMBOL_USB);
-    lv_obj_set_style_text_font(audio_chip.usb_icon, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(audio_chip.usb_icon, lv_color_hex(0x2dd4bf), 0);
+    lv_obj_set_style_text_font(audio_chip.usb_icon, UI_FONT_SYMBOL_SM, 0);
+    lv_obj_set_style_text_color(audio_chip.usb_icon, lv_color_hex(UI_TINT_USB), 0);
 #endif
 
     audio_chip.label = status_label_create(chip);
-    lv_obj_set_style_text_color(audio_chip.label, lv_color_white(), 0);
+    lv_obj_set_style_text_color(audio_chip.label, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_label_set_long_mode(audio_chip.label, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_height(audio_chip.label, lv_font_get_line_height(&inter_med_13));
+    lv_obj_set_height(audio_chip.label, lv_font_get_line_height(UI_FONT_BODY));
 }
 
 static bool launcher_audio_status(char *buf, size_t len) {
@@ -1472,7 +1463,7 @@ static void format_subtitle(const ui_track_info_t *track, char *out, size_t len)
 void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *track) {
     static bool was_playing;
     bool airplay = state->source == SOURCE_AIRPLAY;
-    lv_color_t tint = airplay ? lv_color_hex(0x4ea1ff) : lv_color_hex(0x7c6cff);
+    lv_color_t tint = lv_color_hex(airplay ? UI_TINT_AIRPLAY : UI_TINT_BLUETOOTH);
     s_current_source = airplay ? UI_SOURCE_AIRPLAY : UI_SOURCE_BLUETOOTH;
 
     ring_set_volume(wireless_screen.ring, state->volume);
@@ -1521,8 +1512,7 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     } else {
         ui_label_set_text(wireless_screen.play_icon,
                            state->muted ? LV_SYMBOL_MUTE : (state->playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));
-        lv_obj_set_style_text_color(wireless_screen.play_icon, state->muted ? lv_color_hex(0xff5a5a) : lv_color_white(),
-                                     0);
+        lv_obj_set_style_text_color(wireless_screen.play_icon, lv_color_hex(state->muted ? UI_COLOR_DANGER : UI_COLOR_TEXT), 0);
         ui_label_set_text(wireless_screen.title_label, has_track ? track->title : source_name);
         ui_label_set_text(wireless_screen.subtitle_label, subtitle);
         update_artwork(track);
@@ -1546,7 +1536,7 @@ void ui_update_usb(uint8_t volume, bool muted, bool playing) {
     ring_set_volume(usb_screen.ring, volume);
 
     ui_label_set_text(usb_screen.play_icon, muted ? LV_SYMBOL_MUTE : (playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));
-    lv_obj_set_style_text_color(usb_screen.play_icon, muted ? lv_color_hex(0xff5a5a) : lv_color_white(), 0);
+    lv_obj_set_style_text_color(usb_screen.play_icon, lv_color_hex(muted ? UI_COLOR_DANGER : UI_COLOR_TEXT), 0);
 
     s_audio.usb_playing = playing;
     surface_source(usb_screen.screen, playing, &was_playing);
@@ -1593,10 +1583,10 @@ void ui_update_clock(bool synced, const struct tm *local_time) {
 static lv_obj_t *setup_label_create(lv_obj_t *parent, const lv_font_t *font, lv_opa_t opa, int32_t y) {
     lv_obj_t *label = lv_label_create(parent);
     lv_obj_set_style_text_font(label, font, 0);
-    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_set_style_text_opa(label, opa, 0);
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_width(label, 240);
+    lv_obj_set_width(label, UI_TEXT_W);
     lv_label_set_long_mode(label, LV_LABEL_LONG_DOT);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, y);
     return label;
@@ -1605,7 +1595,7 @@ static lv_obj_t *setup_label_create(lv_obj_t *parent, const lv_font_t *font, lv_
 static void wifi_setup_screen_build(void) {
     wifi_setup_screen.screen = screen_create();
 
-    lv_obj_t *title = setup_label_create(wifi_setup_screen.screen, &inter_semi_16, LV_OPA_COVER, SETUP_TITLE_Y);
+    lv_obj_t *title = setup_label_create(wifi_setup_screen.screen, UI_FONT_TITLE, LV_OPA_COVER, SETUP_TITLE_Y);
     lv_label_set_text(title, "Set up WiFi");
 
     wifi_setup_screen.qr = lv_qrcode_create(wifi_setup_screen.screen);
@@ -1617,9 +1607,9 @@ static void wifi_setup_screen_build(void) {
     lv_obj_align(wifi_setup_screen.qr, LV_ALIGN_CENTER, 0, SETUP_QR_Y);
 
     wifi_setup_screen.status_label =
-        setup_label_create(wifi_setup_screen.screen, &inter_med_13, LV_OPA_COVER, SETUP_STATUS_Y);
+        setup_label_create(wifi_setup_screen.screen, UI_FONT_BODY, LV_OPA_COVER, SETUP_STATUS_Y);
     wifi_setup_screen.network_label =
-        setup_label_create(wifi_setup_screen.screen, &inter_med_12, LV_OPA_60, SETUP_NETWORK_Y);
+        setup_label_create(wifi_setup_screen.screen, UI_FONT_CAPTION, UI_OPA_TEXT_MUTED, SETUP_NETWORK_Y);
 }
 
 void ui_show_wifi_setup(const char *qr_payload, const char *ssid, const char *password, const char *status) {

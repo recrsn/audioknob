@@ -4,8 +4,6 @@
 // break instead. Each phase rings at its end and waits for a press to start
 // the next one, so a break never begins while you're still away.
 
-#define TOMATO_FOCUS_TINT 0xff6347
-#define TOMATO_BREAK_TINT 0x5ad17a
 #define TOMATO_SETS       4
 #define TOMATO_MAX_MIN    90
 #define TOMATO_DOT        8
@@ -39,7 +37,7 @@ static struct {
 } tomato;
 
 static lv_color_t phase_tint(void) {
-    return lv_color_hex(tomato.phase == PHASE_FOCUS ? TOMATO_FOCUS_TINT : TOMATO_BREAK_TINT);
+    return lv_color_hex(tomato.phase == PHASE_FOCUS ? UI_TINT_TOMATO : UI_TINT_TOMATO_BREAK);
 }
 
 // Restyling is a full redraw, so it runs on phase/session changes only, not
@@ -50,8 +48,8 @@ static void restyle(void) {
     lv_obj_set_style_text_color(tomato.phase_label, tint, 0);
     lv_obj_set_style_bg_color(lv_obj_get_parent(tomato.start_icon), tint, 0);
     for (uint32_t i = 0; i < TOMATO_SETS; i++) {
-        lv_obj_set_style_bg_color(tomato.dots[i], lv_color_hex(TOMATO_FOCUS_TINT), 0);
-        lv_obj_set_style_bg_opa(tomato.dots[i], i < tomato.sessions ? LV_OPA_COVER : LV_OPA_20, 0);
+        lv_obj_set_style_bg_color(tomato.dots[i], lv_color_hex(UI_TINT_TOMATO), 0);
+        lv_obj_set_style_bg_opa(tomato.dots[i], i < tomato.sessions ? LV_OPA_COVER : UI_OPA_DOT_OFF, 0);
     }
 }
 
@@ -140,22 +138,22 @@ static void dots_create(lv_obj_t *screen) {
     lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_style_pad_column(row, TOMATO_DOT, 0);
-    lv_obj_align(row, LV_ALIGN_CENTER, 0, TOOL_TITLE_Y);
+    lv_obj_align(row, LV_ALIGN_CENTER, 0, UI_TITLE_Y);
     for (int i = 0; i < TOMATO_SETS; i++) {
         lv_obj_t *dot = lv_obj_create(row);
         lv_obj_remove_style_all(dot);
         lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_size(dot, TOMATO_DOT, TOMATO_DOT);
-        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_radius(dot, UI_RADIUS_PILL, 0);
         tomato.dots[i] = dot;
     }
 }
 
 void tomato_page_build(lv_obj_t *screen) {
-    lv_color_t tint = lv_color_hex(TOMATO_FOCUS_TINT);
+    lv_color_t tint = lv_color_hex(UI_TINT_TOMATO);
     tool_page_register(screen, &(tool_page_desc_t){.name = "Pomodoro",
                                                    .icon = ICON_NUTRITION,
-                                                   .tint = TOMATO_FOCUS_TINT,
+                                                   .tint = UI_TINT_TOMATO,
                                                    .cd = &tomato.cd,
                                                    .rotate = tomato_rotate,
                                                    .press = tomato_press});
@@ -169,7 +167,7 @@ void tomato_page_build(lv_obj_t *screen) {
     tomato.cd.time_label = tool_time_label_create(screen);
     lv_obj_align(tomato.cd.time_label, LV_ALIGN_CENTER, 0, 0);
     tomato.phase_label = tool_hint_label_create(screen);
-    lv_obj_set_style_text_font(tomato.phase_label, &inter_semi_16, 0);
+    lv_obj_set_style_text_font(tomato.phase_label, UI_FONT_TITLE, 0);
 
     lv_obj_t *row = tool_button_row_create(screen);
     tomato.side_icon = tool_button_create(row, "Skip", side_cb);

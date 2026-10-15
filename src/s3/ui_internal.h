@@ -7,18 +7,7 @@
 #include <stddef.h>
 
 #include "lvgl.h"
-
-// The chip safe area. Chips -- the audio chip and a now-playing screen's
-// source pill at the top, the clock's app chips at the bottom -- sit in a
-// band UI_CHIP_INSET in from the round edge, where the panel is still ~190 px
-// wide; they're capped to UI_CHIP_MAX_W so their corners stay on the glass.
-// Page content starts at UI_SAFE_TOP so a chip never lands on it.
-#define UI_CHIP_H     28
-#define UI_CHIP_INSET 28
-#define UI_CHIP_MAX_W 176
-#define UI_SAFE_TOP   (UI_CHIP_INSET + UI_CHIP_H + 6)
-// A label's LV_ALIGN_CENTER y offset that puts its top at UI_SAFE_TOP.
-#define UI_SAFE_TOP_Y(line_h) (UI_SAFE_TOP + (line_h) / 2 - 180)
+#include "ui_theme.h"
 
 void ui_label_set_text(lv_obj_t *label, const char *text);
 void ui_set_visible(lv_obj_t *obj, bool visible);

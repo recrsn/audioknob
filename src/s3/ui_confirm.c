@@ -4,8 +4,6 @@
 // "Are you sure?" for anything that can't be undone from the device, on
 // the same full-screen prompt as pairing.
 
-#define CONFIRM_TINT 0xff7a7a
-
 static struct {
     ui_prompt_t prompt;
     void (*on_confirm)(void);
@@ -30,7 +28,7 @@ void ui_confirm(const char *symbol, const char *title, const char *body, void (*
     }
     cf.on_confirm = on_confirm;
     ui_prompt_render(&cf.prompt, &(ui_prompt_content_t){.symbol = symbol,
-                                                         .tint = CONFIRM_TINT,
+                                                         .tint = UI_COLOR_DANGER,
                                                          .title = title,
                                                          .body = body,
                                                          .cancel = true,

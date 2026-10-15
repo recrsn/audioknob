@@ -2,16 +2,14 @@
 
 #include <stdio.h>
 
-#define TOOL_RING_SIZE  344
 #define TOOL_DIAL_SIZE  336
 #define TOOL_DIAL_W     16
 #define TOOL_TICKS      8
 #define TOOL_TICK_OUT   140
 #define TOOL_TICK_MS    33
 #define TOOL_BUTTONS_Y  92
-#define TOOL_BTN_SIZE   60
-#define TOOL_BTN_GAP    18
-#define TOOL_BTN_EXT    10
+#define TOOL_BTN_GAP    UI_SPACE_L
+#define TOOL_BTN_EXT    (TOOL_BTN_GAP / 2)
 // Inside this radius is a page's own content; the band outside it, ~7 mm
 // deep on the round panel, belongs to the ring.
 #define TOOL_TOUCH_R_IN 116
@@ -37,16 +35,16 @@ static void (*s_on_alert)(lv_obj_t *screen, bool ringing);
 
 lv_obj_t *tool_ring_create(lv_obj_t *parent, lv_color_t tint, int32_t range) {
     lv_obj_t *arc = lv_arc_create(parent);
-    lv_obj_set_size(arc, TOOL_RING_SIZE, TOOL_RING_SIZE);
+    lv_obj_set_size(arc, UI_RING_SIZE, UI_RING_SIZE);
     lv_arc_set_rotation(arc, 135);
     lv_arc_set_bg_angles(arc, 0, 270);
     lv_arc_set_range(arc, 0, range);
     lv_arc_set_value(arc, 0);
     lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
-    lv_obj_set_style_arc_width(arc, 6, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(arc, 6, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(arc, lv_color_hex(0x1c1c24), LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, UI_RING_W, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(arc, UI_RING_W, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(arc, lv_color_hex(UI_COLOR_SURFACE), LV_PART_MAIN);
     // No track: LVGL masks every pixel of an arc's bounding box, so even this
     // thin ring cost ~13 ms per full frame. Only progress is drawn.
     lv_obj_set_style_arc_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -184,7 +182,7 @@ static void ticks_draw_cb(lv_event_t *e) {
         int32_t s = lv_trigo_sin(deg);
         int32_t c = lv_trigo_cos(deg);
         line.width = quarter ? 4 : 3;
-        line.color = lv_color_hex(quarter ? 0x8a8a94 : 0x55555e);
+        line.color = lv_color_hex(quarter ? UI_COLOR_TEXT_DIM : UI_COLOR_TEXT_FAINT);
         line.p1.x = cx + (s * r_in >> LV_TRIGO_SHIFT);
         line.p1.y = cy - (c * r_in >> LV_TRIGO_SHIFT);
         line.p2.x = cx + (s * TOOL_TICK_OUT >> LV_TRIGO_SHIFT);
@@ -207,32 +205,32 @@ lv_obj_t *tool_dial_create(lv_obj_t *parent, lv_color_t tint, int32_t range) {
     lv_arc_set_bg_angles(ring, 0, 360);
     lv_obj_set_style_arc_width(ring, TOOL_DIAL_W, LV_PART_MAIN);
     lv_obj_set_style_arc_width(ring, TOOL_DIAL_W, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_color(ring, lv_color_hex(0x2a2a30), LV_PART_MAIN);
+    lv_obj_set_style_arc_color(ring, lv_color_hex(UI_COLOR_TRACK), LV_PART_MAIN);
     return ring;
 }
 
 lv_obj_t *tool_title_create(lv_obj_t *parent, const char *text, lv_color_t tint) {
     lv_obj_t *title = lv_label_create(parent);
     lv_label_set_text(title, text);
-    lv_obj_set_style_text_font(title, &inter_semi_11, 0);
+    lv_obj_set_style_text_font(title, UI_FONT_OVERLINE, 0);
     lv_obj_set_style_text_color(title, tint, 0);
-    lv_obj_set_style_text_letter_space(title, 1, 0);
-    lv_obj_align(title, LV_ALIGN_CENTER, 0, TOOL_TITLE_Y);
+    lv_obj_set_style_text_letter_space(title, UI_OVERLINE_SPACING, 0);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, UI_TITLE_Y);
     return title;
 }
 
 // Tabular digits (inter_tnum_*) keep a running time from wobbling sideways.
 lv_obj_t *tool_time_label_create(lv_obj_t *parent) {
     lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_style_text_font(label, &inter_tnum_52, 0);
-    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_set_style_text_font(label, UI_FONT_READING, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_COLOR_TEXT), 0);
     return label;
 }
 
 lv_obj_t *tool_hint_label_create(lv_obj_t *parent) {
     lv_obj_t *label = lv_label_create(parent);
-    lv_obj_set_style_text_font(label, &inter_med_13, 0);
-    lv_obj_set_style_text_color(label, lv_color_hex(0x9a9aa4), 0);
+    lv_obj_set_style_text_font(label, UI_FONT_BODY, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(UI_COLOR_TEXT_DIM), 0);
     lv_obj_align(label, LV_ALIGN_CENTER, 0, TOOL_HINT_Y);
     return label;
 }
@@ -253,7 +251,7 @@ lv_obj_t *tool_button_row_create(lv_obj_t *parent) {
 }
 
 static lv_obj_t *button_create(lv_obj_t *row, const char *text, const lv_font_t *font, lv_event_cb_t cb) {
-    lv_obj_t *label = ui_round_button_create(row, text, TOOL_BTN_SIZE, font, false);
+    lv_obj_t *label = ui_round_button_create(row, text, UI_BUTTON_SIZE, font, false);
     lv_obj_t *btn = lv_obj_get_parent(label);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_ext_click_area(btn, TOOL_BTN_EXT);
@@ -262,11 +260,11 @@ static lv_obj_t *button_create(lv_obj_t *row, const char *text, const lv_font_t 
 }
 
 lv_obj_t *tool_button_create(lv_obj_t *row, const char *text, lv_event_cb_t cb) {
-    return button_create(row, text, &inter_semi_13, cb);
+    return button_create(row, text, UI_FONT_LABEL, cb);
 }
 
 lv_obj_t *tool_primary_button_create(lv_obj_t *row, lv_color_t tint, lv_event_cb_t cb) {
-    lv_obj_t *label = button_create(row, LV_SYMBOL_PLAY, &lv_font_montserrat_22, cb);
+    lv_obj_t *label = button_create(row, LV_SYMBOL_PLAY, UI_FONT_SYMBOL_LG, cb);
     lv_obj_set_style_bg_color(lv_obj_get_parent(label), tint, 0);
     return label;
 }
@@ -278,7 +276,7 @@ void tool_button_set_enabled(lv_obj_t *label, bool enabled) {
     if (lv_obj_has_flag(btn, LV_OBJ_FLAG_CLICKABLE) == enabled) {
         return;
     }
-    lv_obj_set_style_opa(btn, enabled ? LV_OPA_COVER : LV_OPA_40, 0);
+    lv_obj_set_style_opa(btn, enabled ? LV_OPA_COVER : UI_OPA_DISABLED, 0);
     if (enabled) {
         lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
     } else {

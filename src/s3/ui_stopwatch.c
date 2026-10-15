@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SW_TINT       0x2dd4a0
 #define SW_TIME_Y     (-38)
 #define SW_LAPS_Y     12
 #define SW_LAP_ROWS   3
@@ -117,10 +116,10 @@ static void lap_cb(lv_event_t *e) {
 }
 
 void stopwatch_page_build(lv_obj_t *screen) {
-    lv_color_t tint = lv_color_hex(SW_TINT);
+    lv_color_t tint = lv_color_hex(UI_TINT_STOPWATCH);
     tool_page_register(screen, &(tool_page_desc_t){.name = "Stopwatch",
                                                    .icon = ICON_STOPWATCH,
-                                                   .tint = SW_TINT,
+                                                   .tint = UI_TINT_STOPWATCH,
                                                    .press = toggle,
                                                    .tick = tick,
                                                    .status = status});
@@ -140,9 +139,9 @@ void stopwatch_page_build(lv_obj_t *screen) {
 
     sw.time_label = tool_time_label_create(row);
     sw.cs_label = lv_label_create(row);
-    lv_obj_set_style_text_font(sw.cs_label, &inter_tnum_26, 0);
-    lv_obj_set_style_text_color(sw.cs_label, lv_color_hex(0x9a9aa4), 0);
-    lv_obj_set_style_pad_bottom(sw.cs_label, inter_tnum_52.base_line - inter_tnum_26.base_line, 0);
+    lv_obj_set_style_text_font(sw.cs_label, UI_FONT_READING_SM, 0);
+    lv_obj_set_style_text_color(sw.cs_label, lv_color_hex(UI_COLOR_TEXT_DIM), 0);
+    lv_obj_set_style_pad_bottom(sw.cs_label, UI_FONT_READING->base_line - UI_FONT_READING_SM->base_line, 0);
 
     lv_obj_t *laps = lv_obj_create(screen);
     lv_obj_remove_style_all(laps);
@@ -150,13 +149,13 @@ void stopwatch_page_build(lv_obj_t *screen) {
     lv_obj_set_size(laps, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(laps, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(laps, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_row(laps, 2, 0);
+    lv_obj_set_style_pad_row(laps, UI_SPACE_XXS, 0);
     lv_obj_align(laps, LV_ALIGN_TOP_MID, 0, LV_VER_RES / 2 + SW_LAPS_Y);
     for (int i = 0; i < SW_LAP_ROWS; i++) {
         sw.lap_labels[i] = lv_label_create(laps);
-        lv_obj_set_style_text_font(sw.lap_labels[i], &inter_med_13, 0);
-        lv_obj_set_style_text_color(sw.lap_labels[i], lv_color_white(), 0);
-        lv_obj_set_style_text_opa(sw.lap_labels[i], i == 0 ? LV_OPA_80 : LV_OPA_50, 0);
+        lv_obj_set_style_text_font(sw.lap_labels[i], UI_FONT_BODY, 0);
+        lv_obj_set_style_text_color(sw.lap_labels[i], lv_color_hex(UI_COLOR_TEXT), 0);
+        lv_obj_set_style_text_opa(sw.lap_labels[i], i == 0 ? UI_OPA_TEXT_SOFT : UI_OPA_TEXT_MUTED, 0);
     }
 
     lv_obj_t *buttons = tool_button_row_create(screen);
