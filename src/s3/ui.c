@@ -1267,7 +1267,8 @@ bool ui_knob_rotate(int steps) {
     if (ui_wake()) {
         return true;
     }
-    if (ui_pairing_visible()) {
+    // A prompt answers to press and long press only.
+    if (ui_pairing_visible() || ui_confirm_visible()) {
         return true;
     }
     if (launcher_visible()) {
@@ -1281,7 +1282,7 @@ bool ui_knob_press(void) {
     if (ui_wake()) {
         return true;
     }
-    if (ui_pairing_knob_press()) {
+    if (ui_pairing_knob_press() || ui_confirm_knob_press()) {
         return true;
     }
     if (launcher_visible()) {
@@ -1295,7 +1296,7 @@ void ui_knob_long_press(void) {
     if (ui_wake()) {
         return;
     }
-    if (ui_pairing_knob_long_press()) {
+    if (ui_pairing_knob_long_press() || ui_confirm_knob_long_press()) {
         return;
     }
     if (launcher_visible()) {

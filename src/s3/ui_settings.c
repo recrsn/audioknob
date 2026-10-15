@@ -12,9 +12,10 @@
 // selection and a press (or a tap on a row) acts on it: switches flip at
 // once, brightness, sleep and timezone enter an edit mode where the knob (or
 // the -/+ buttons that cover the rows below meanwhile) changes the value
-// until the next press/tap, and the name, web page and (automatic) location
-// rows open a QR code for the device's web page, which has every setting
-// too (a name or a city can't be typed here).
+// until the next press/tap, and the name and web page rows (and turning
+// Auto location off) open a QR code for the device's web page, which has
+// every setting too (a name or a city can't be typed here). The Forget rows
+// ask first, on the full-screen confirmation.
 
 #define SET_TINT        0x9a9aa4
 #define SET_ACCENT      0x4ea1ff
@@ -49,7 +50,7 @@ static const uint16_t k_sleep_options[] = {0, 30, 60, 120, 300, 600, 1800, UI_SL
 #define SET_TZ_FAST_REPS 10
 #define SET_QR_SIZE     150
 #define SET_QR_Y        (-4)
-#define SET_QR_TITLE_Y  (-112)
+#define SET_QR_TITLE_Y  UI_SAFE_TOP_Y(20) // inter_semi_16, clear of the audio chip
 #define SET_QR_HINT_Y   100
 #define SET_QR_URL_Y    122
 
@@ -89,7 +90,7 @@ static const struct {
     [ROW_SLEEP] = {"Sleep after", KIND_VALUE},
     [ROW_HAPTICS] = {"Haptics", KIND_SWITCH},
     [ROW_CLOCK] = {"Clock", KIND_VALUE},
-    [ROW_LOCATION] = {"Location", KIND_VALUE},
+    [ROW_LOCATION] = {"Auto location", KIND_SWITCH},
     [ROW_TIMEZONE] = {"Timezone", KIND_VALUE},
     [ROW_UNITS] = {"Units", KIND_VALUE},
     [ROW_AIRPLAY2] = {"AirPlay 2", KIND_SWITCH},
@@ -161,7 +162,6 @@ static struct {
     int step_reps;                 // long-press repeats of the held one
     int selected;
     bool editing;
-    bool forget_armed; // the selected row (a Forget one, or a pinned location) pressed once
     lv_obj_t *qr_overlay; // while open
     lv_obj_t *qr;
     lv_obj_t *qr_url;
@@ -219,15 +219,6 @@ static void timezone_text(char *out, size_t len) {
     }
 }
 
-static void location_text(char *out, size_t len) {
-    const ui_settings_t *s = &s_settings;
-    if (!s->location_auto) {
-        snprintf(out, len, "%s", st.forget_armed ? "Press for Auto" : s->location);
-    } else {
-        snprintf(out, len, s->location[0] ? "Auto \xC2\xB7 %s" : "Auto", s->location);
-    }
-}
-
 // NULL while Bluetooth is off or the ESP32 isn't answering.
 static const pairing_status_t *bluetooth_status(void) {
     return s_settings.bluetooth ? ui_pairing_status() : NULL;
@@ -246,11 +237,6 @@ static void bt_pair_text(char *buf, size_t len) {
     }
 }
 
-static void bt_forget_text(char *buf, size_t len) {
-    const pairing_status_t *bt = bluetooth_status();
-    snprintf(buf, len, "%s", bt && bt->bonded && st.forget_armed ? "Press again" : "");
-}
-
 static bool switch_on(int row) {
     const ui_settings_t *s = &s_settings;
     switch (row) {
@@ -262,6 +248,8 @@ static bool switch_on(int row) {
         return s->airplay & UI_AIRPLAY_1;
     case ROW_BLUETOOTH:
         return s->bluetooth;
+    case ROW_LOCATION:
+        return s->location_auto;
     default:
         return false;
     }
@@ -314,9 +302,6 @@ static void value_text(int row, char *buf, size_t len) {
     case ROW_UNITS:
         snprintf(buf, len, "%s", s->fahrenheit ? "\xC2\xB0" "F" : "\xC2\xB0" "C");
         break;
-    case ROW_LOCATION:
-        location_text(buf, len);
-        break;
     case ROW_TIMEZONE:
         timezone_text(buf, len);
         break;
@@ -331,12 +316,6 @@ static void value_text(int row, char *buf, size_t len) {
         break;
     case ROW_BT_PAIR:
         bt_pair_text(buf, len);
-        break;
-    case ROW_BT_FORGET:
-        bt_forget_text(buf, len);
-        break;
-    case ROW_FORGET:
-        snprintf(buf, len, "%s", st.forget_armed ? "Press again" : "");
         break;
     case ROW_VERSION:
         snprintf(buf, len, "%s", s->version[0] ? s->version : "dev");
@@ -421,7 +400,6 @@ static void select_row(int row, bool scroll) {
     }
     if (row != st.selected) {
         st.selected = row;
-        st.forget_armed = false;
         render();
     }
     if (scroll) {
@@ -543,6 +521,15 @@ static void toggle_airplay(unsigned bit) {
     emit(UI_SETTING_AIRPLAY, (s_settings.airplay ^ bit) & (UI_AIRPLAY_1 | UI_AIRPLAY_2), NULL);
 }
 
+// Run once their confirmation is accepted.
+static void forget_devices(void) {
+    ui_pairing_request(UI_PAIRING_FORGET);
+}
+
+static void forget_wifi(void) {
+    emit(UI_SETTING_FORGET_WIFI, 0, NULL);
+}
+
 static void activate(void) {
     const ui_settings_t *s = &s_settings;
     if (st.qr_overlay) {
@@ -586,10 +573,10 @@ static void activate(void) {
     case ROW_BT_FORGET: {
         const pairing_status_t *bt = bluetooth_status();
         if (bt && bt->bonded) {
-            if (st.forget_armed) {
-                ui_pairing_request(UI_PAIRING_FORGET);
-            }
-            st.forget_armed = !st.forget_armed;
+            char body[80];
+            snprintf(body, sizeof(body), "%u %s will have to pair again", bt->bonded,
+                     bt->bonded == 1 ? "device" : "devices");
+            ui_confirm(LV_SYMBOL_BLUETOOTH, "Forget paired devices?", body, forget_devices);
         }
         break;
     }
@@ -600,13 +587,10 @@ static void activate(void) {
         toggle_airplay(UI_AIRPLAY_1);
         break;
     case ROW_LOCATION:
-        // A city can't be typed here: the web page picks one, and this
-        // only goes back to automatic.
+        // A city can't be typed here, so turning it off sends the user to
+        // the web page to pick one; turning it on is immediate.
         if (!s->location_auto) {
-            if (st.forget_armed) {
-                emit(UI_SETTING_LOCATION, 0, NULL);
-            }
-            st.forget_armed = !st.forget_armed;
+            emit(UI_SETTING_LOCATION, 0, NULL);
         } else if (s->ip[0]) {
             qr_open(lv_obj_get_screen(st.list), "Set location on your phone");
         }
@@ -618,10 +602,7 @@ static void activate(void) {
         }
         break;
     case ROW_FORGET:
-        if (st.forget_armed) {
-            emit(UI_SETTING_FORGET_WIFI, 0, NULL);
-        }
-        st.forget_armed = !st.forget_armed;
+        ui_confirm(LV_SYMBOL_WIFI, "Forget WiFi?", "The device restarts and opens its setup hotspot", forget_wifi);
         break;
     default:
         break;

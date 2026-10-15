@@ -110,6 +110,15 @@ void ui_tools_dismiss(lv_obj_t *screen);
 bool ui_tools_knob_rotate(lv_obj_t *screen, int steps);
 bool ui_tools_knob_press(lv_obj_t *screen);
 
+// A confirmation (ui_confirm.c) on the same full-screen prompt as pairing:
+// `symbol` is a Montserrat LV_SYMBOL_*; on_confirm runs once accepted.
+void ui_confirm(const char *symbol, const char *title, const char *body, void (*on_confirm)(void));
+bool ui_confirm_visible(void);
+// Knob input while it's up (press accepts, long press cancels); false when
+// it isn't.
+bool ui_confirm_knob_press(void);
+bool ui_confirm_knob_long_press(void);
+
 // The Bluetooth pairing prompt (ui_pairing.c), over every screen.
 bool ui_pairing_visible(void);
 // Knob input while the prompt is up; false when it isn't.
