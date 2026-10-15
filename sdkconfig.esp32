@@ -3966,6 +3966,13 @@ CONFIG_ESP_LCD_TOUCH_MAX_BUTTONS=1
 # end of libpng
 
 #
+# libsodium
+#
+# default:
+CONFIG_LIBSODIUM_USE_MBEDTLS_SHA=y
+# end of libsodium
+
+#
 # mDNS
 #
 # default:
