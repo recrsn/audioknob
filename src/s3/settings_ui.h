@@ -2,12 +2,13 @@
 
 #include <stdbool.h>
 
+#include "geo.h"
 #include "ui.h"
 
 // Applies the user's settings (backlight, timezone, Bluetooth, AirPlay
 // versions) and connects them to the Settings page: loads them from NVS,
-// handles changes from the UI, persists them, follows the IP-detected
-// timezone while that's on "automatic", and pushes values (including
+// handles changes from the UI, persists them, follows the
+// location's timezone while that's on "automatic", and pushes values (including
 // WiFi/memory info) back to the page.
 
 // Loads settings and applies them. Call after uart_link_start(),
@@ -23,5 +24,7 @@ void settings_ui_start(void);
 // task.
 void settings_ui_snapshot(ui_settings_t *out);
 void settings_ui_change(ui_setting_t setting, int value, const char *zone);
+// Pins the location, or with NULL goes back to the IP-detected one.
+void settings_ui_set_location(const geo_t *geo);
 
 bool settings_ui_haptics(void);

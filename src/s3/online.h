@@ -16,6 +16,12 @@ void online_start(void);
 void online_network_up(void);
 
 // Each getter returns a version that bumps whenever the data changes, so a
-// poller can skip unchanged copies; 0 means nothing yet.
-uint32_t online_get_location(geo_t *out);
+// poller can skip unchanged copies; 0 means nothing yet. The location is
+// the manual one if set, else the IP-detected one, cached across boots;
+// `manual` may be NULL.
+uint32_t online_get_location(geo_t *out, bool *manual);
 uint32_t online_get_weather(ui_weather_t *out);
+
+// Pins the location (e.g. picked on the web page), or with NULL goes back to
+// the IP-detected one. Persisted, and the forecast follows at once.
+void online_set_location(const geo_t *manual);

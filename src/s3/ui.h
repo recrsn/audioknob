@@ -153,7 +153,9 @@ typedef struct {
     bool bluetooth;
     uint8_t airplay;   // UI_AIRPLAY_* mask; 0 = off
     bool airplay2_available; // else only UI_AIRPLAY_1 means anything
-    bool tz_auto;      // following the IP-detected zone
+    bool tz_auto;      // following the location's zone
+    bool location_auto; // following the IP-detected location
+    char location[32]; // city in effect; "" while still unknown
     char tz_name[40];  // zone in effect; "" while still unknown
     char device_name[33];
     char hostname[64]; // mDNS, without ".local"
@@ -176,6 +178,7 @@ typedef enum {
     UI_SETTING_FORGET_WIFI,
     UI_SETTING_BLUETOOTH,  // value: 0/1
     UI_SETTING_AIRPLAY,    // value: UI_AIRPLAY_* mask
+    UI_SETTING_LOCATION,   // back to the IP-detected one; picking one is the web page's
 } ui_setting_t;
 
 #define UI_AIRPLAY_1 (1u << 0)

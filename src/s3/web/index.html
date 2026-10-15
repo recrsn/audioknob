@@ -61,6 +61,11 @@ select,input[type=text]{width:100%;padding:11px 12px;font-size:16px;border-radiu
 .btn{border:0;border-radius:10px;padding:11px 16px;font-size:16px;background:var(--accent);color:#fff;flex:none}
 .btn.danger{background:none;color:var(--err);padding:0 4px;font-size:16px}
 #btactions .inline{justify-content:space-between;align-items:center}
+.split{justify-content:space-between;align-items:center}
+.btn.ghost{background:none;color:var(--accent);padding:0 4px;align-self:flex-start}
+#locresults{display:flex;flex-direction:column}
+#locresults button{display:flex;flex-direction:column;align-items:flex-start;border:0;border-top:1px solid var(--line);background:none;color:var(--text);padding:10px 4px;font-size:16px;text-align:left}
+#locresults small{color:var(--dim);font-size:13px}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#2a2a35;color:var(--text);padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.show{opacity:1}
 </style>
@@ -104,6 +109,12 @@ select,input[type=text]{width:100%;padding:11px 12px;font-size:16px;border-radiu
 <section class="card">
   <div class="row"><span>Clock</span><div class="seg" id="clock24"><button data-v="0">12-hour</button><button data-v="1">24-hour</button></div></div>
   <div class="row"><span>Units</span><div class="seg" id="fahrenheit"><button data-v="0">°C</button><button data-v="1">°F</button></div></div>
+  <div class="row col">
+    <div class="inline split"><span>Location</span><span class="val" id="loc"></span></div>
+    <form class="inline" id="locform"><input type="text" id="locq" placeholder="Search for a city" autocomplete="off"><button class="btn">Search</button></form>
+    <div id="locresults"></div>
+    <button class="btn ghost" id="locauto" hidden>Use the detected location</button>
+  </div>
   <div class="row col"><span>Timezone</span><select id="tz"><option value="">Automatic</option></select></div>
 </section>
 
@@ -220,6 +231,8 @@ function render(s) {
   $("haptics").checked = s.haptics;
   setSeg("clock24", s.clock24);
   setSeg("fahrenheit", s.fahrenheit);
+  setText("loc", s.locationAuto ? (s.location ? `Automatic (${s.location})` : "Automatic") : s.location);
+  $("locauto").hidden = s.locationAuto;
   if (zonesLoaded) $("tz").value = s.tzAuto ? "" : s.tz;
   $("tz").options[0].textContent = s.tzAuto && s.tz ? `Automatic (${s.tz})` : "Automatic";
   // Without the AirPlay 2 receiver built in, the one switch means AirPlay.
@@ -289,6 +302,40 @@ for (const id of ["clock24", "fahrenheit"]) {
   };
 }
 $("tz").onchange = e => set("tz", e.target.value);
+
+// The phone asks Open-Meteo's geocoder (the forecast's own source); the
+// device only stores the pick.
+$("locform").onsubmit = async e => {
+  e.preventDefault();
+  const q = $("locq").value.trim(), list = $("locresults");
+  if (!q) return;
+  list.textContent = "";
+  let places;
+  try {
+    const params = new URLSearchParams({name: q, count: 5, language: "en", format: "json"});
+    places = (await (await fetch("https://geocoding-api.open-meteo.com/v1/search?" + params)).json()).results || [];
+  } catch (err) {
+    toast("Couldn't search: is this phone online?");
+    return;
+  }
+  if (!places.length) toast("No places found");
+  for (const p of places) {
+    const b = document.createElement("button");
+    const sub = document.createElement("small");
+    b.type = "button";
+    b.textContent = p.name;
+    sub.textContent = [p.admin1, p.country].filter(Boolean).join(", ");
+    b.append(sub);
+    b.onclick = async () => {
+      if (!await post("/api/location", {city: p.name, lat: p.latitude, lon: p.longitude, tz: p.timezone || ""})) return;
+      list.textContent = "";
+      $("locq").value = "";
+      toast("Location set to " + p.name);
+    };
+    list.append(b);
+  }
+};
+$("locauto").onclick = () => post("/api/location", {auto: 1});
 
 function airplayMask() {
   if (!state.airplay2) return $("ap2").checked ? 1 : 0;

@@ -99,6 +99,8 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddBoolToObject(json, "airplay2", s.airplay2_available);
     cJSON_AddBoolToObject(json, "tzAuto", s.tz_auto);
     cJSON_AddStringToObject(json, "tz", s.tz_name);
+    cJSON_AddBoolToObject(json, "locationAuto", s.location_auto);
+    cJSON_AddStringToObject(json, "location", s.location);
     cJSON_AddItemToObject(json, "np", now_playing_json());
     // null while Bluetooth is off or the ESP32 isn't answering.
     pairing_status_t pairing;
@@ -251,6 +253,55 @@ static esp_err_t set_handler(httpd_req_t *req) {
     return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown setting");
 }
 
+static bool parse_double(const char *text, double min, double max, double *out) {
+    char *end;
+    double v = strtod(text, &end);
+    if (!*text || *end || !(v >= min && v <= max)) {
+        return false;
+    }
+    *out = v;
+    return true;
+}
+
+// Cuts a UTF-8 string to fit `len` bytes without splitting a character.
+static void copy_utf8(char *out, size_t len, const char *in) {
+    size_t n = strlen(in);
+    if (n >= len) {
+        n = len - 1;
+        while (n && ((unsigned char)in[n] & 0xC0) == 0x80) {
+            n--;
+        }
+    }
+    memcpy(out, in, n);
+    out[n] = '\0';
+}
+
+// A place the page found with Open-Meteo's geocoder (city, lat, lon, tz),
+// or auto=1 to go back to the IP-detected one.
+static esp_err_t location_handler(httpd_req_t *req) {
+    char form[FORM_MAX + 1], text[96];
+    if (!read_post(req, form, sizeof(form))) {
+        return ESP_OK;
+    }
+    web_form_value(form, "auto", text, sizeof(text));
+    if (!strcmp(text, "1")) {
+        settings_ui_set_location(NULL);
+        return send_ok(req);
+    }
+    geo_t geo = {0};
+    char lat[24], lon[24];
+    web_form_value(form, "lat", lat, sizeof(lat));
+    web_form_value(form, "lon", lon, sizeof(lon));
+    web_form_value(form, "city", text, sizeof(text));
+    if (!text[0] || !parse_double(lat, -90, 90, &geo.lat) || !parse_double(lon, -180, 180, &geo.lon)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad location");
+    }
+    copy_utf8(geo.city, sizeof(geo.city), text);
+    web_form_value(form, "tz", geo.tz, sizeof(geo.tz));
+    settings_ui_set_location(&geo);
+    return send_ok(req);
+}
+
 static esp_err_t name_handler(httpd_req_t *req) {
     char form[FORM_MAX + 1];
     if (!read_post(req, form, sizeof(form))) {
@@ -346,6 +397,7 @@ void web_settings_start(void) {
         {.uri = "/api/art.bmp", .method = HTTP_GET, .handler = art_handler},
         {.uri = "/api/set", .method = HTTP_POST, .handler = set_handler},
         {.uri = "/api/name", .method = HTTP_POST, .handler = name_handler},
+        {.uri = "/api/location", .method = HTTP_POST, .handler = location_handler},
         {.uri = "/api/volume", .method = HTTP_POST, .handler = volume_handler},
         {.uri = "/api/transport", .method = HTTP_POST, .handler = transport_handler},
         {.uri = "/api/pairing", .method = HTTP_POST, .handler = pairing_handler},

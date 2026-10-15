@@ -25,9 +25,7 @@ static uint8_t get_u8(nvs_handle_t nvs, const char *key, uint8_t fallback) {
     return nvs_get_u8(nvs, key, &v) == ESP_OK ? v : fallback;
 }
 
-void settings_load(settings_t *out) {
-    *out = k_defaults;
-
+void settings_nvs_init(void) {
     // Same recovery wifi.c applies; a second nvs_flash_init() is a no-op.
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -35,6 +33,11 @@ void settings_load(settings_t *out) {
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
+}
+
+void settings_load(settings_t *out) {
+    *out = k_defaults;
+    settings_nvs_init();
 
     nvs_handle_t nvs;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) != ESP_OK) {

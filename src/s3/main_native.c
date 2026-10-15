@@ -24,7 +24,8 @@ static void clock_tick_cb(lv_timer_t *timer) {
 }
 
 // Settings live in memory only. "Automatic" timezone means the host's own
-// zone, read from /etc/localtime, since there's no IP lookup here.
+// zone, read from /etc/localtime, since there's no IP lookup here; the
+// location starts pinned so going back to automatic can be tried.
 static ui_settings_t s_settings = {
     .brightness = 80,
     .clock_24h = true,
@@ -33,6 +34,7 @@ static ui_settings_t s_settings = {
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .airplay2_available = true,
     .tz_auto = true,
+    .location = "Lisbon",
     .device_name = "AudioKnob-K7MXQ2PA",
     .hostname = "audioknob-k7mxq2pa",
     .wifi_ssid = "Sample",
@@ -74,6 +76,10 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
             tzset();
             host_zone(s_settings.tz_name, sizeof(s_settings.tz_name));
         }
+        break;
+    case UI_SETTING_LOCATION:
+        s_settings.location_auto = true;
+        snprintf(s_settings.location, sizeof(s_settings.location), "Sample");
         break;
     case UI_SETTING_FORGET_WIFI:
         printf("settings: forget WiFi (no-op on native)\n");

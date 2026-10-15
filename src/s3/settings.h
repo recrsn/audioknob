@@ -16,5 +16,8 @@ typedef struct {
     char tz[40]; // manual IANA zone; "" follows the IP-detected one
 } settings_t;
 
+// Brings up NVS for anything that reads it before settings_load().
+void settings_nvs_init(void);
+
 void settings_load(settings_t *out);
 void settings_save(const settings_t *s);

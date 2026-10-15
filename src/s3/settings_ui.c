@@ -44,7 +44,7 @@ static void save_later(void) {
     esp_timer_start_once(s_save_timer, SAVE_DELAY_US);
 }
 
-// A manual zone wins; otherwise the IP-detected one, by name when tz_db
+// A manual zone wins; otherwise the location's (manual or IP-detected), by name when tz_db
 // knows it, else by its current offset; UTC until that's known.
 static void apply_timezone(void) {
     if (s_settings.tz[0] && tz_apply(s_settings.tz)) {
@@ -52,7 +52,7 @@ static void apply_timezone(void) {
         return;
     }
     geo_t geo;
-    if (!online_get_location(&geo)) {
+    if (!online_get_location(&geo, NULL)) {
         tz_apply("UTC");
         s_zone[0] = '\0';
         return;
@@ -84,6 +84,12 @@ static void fill(ui_settings_t *out) {
         .free_psram_kb = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
     };
     snprintf(out->tz_name, sizeof(out->tz_name), "%s", s_zone);
+    geo_t geo;
+    bool manual = false;
+    if (online_get_location(&geo, &manual)) {
+        snprintf(out->location, sizeof(out->location), "%s", geo.city);
+    }
+    out->location_auto = !manual;
     device_name_get(out->device_name, sizeof(out->device_name));
     device_name_hostname(out->hostname, sizeof(out->hostname));
     snprintf(out->version, sizeof(out->version), "%s", esp_app_get_description()->version);
@@ -123,6 +129,12 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         s_settings.airplay = (uint8_t)value;
         apply_airplay();
         break;
+    case UI_SETTING_LOCATION:
+        // online.c persists the location itself.
+        online_set_location(NULL);
+        apply_timezone();
+        push();
+        return;
     case UI_SETTING_FORGET_WIFI:
         wifi_forget();
         return;
@@ -134,7 +146,7 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
 static void refresh_cb(lv_timer_t *timer) {
     (void)timer;
     geo_t geo;
-    uint32_t v = online_get_location(&geo);
+    uint32_t v = online_get_location(&geo, NULL);
     if (v != s_geo_version) {
         s_geo_version = v;
         apply_timezone();
@@ -167,6 +179,14 @@ void settings_ui_snapshot(ui_settings_t *out) {
 void settings_ui_change(ui_setting_t setting, int value, const char *zone) {
     lcd_driver_lvgl_lock();
     on_setting(setting, value, zone);
+    lcd_driver_lvgl_unlock();
+}
+
+void settings_ui_set_location(const geo_t *geo) {
+    lcd_driver_lvgl_lock();
+    online_set_location(geo);
+    apply_timezone();
+    push();
     lcd_driver_lvgl_unlock();
 }
 

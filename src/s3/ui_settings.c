@@ -11,9 +11,9 @@
 // grouped under section headers the selection skips. The knob moves the
 // selection and a press (or a tap on a row) acts on it: switches flip at
 // once, brightness and timezone enter an edit mode where the knob changes
-// the value until the next press/tap, and the name and web page rows open a
-// QR code for the device's web page, which has every setting too (a name
-// can't be typed here).
+// the value until the next press/tap, and the name, web page and (automatic)
+// location rows open a QR code for the device's web page, which has every
+// setting too (a name or a city can't be typed here).
 
 #define SET_TINT        0x9a9aa4
 #define SET_ACCENT      0x4ea1ff
@@ -46,6 +46,7 @@ typedef enum {
     ROW_BRIGHTNESS,
     ROW_HAPTICS,
     ROW_CLOCK,
+    ROW_LOCATION,
     ROW_TIMEZONE,
     ROW_UNITS,
     ROW_AIRPLAY2,
@@ -75,6 +76,7 @@ static const struct {
     [ROW_BRIGHTNESS] = {"Brightness", KIND_LEVEL},
     [ROW_HAPTICS] = {"Haptics", KIND_SWITCH},
     [ROW_CLOCK] = {"Clock", KIND_VALUE},
+    [ROW_LOCATION] = {"Location", KIND_VALUE},
     [ROW_TIMEZONE] = {"Timezone", KIND_VALUE},
     [ROW_UNITS] = {"Units", KIND_VALUE},
     [ROW_AIRPLAY2] = {"AirPlay 2", KIND_SWITCH},
@@ -101,6 +103,7 @@ static const struct {
     {NULL, ROW_HAPTICS},
     HEADER("TIME AND WEATHER"),
     {NULL, ROW_CLOCK},
+    {NULL, ROW_LOCATION},
     {NULL, ROW_TIMEZONE},
     {NULL, ROW_UNITS},
     HEADER("AUDIO"),
@@ -127,6 +130,7 @@ static ui_settings_t s_settings = {
     .bluetooth = true,
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .tz_auto = true,
+    .location_auto = true,
 };
 
 static struct {
@@ -140,7 +144,7 @@ static struct {
     lv_obj_t *level;               // brightness bar
     int selected;
     bool editing;
-    bool forget_armed; // the selected row is a Forget one, pressed once
+    bool forget_armed; // the selected row (a Forget one, or a pinned location) pressed once
     lv_obj_t *qr_overlay; // while open
     lv_obj_t *qr;
     lv_obj_t *qr_url;
@@ -195,6 +199,15 @@ static void timezone_text(char *out, size_t len) {
         snprintf(out, len, s_settings.tz_name[0] ? "Auto \xC2\xB7 %s" : "Auto", city);
     } else {
         snprintf(out, len, "%s", city);
+    }
+}
+
+static void location_text(char *out, size_t len) {
+    const ui_settings_t *s = &s_settings;
+    if (!s->location_auto) {
+        snprintf(out, len, "%s", st.forget_armed ? "Press for Auto" : s->location);
+    } else {
+        snprintf(out, len, s->location[0] ? "Auto \xC2\xB7 %s" : "Auto", s->location);
     }
 }
 
@@ -254,6 +267,9 @@ static void value_text(int row, char *buf, size_t len) {
         break;
     case ROW_UNITS:
         snprintf(buf, len, "%s", s->fahrenheit ? "\xC2\xB0" "F" : "\xC2\xB0" "C");
+        break;
+    case ROW_LOCATION:
+        location_text(buf, len);
         break;
     case ROW_TIMEZONE:
         timezone_text(buf, len);
@@ -534,6 +550,18 @@ static void activate(void) {
         break;
     case ROW_AIRPLAY1:
         toggle_airplay(UI_AIRPLAY_1);
+        break;
+    case ROW_LOCATION:
+        // A city can't be typed here: the web page picks one, and this
+        // only goes back to automatic.
+        if (!s->location_auto) {
+            if (st.forget_armed) {
+                emit(UI_SETTING_LOCATION, 0, NULL);
+            }
+            st.forget_armed = !st.forget_armed;
+        } else if (s->ip[0]) {
+            qr_open(lv_obj_get_screen(st.list), "Set location on your phone");
+        }
         break;
     case ROW_NAME:
     case ROW_WEB:
