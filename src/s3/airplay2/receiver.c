@@ -8,6 +8,7 @@
  */
 
 #include <errno.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -460,9 +461,9 @@ bool raop_remote_command(raop_ctx_t *ctx, const char *command) {
     return false;
 }
 
-// AirPlay 1 senders take it over DACP. AirPlay 2 has no way to move the
-// sender's slider (MediaRemote carries no volume), so only what /info and
-// GET_PARAMETER report follows the knob.
+// AirPlay 1 senders take it over DACP, AirPlay 2 ones over MediaRemote.
+// Big jumps go in steps under 0.1, as shairport-sync does: Apple Music on
+// macOS Tahoe jumps its own volume otherwise.
 bool raop_remote_volume(raop_ctx_t *ctx, float volume) {
     (void)ctx;
     if (session_is_airplay1()) {
@@ -470,9 +471,21 @@ bool raop_remote_volume(raop_ctx_t *ctx, float volume) {
     }
     float db = volume > 0.0f ? (1.0f - volume) * AP2_VOLUME_MIN_DB : AP2_VOLUME_MUTE_DB;
     portENTER_CRITICAL(&s_lock);
+    float sent = db_to_linear(s_volume_db);
     s_volume_db = db;
     portEXIT_CRITICAL(&s_lock);
-    return false;
+
+    bool ok = true;
+    while (ok && fabsf(volume - sent) > 1e-3f) {
+        if (fabsf(volume - sent) < 0.1f) {
+            sent = volume;
+        } else {
+            sent += volume > sent ? 0.09f : -0.09f;
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+        ok = session_volume(sent);
+    }
+    return ok;
 }
 
 uint32_t raop_time_ms(void) {

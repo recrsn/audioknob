@@ -652,3 +652,30 @@ bool session_media_command(mr_command_t command) {
     ESP_LOGI(TAG, "MediaRemote command %d %s", (int)command, ok ? "sent" : "failed");
     return ok;
 }
+
+// shairport-sync's ap2_event_send_unit_volume_notification(): "dvlc", the
+// device volume, with the unit volume both at the top level and in params.
+bool session_volume(float volume) {
+    bool ok = false;
+    xSemaphoreTakeRecursive(s.lock, portMAX_DELAY);
+    ap2_conn_t *conn = s.principal;
+    if (conn && conn->events) {
+        bpw_t *w = bpw_new();
+        if (w) {
+            bpw_obj params = bpw_dict(w);
+            bpw_dict_set(w, params, "volume", bpw_real(w, volume));
+            bpw_obj d = bpw_dict(w);
+            bpw_dict_set(w, d, "type", bpw_string(w, "sendMediaRemoteCommand"));
+            bpw_dict_set(w, d, "value", bpw_string(w, "dvlc"));
+            bpw_dict_set(w, d, "volume", bpw_real(w, volume));
+            bpw_dict_set(w, d, "params", params);
+            ok = event_post_command(conn->events, w, d);
+            bpw_free(w);
+        }
+    }
+    xSemaphoreGiveRecursive(s.lock);
+    if (!ok) {
+        ESP_LOGW(TAG, "volume %.3f not sent", volume);
+    }
+    return ok;
+}

@@ -46,6 +46,8 @@ bool session_feedback(bpw_t *w, bpw_obj *root);
 
 // Asks the principal sender to act (MediaRemote over its event channel).
 bool session_media_command(mr_command_t command);
+// Moves the principal sender's slider for this speaker, 0..1.
+bool session_volume(float volume);
 
 // The esp_timer time (us) at which this RTP frame should reach the DAC.
 bool session_playtime_us(uint32_t rtp, int64_t *playtime_us);
