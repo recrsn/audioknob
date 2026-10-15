@@ -21,6 +21,9 @@
 #define STATUS_DEVICE_ID(s) ((s) >> 5)
 #define DEVICE_ID_DRV2605   3
 #define DEVICE_ID_DRV2605L  7
+// Not a TI ID: this board's part (a DRV2605L on the schematic) reports it,
+// most likely a register-compatible second source.
+#define DEVICE_ID_COMPAT    5
 
 #define MODE_INTERNAL_TRIGGER 0x00 // also clears STANDBY
 #define LIBRARY_LRA           6
@@ -70,10 +73,11 @@ static bool configure(void) {
         return false;
     }
     uint8_t id = STATUS_DEVICE_ID(status);
-    if (id != DEVICE_ID_DRV2605 && id != DEVICE_ID_DRV2605L) {
+    if (id != DEVICE_ID_DRV2605 && id != DEVICE_ID_DRV2605L && id != DEVICE_ID_COMPAT) {
         ESP_LOGW(TAG, "unexpected device id %u at 0x%02x", id, DRV2605_ADDR);
         return false;
     }
+    ESP_LOGI(TAG, "device id %u", id);
     // The board's actuator is an LRA: switch the driver from its ERM reset
     // default and use the LRA effect library. Closed-loop resonance tracking
     // works from reset values, so no auto-calibration pass.
