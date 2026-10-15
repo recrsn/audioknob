@@ -28,6 +28,7 @@ static void clock_tick_cb(lv_timer_t *timer) {
 // location starts pinned so going back to automatic can be tried.
 static ui_settings_t s_settings = {
     .brightness = 80,
+    .sleep_s = 300,
     .clock_24h = true,
     .haptics = true,
     .bluetooth = true,
@@ -66,6 +67,9 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         break;
     case UI_SETTING_HAPTICS:
         s_settings.haptics = value;
+        break;
+    case UI_SETTING_SLEEP:
+        s_settings.sleep_s = (uint16_t)value;
         break;
     case UI_SETTING_TIMEZONE:
         s_settings.tz_auto = zone == NULL;

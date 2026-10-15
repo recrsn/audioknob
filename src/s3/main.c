@@ -165,6 +165,7 @@ void app_main(void) {
     ui_set_source_handler(now_playing_pick);
     ui_set_pairing_handler(on_pairing);
     ui_set_alert_handler(on_alert);
+    ui_set_display_handler(lcd_driver_set_backlight_on);
     lv_indev_add_event_cb(lcd_driver_touch_indev(), on_touch_clicked, LV_EVENT_CLICKED, NULL);
     settings_ui_start();
     lights_ui_start();

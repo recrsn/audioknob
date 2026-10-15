@@ -91,6 +91,7 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddNumberToObject(json, "freeInternalKb", s.free_internal_kb);
     cJSON_AddNumberToObject(json, "freePsramKb", s.free_psram_kb);
     cJSON_AddNumberToObject(json, "brightness", s.brightness);
+    cJSON_AddNumberToObject(json, "sleep", s.sleep_s);
     cJSON_AddBoolToObject(json, "clock24", s.clock_24h);
     cJSON_AddBoolToObject(json, "fahrenheit", s.fahrenheit);
     cJSON_AddBoolToObject(json, "haptics", s.haptics);
@@ -218,6 +219,7 @@ static esp_err_t set_handler(httpd_req_t *req) {
         int min, max;
     } k_keys[] = {
         {"brightness", UI_SETTING_BRIGHTNESS, 5, 100},
+        {"sleep", UI_SETTING_SLEEP, 0, UI_SLEEP_MAX_S},
         {"clock24", UI_SETTING_CLOCK_24H, 0, 1},
         {"fahrenheit", UI_SETTING_FAHRENHEIT, 0, 1},
         {"haptics", UI_SETTING_HAPTICS, 0, 1},

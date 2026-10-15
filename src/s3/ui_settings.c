@@ -10,7 +10,7 @@
 // distance so the clipped top and bottom of the circle stay quiet. Rows are
 // grouped under section headers the selection skips. The knob moves the
 // selection and a press (or a tap on a row) acts on it: switches flip at
-// once, brightness and timezone enter an edit mode where the knob changes
+// once, brightness, sleep and timezone enter an edit mode where the knob changes
 // the value until the next press/tap, and the name, web page and (automatic)
 // location rows open a QR code for the device's web page, which has every
 // setting too (a name or a city can't be typed here).
@@ -34,6 +34,9 @@
 #define SET_FADE_MIN    40
 #define SET_BRIGHT_STEP 5
 #define SET_BRIGHT_MIN  5
+// Display sleep choices, seconds; the web page offers the same.
+static const uint16_t k_sleep_options[] = {0, 30, 60, 120, 300, 600, 1800, UI_SLEEP_MAX_S};
+#define SLEEP_OPTION_COUNT (int)(sizeof(k_sleep_options) / sizeof(k_sleep_options[0]))
 // Timezone picker position for "automatic", ahead of tz_db's entries.
 #define TZ_AUTO (-1)
 #define SET_QR_SIZE     150
@@ -44,6 +47,7 @@
 
 typedef enum {
     ROW_BRIGHTNESS,
+    ROW_SLEEP,
     ROW_HAPTICS,
     ROW_CLOCK,
     ROW_LOCATION,
@@ -74,6 +78,7 @@ static const struct {
     row_kind_t kind;
 } k_rows[ROW_COUNT] = {
     [ROW_BRIGHTNESS] = {"Brightness", KIND_LEVEL},
+    [ROW_SLEEP] = {"Sleep after", KIND_VALUE},
     [ROW_HAPTICS] = {"Haptics", KIND_SWITCH},
     [ROW_CLOCK] = {"Clock", KIND_VALUE},
     [ROW_LOCATION] = {"Location", KIND_VALUE},
@@ -100,6 +105,7 @@ static const struct {
 } k_layout[] = {
     HEADER("DISPLAY"),
     {NULL, ROW_BRIGHTNESS},
+    {NULL, ROW_SLEEP},
     {NULL, ROW_HAPTICS},
     HEADER("TIME AND WEATHER"),
     {NULL, ROW_CLOCK},
@@ -125,6 +131,7 @@ static const struct {
 
 static ui_settings_t s_settings = {
     .brightness = 80,
+    .sleep_s = 300,
     .clock_24h = true,
     .haptics = true,
     .bluetooth = true,
@@ -255,6 +262,29 @@ static void switch_set(lv_obj_t *track, bool on) {
     lv_obj_align(lv_obj_get_child(track, 0), on ? LV_ALIGN_RIGHT_MID : LV_ALIGN_LEFT_MID, on ? -2 : 2, 0);
 }
 
+static void sleep_text(uint16_t s, char *out, size_t len) {
+    if (!s) {
+        snprintf(out, len, "Never");
+    } else if (s < 60) {
+        snprintf(out, len, "%u s", s);
+    } else if (s < 3600) {
+        snprintf(out, len, "%u min", s / 60);
+    } else {
+        snprintf(out, len, "%u h", s / 3600);
+    }
+}
+
+// The first choice at least as long as `s`, so a value set elsewhere steps
+// from where it is.
+static int sleep_option(uint16_t s) {
+    for (int i = 0; i < SLEEP_OPTION_COUNT; i++) {
+        if (k_sleep_options[i] >= s) {
+            return i;
+        }
+    }
+    return SLEEP_OPTION_COUNT - 1;
+}
+
 static void value_text(int row, char *buf, size_t len) {
     const ui_settings_t *s = &s_settings;
     bool editing = st.editing && st.selected == row;
@@ -262,6 +292,12 @@ static void value_text(int row, char *buf, size_t len) {
     case ROW_BRIGHTNESS:
         snprintf(buf, len, editing ? LV_SYMBOL_LEFT " %u%% " LV_SYMBOL_RIGHT : "%u%%", s->brightness);
         break;
+    case ROW_SLEEP: {
+        char text[16];
+        sleep_text(s->sleep_s, text, sizeof(text));
+        snprintf(buf, len, editing ? LV_SYMBOL_LEFT " %s " LV_SYMBOL_RIGHT : "%s", text);
+        break;
+    }
     case ROW_CLOCK:
         snprintf(buf, len, "%s", s->clock_24h ? "24-hour" : "12-hour");
         break;
@@ -512,6 +548,7 @@ static void activate(void) {
     }
     switch (st.selected) {
     case ROW_BRIGHTNESS:
+    case ROW_SLEEP:
         st.editing = true;
         break;
     case ROW_TIMEZONE:
@@ -593,6 +630,10 @@ static bool settings_rotate(int steps) {
         int pct = s_settings.brightness + steps * SET_BRIGHT_STEP;
         pct = pct < SET_BRIGHT_MIN ? SET_BRIGHT_MIN : pct > 100 ? 100 : pct;
         emit(UI_SETTING_BRIGHTNESS, pct, NULL);
+    } else if (st.selected == ROW_SLEEP) {
+        int i = sleep_option(s_settings.sleep_s) + steps;
+        i = i < 0 ? 0 : i >= SLEEP_OPTION_COUNT ? SLEEP_OPTION_COUNT - 1 : i;
+        emit(UI_SETTING_SLEEP, k_sleep_options[i], NULL);
     } else {
         // Wraps through Automatic, then every zone in name order.
         int n = (int)tz_db_count + 1;

@@ -8,6 +8,7 @@
 
 typedef struct {
     uint8_t brightness; // backlight, 5-100 %
+    uint16_t sleep_s;   // display sleep after this long idle; 0 = never
     bool clock_24h;
     bool fahrenheit;
     bool haptics;

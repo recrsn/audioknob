@@ -205,7 +205,7 @@ void ui_update_pairing(const pairing_status_t *status) {
     if (!was_visible) {
         lv_obj_move_foreground(pr.scrim);
         ui_set_visible(pr.scrim, true);
-        lv_display_trigger_activity(NULL);
+        ui_wake();
     }
 }
 

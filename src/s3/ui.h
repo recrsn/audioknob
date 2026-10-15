@@ -81,6 +81,12 @@ void ui_knob_long_press(void);
 // buzz; must not block.
 void ui_set_alert_handler(void (*handler)(bool ringing));
 
+// Called on the LVGL task when the display goes to sleep (false) after the
+// Settings page's idle timeout, and when input, a ringing countdown, a
+// pairing request or a new stream wakes it (true), so hardware can switch
+// the backlight; must not block. The UI blacks the screen out by itself.
+void ui_set_display_handler(void (*handler)(bool on));
+
 #ifdef AK_USB_AUDIO
 // Pushes USB UAC2 volume/mute/playback state into the USB now-playing screen.
 // USB audio isn't implemented, so the screen is compiled out without
@@ -147,6 +153,7 @@ void ui_set_lights_handler(const ui_lights_handler_t *handler);
 
 typedef struct {
     uint8_t brightness; // backlight, 5-100 %
+    uint16_t sleep_s;   // idle time before the display sleeps; 0 = never
     bool clock_24h;
     bool fahrenheit;
     bool haptics;
@@ -178,11 +185,14 @@ typedef enum {
     UI_SETTING_FORGET_WIFI,
     UI_SETTING_BLUETOOTH,  // value: 0/1
     UI_SETTING_AIRPLAY,    // value: UI_AIRPLAY_* mask
+    UI_SETTING_SLEEP,      // value: seconds, 0-UI_SLEEP_MAX_S; 0 = never
     UI_SETTING_LOCATION,   // back to the IP-detected one; picking one is the web page's
 } ui_setting_t;
 
 #define UI_AIRPLAY_1 (1u << 0)
 #define UI_AIRPLAY_2 (1u << 1)
+
+#define UI_SLEEP_MAX_S 3600
 
 // Called on the LVGL task when the user changes a setting; must not block.
 // The handler applies and persists it, then pushes ui_update_settings().

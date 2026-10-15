@@ -12,6 +12,7 @@ static const char *TAG = "settings";
 
 static const settings_t k_defaults = {
     .brightness = CONFIG_AK_BACKLIGHT_DEFAULT_PCT,
+    .sleep_s = 300,
     .clock_24h = true,
     .fahrenheit = false,
     .haptics = true,
@@ -44,6 +45,9 @@ void settings_load(settings_t *out) {
         return;
     }
     out->brightness = get_u8(nvs, "brightness", k_defaults.brightness);
+    if (nvs_get_u16(nvs, "sleep_s", &out->sleep_s) != ESP_OK) {
+        out->sleep_s = k_defaults.sleep_s;
+    }
     out->clock_24h = get_u8(nvs, "clock_24h", k_defaults.clock_24h);
     out->fahrenheit = get_u8(nvs, "fahrenheit", k_defaults.fahrenheit);
     out->haptics = get_u8(nvs, "haptics", k_defaults.haptics);
@@ -63,6 +67,7 @@ void settings_save(const settings_t *s) {
         return;
     }
     nvs_set_u8(nvs, "brightness", s->brightness);
+    nvs_set_u16(nvs, "sleep_s", s->sleep_s);
     nvs_set_u8(nvs, "clock_24h", s->clock_24h);
     nvs_set_u8(nvs, "fahrenheit", s->fahrenheit);
     nvs_set_u8(nvs, "haptics", s->haptics);

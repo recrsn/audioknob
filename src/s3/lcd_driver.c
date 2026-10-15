@@ -74,6 +74,8 @@ static SemaphoreHandle_t s_flush_done;
 static lv_indev_t *s_touch_indev;
 static esp_lcd_touch_handle_t s_touch_handle;
 static i2c_master_bus_handle_t s_i2c_bus;
+static uint8_t s_brightness = CONFIG_AK_BACKLIGHT_DEFAULT_PCT;
+static bool s_backlight_on = true;
 
 void lcd_driver_lvgl_lock(void) {
     xSemaphoreTake(s_lvgl_mutex, portMAX_DELAY);
@@ -284,15 +286,25 @@ static lv_display_t *lvgl_display_init(esp_lcd_panel_handle_t panel_handle, esp_
     return disp;
 }
 
+static void backlight_apply(void) {
+    uint32_t duty = s_backlight_on ? (uint32_t)s_brightness * ((1u << BLK_LEDC_RES) - 1) / 100 : 0;
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, BLK_LEDC_CHANNEL, duty);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, BLK_LEDC_CHANNEL);
+}
+
 void lcd_driver_set_brightness(uint8_t pct) {
     if (pct > 100) {
         pct = 100;
     } else if (pct < BLK_MIN_PCT) {
         pct = BLK_MIN_PCT;
     }
-    uint32_t duty = (uint32_t)pct * ((1u << BLK_LEDC_RES) - 1) / 100;
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, BLK_LEDC_CHANNEL, duty);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, BLK_LEDC_CHANNEL);
+    s_brightness = pct;
+    backlight_apply();
+}
+
+void lcd_driver_set_backlight_on(bool on) {
+    s_backlight_on = on;
+    backlight_apply();
 }
 
 static void backlight_init(void) {
@@ -312,7 +324,7 @@ static void backlight_init(void) {
         .duty = 0,
     };
     ESP_ERROR_CHECK(ledc_channel_config(&chan_cfg));
-    lcd_driver_set_brightness(CONFIG_AK_BACKLIGHT_DEFAULT_PCT);
+    backlight_apply();
 }
 
 static i2c_master_bus_handle_t touch_i2c_bus_init(void) {

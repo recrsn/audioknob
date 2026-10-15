@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "driver/i2c_master.h"
@@ -13,6 +14,10 @@ void lcd_driver_init(void);
 // Backlight PWM duty in percent, clamped to 5..100 (0 would look like a
 // dead board). Starts at CONFIG_AK_BACKLIGHT_DEFAULT_PCT.
 void lcd_driver_set_brightness(uint8_t pct);
+
+// Switches the backlight fully off for display sleep and back on at the set
+// brightness; brightness changes while off apply on waking.
+void lcd_driver_set_backlight_on(bool on);
 
 // lcd_driver_init() starts a task that owns lv_timer_handler(); every LVGL
 // call made from anywhere else (ui_init(), ui_update_*() from the UART RX

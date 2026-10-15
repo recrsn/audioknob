@@ -273,6 +273,7 @@ static void surface_source(lv_obj_t *screen, bool playing, bool *was_playing) {
     if (playing && !*was_playing) {
         s_homed = false;
         s_pinned = false;
+        ui_wake();
     }
     *was_playing = playing;
 
@@ -820,6 +821,7 @@ void ui_set_alert_handler(void (*handler)(bool ringing)) {
 // "anything ringing".
 static void tool_alert_cb(lv_obj_t *screen, bool ringing) {
     if (ringing) {
+        ui_wake();
         launcher_hide();
         show_screen(screen);
     }
@@ -966,8 +968,74 @@ static void launcher_visibility_cb(void) {
 #define NAV_TICK_MS     250
 #define APP_IDLE_HOME_MS 30000
 
+// Display sleep: with no input for the user's timeout, an opaque catcher on
+// the system layer blacks out everything (which is all the emulator shows)
+// and the display handler turns the backlight off. The input that wakes it
+// is swallowed, so a tap or knob turn only lights the screen.
+static struct {
+    lv_obj_t *catcher;
+    bool asleep;
+    void (*handler)(bool on);
+} s_sleep;
+
+void ui_set_display_handler(void (*handler)(bool on)) {
+    s_sleep.handler = handler;
+}
+
+bool ui_wake(void) {
+    lv_display_trigger_activity(NULL);
+    if (!s_sleep.asleep) {
+        return false;
+    }
+    s_sleep.asleep = false;
+    ui_set_visible(s_sleep.catcher, false);
+    if (s_sleep.handler) {
+        s_sleep.handler(true);
+    }
+    return true;
+}
+
+static void display_sleep(void) {
+    s_sleep.asleep = true;
+    ui_set_visible(s_sleep.catcher, true);
+    if (s_sleep.handler) {
+        s_sleep.handler(false);
+    }
+}
+
+// Hiding the catcher mid-press would hand the press to whatever is under
+// it, so the touch is ignored until the finger lifts.
+static void sleep_catcher_cb(lv_event_t *e) {
+    (void)e;
+    lv_indev_wait_release(lv_indev_active());
+    ui_wake();
+}
+
+static void sleep_build(void) {
+    s_sleep.catcher = lv_obj_create(lv_layer_sys());
+    lv_obj_remove_style_all(s_sleep.catcher);
+    lv_obj_set_size(s_sleep.catcher, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(s_sleep.catcher, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_sleep.catcher, LV_OPA_COVER, 0);
+    lv_obj_add_flag(s_sleep.catcher, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(s_sleep.catcher, sleep_catcher_cb, LV_EVENT_PRESSED, NULL);
+}
+
+// Something that must be seen (a ringing countdown, the pairing prompt)
+// keeps the display on.
+static void sleep_tick(void) {
+    uint32_t sleep_s = ui_settings_current()->sleep_s;
+    if (s_sleep.asleep || !sleep_s || ui_tools_alerting() || ui_pairing_visible()) {
+        return;
+    }
+    if (lv_display_get_inactive_time(NULL) >= sleep_s * 1000) {
+        display_sleep();
+    }
+}
+
 static void nav_tick_cb(lv_timer_t *t) {
     (void)t;
+    sleep_tick();
     lv_obj_t *active = lv_screen_active();
     if (active == idle_screen.screen) {
         idle_screen_refresh();
@@ -983,14 +1051,12 @@ static void nav_tick_cb(lv_timer_t *t) {
     }
 }
 
-// The knob doesn't go through an LVGL input device, so it has to report its
-// own activity for the idle timeout.
-static void knob_activity(void) {
-    lv_display_trigger_activity(NULL);
-}
-
+// The knob doesn't go through an LVGL input device, so ui_wake() reports
+// its activity for the idle timeouts.
 bool ui_knob_rotate(int steps) {
-    knob_activity();
+    if (ui_wake()) {
+        return true;
+    }
     if (ui_pairing_visible()) {
         return true;
     }
@@ -1002,7 +1068,9 @@ bool ui_knob_rotate(int steps) {
 }
 
 bool ui_knob_press(void) {
-    knob_activity();
+    if (ui_wake()) {
+        return true;
+    }
     if (ui_pairing_knob_press()) {
         return true;
     }
@@ -1014,7 +1082,9 @@ bool ui_knob_press(void) {
 }
 
 void ui_knob_long_press(void) {
-    knob_activity();
+    if (ui_wake()) {
+        return;
+    }
     if (ui_pairing_knob_long_press()) {
         return;
     }
@@ -1037,6 +1107,7 @@ void ui_init(void) {
     switch_screen_build();
     audio_chip_build();
     launcher_build(open_app, go_home, launcher_visibility_cb);
+    sleep_build();
     lv_timer_create(nav_tick_cb, NAV_TICK_MS, NULL);
 
     lv_screen_load(s_home);

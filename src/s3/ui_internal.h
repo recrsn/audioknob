@@ -68,6 +68,10 @@ void ui_tools_build(lv_obj_t *const screens[UI_APP_COUNT], void (*on_alert)(lv_o
 // The last settings pushed by ui_update_settings() (clock format, units).
 const ui_settings_t *ui_settings_current(void);
 
+// Counts as user activity and lights a sleeping display; true if it was
+// asleep. For whatever must be seen at once (an alert, a pairing request).
+bool ui_wake(void);
+
 ui_app_info_t ui_tools_info(ui_app_t app);
 // The app whose page `screen` is, or -1.
 int ui_tools_app_of(lv_obj_t *screen);

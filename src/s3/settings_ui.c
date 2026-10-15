@@ -73,6 +73,7 @@ static void apply_airplay(void) {
 static void fill(ui_settings_t *out) {
     *out = (ui_settings_t){
         .brightness = s_settings.brightness,
+        .sleep_s = s_settings.sleep_s,
         .clock_24h = s_settings.clock_24h,
         .fahrenheit = s_settings.fahrenheit,
         .haptics = s_settings.haptics,
@@ -107,6 +108,9 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
     case UI_SETTING_BRIGHTNESS:
         s_settings.brightness = (uint8_t)value;
         lcd_driver_set_brightness(s_settings.brightness);
+        break;
+    case UI_SETTING_SLEEP:
+        s_settings.sleep_s = (uint16_t)value;
         break;
     case UI_SETTING_CLOCK_24H:
         s_settings.clock_24h = value;
