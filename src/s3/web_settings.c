@@ -1,51 +1,173 @@
 #include "web_settings.h"
 
+#include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include "artwork.h"
+#include "cJSON.h"
 #include "device_name.h"
+#include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "now_playing.h"
+#include "settings_ui.h"
+#include "tz.h"
+#include "uart_link.h"
+#include "ui.h"
 #include "web_page.h"
 
-#define FORM_MAX 256
-#define HEADER_MAX 96
+#define FORM_MAX     256
+#define HEADER_MAX   96
+#define ZONES_CHUNK  1024
+// Lets the reply reach the browser before the device restarts.
+#define FORGET_DELAY_MS 300
 
 static const char *TAG = "web_settings";
 
+extern const char index_html_start[] asm("_binary_index_html_start");
+extern const char index_html_end[] asm("_binary_index_html_end");
+
 static httpd_handle_t s_server;
 
-static esp_err_t root_handler(httpd_req_t *req) {
-    char query[32] = "";
-    httpd_req_get_url_query_str(req, query, sizeof(query));
-
-    char name[DEVICE_NAME_MAX + 1], hostname[64];
-    device_name_get(name, sizeof(name));
-    device_name_hostname(hostname, sizeof(hostname));
-
-    web_page_t page;
-    if (!web_page_begin(&page, name, "")) {
+static esp_err_t send_json(httpd_req_t *req, cJSON *json) {
+    char *text = json ? cJSON_PrintUnformatted(json) : NULL;
+    cJSON_Delete(json);
+    if (!text) {
         return httpd_resp_send_500(req);
     }
-    web_page_append(&page, "<h1>");
-    web_page_append_escaped(&page, name);
-    web_page_append(&page, "</h1>");
-    if (strstr(query, "saved")) {
-        web_page_append(&page, "<p class=\"ok\">Saved. This page is now at "
-                               "<a href=\"http://%s.local/\">%s.local</a>.</p>",
-                        hostname, hostname);
-    } else if (strstr(query, "invalid")) {
-        web_page_append(&page, "<p class=\"err\">Names need 1 to %d characters.</p>", DEVICE_NAME_MAX);
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    esp_err_t err = httpd_resp_sendstr(req, text);
+    cJSON_free(text);
+    return err;
+}
+
+static esp_err_t send_ok(httpd_req_t *req) {
+    httpd_resp_set_status(req, "204 No Content");
+    return httpd_resp_send(req, NULL, 0);
+}
+
+static esp_err_t root_handler(httpd_req_t *req) {
+    httpd_resp_set_type(req, "text/html; charset=utf-8");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+    // EMBED_TXTFILES appends a NUL.
+    return httpd_resp_send(req, index_html_start, index_html_end - index_html_start - 1);
+}
+
+static cJSON *now_playing_json(void) {
+    cJSON *np = cJSON_CreateObject();
+    wireless_state_t state = {0};
+    track_info_t track;
+    bool known = now_playing_get(&state, &track);
+    uint32_t art_version = 0;
+    if (!now_playing_artwork(&art_version)) {
+        art_version = 0;
     }
-    web_page_append(&page, "<form method=\"post\" action=\"/name\">"
-                           "<label for=\"name\">Device name</label>"
-                           "<input id=\"name\" name=\"name\" maxlength=\"%d\" required value=\"",
-                    DEVICE_NAME_MAX);
-    web_page_append_escaped(&page, name);
-    web_page_append(&page, "\"><p class=\"hint\">Shown in AirPlay and Bluetooth lists. Phones already paired over "
-                           "Bluetooth may keep the old name until you pair again.</p>"
-                           "<button type=\"submit\">Save</button></form>");
-    return web_page_send(req, &page);
+    cJSON_AddStringToObject(np, "source", state.source == SOURCE_A2DP ? "bluetooth" : "airplay");
+    cJSON_AddBoolToObject(np, "connected", known && state.connected);
+    cJSON_AddBoolToObject(np, "playing", known && state.playing);
+    cJSON_AddNumberToObject(np, "volume", state.volume);
+    cJSON_AddBoolToObject(np, "muted", state.muted);
+    cJSON_AddStringToObject(np, "title", track.title);
+    cJSON_AddStringToObject(np, "artist", track.artist);
+    cJSON_AddStringToObject(np, "album", track.album);
+    cJSON_AddNumberToObject(np, "art", art_version);
+    return np;
+}
+
+static esp_err_t state_handler(httpd_req_t *req) {
+    ui_settings_t s;
+    settings_ui_snapshot(&s);
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "name", s.device_name);
+    cJSON_AddStringToObject(json, "hostname", s.hostname);
+    cJSON_AddStringToObject(json, "ssid", s.wifi_ssid);
+    cJSON_AddStringToObject(json, "ip", s.ip);
+    cJSON_AddStringToObject(json, "version", s.version);
+    cJSON_AddNumberToObject(json, "freeInternalKb", s.free_internal_kb);
+    cJSON_AddNumberToObject(json, "freePsramKb", s.free_psram_kb);
+    cJSON_AddNumberToObject(json, "brightness", s.brightness);
+    cJSON_AddBoolToObject(json, "clock24", s.clock_24h);
+    cJSON_AddBoolToObject(json, "fahrenheit", s.fahrenheit);
+    cJSON_AddBoolToObject(json, "haptics", s.haptics);
+    cJSON_AddBoolToObject(json, "bluetooth", s.bluetooth);
+    cJSON_AddNumberToObject(json, "airplay", s.airplay);
+    cJSON_AddBoolToObject(json, "airplay2", s.airplay2_available);
+    cJSON_AddBoolToObject(json, "tzAuto", s.tz_auto);
+    cJSON_AddStringToObject(json, "tz", s.tz_name);
+    cJSON_AddItemToObject(json, "np", now_playing_json());
+    // null while Bluetooth is off or the ESP32 isn't answering.
+    pairing_status_t pairing;
+    if (s.bluetooth && uart_link_get_pairing(&pairing)) {
+        cJSON *bt = cJSON_AddObjectToObject(json, "bt");
+        cJSON_AddNumberToObject(bt, "bonded", pairing.bonded);
+        cJSON_AddBoolToObject(bt, "pairing", pairing.state != PAIRING_IDLE);
+    } else {
+        cJSON_AddNullToObject(json, "bt");
+    }
+    return send_json(req, json);
+}
+
+// ~400 names: streamed rather than built as one cJSON tree.
+static esp_err_t zones_handler(httpd_req_t *req) {
+    char buf[ZONES_CHUNK];
+    size_t len = 0;
+    httpd_resp_set_type(req, "application/json");
+    // Only changes with a firmware update.
+    httpd_resp_set_hdr(req, "Cache-Control", "max-age=86400");
+    buf[len++] = '[';
+    for (size_t i = 0; i < tz_db_count; i++) {
+        // tz_db names are plain ASCII: no JSON escaping needed.
+        if (len + strlen(tz_db[i].name) + 4 > sizeof(buf)) {
+            if (httpd_resp_send_chunk(req, buf, len) != ESP_OK) {
+                return ESP_FAIL;
+            }
+            len = 0;
+        }
+        len += snprintf(buf + len, sizeof(buf) - len, "%s\"%s\"", i ? "," : "", tz_db[i].name);
+    }
+    buf[len++] = ']';
+    httpd_resp_send_chunk(req, buf, len);
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+// A 16-bit BI_BITFIELDS BMP straight from the RGB565 bitmap: no encoder
+// needed, and every browser shows it.
+static esp_err_t art_handler(httpd_req_t *req) {
+    enum { ROW = ARTWORK_SIZE * 2, PIXELS = ROW * ARTWORK_SIZE, HEADER = 14 + 40 + 12 };
+    uint32_t version;
+    const uint16_t *art = now_playing_artwork(&version);
+    if (!art) {
+        return httpd_resp_send_404(req);
+    }
+    // A copy, so a new decode can't change the image mid-send.
+    uint8_t *bmp = heap_caps_malloc(HEADER + PIXELS, MALLOC_CAP_SPIRAM);
+    if (!bmp) {
+        return httpd_resp_send_500(req);
+    }
+    memcpy(bmp + HEADER, art, PIXELS);
+    static_assert(ROW % 4 == 0, "BMP rows must be 4-byte aligned");
+    const uint32_t fields[] = {
+        // BITMAPFILEHEADER (the 'BM' tag is written below)
+        HEADER + PIXELS, 0, HEADER,
+        // BITMAPINFOHEADER; negative height = top-down rows
+        40, ARTWORK_SIZE, (uint32_t)-ARTWORK_SIZE, 16 << 16 | 1, 3, PIXELS, 2835, 2835, 0, 0,
+        // R, G, B masks
+        0xF800, 0x07E0, 0x001F,
+    };
+    bmp[0] = 'B';
+    bmp[1] = 'M';
+    memcpy(bmp + 2, fields, sizeof(fields));
+    httpd_resp_set_type(req, "image/bmp");
+    // The page asks for it by version.
+    httpd_resp_set_hdr(req, "Cache-Control", "max-age=3600");
+    esp_err_t err = httpd_resp_send(req, (const char *)bmp, HEADER + PIXELS);
+    free(bmp);
+    return err;
 }
 
 // Any web page the user visits could otherwise post here from their
@@ -63,35 +185,181 @@ static bool same_origin(httpd_req_t *req) {
     return !strcmp(origin, expected);
 }
 
-static esp_err_t name_handler(httpd_req_t *req) {
+// Reads a POSTed form after the origin check; false means a reply has
+// already been sent.
+static bool read_post(httpd_req_t *req, char *form, size_t len) {
     if (!same_origin(req)) {
-        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Cross-site request refused");
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Cross-site request refused");
+        return false;
     }
+    if (!web_read_form(req, form, len)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad form");
+        return false;
+    }
+    return true;
+}
+
+static bool parse_int(const char *text, int min, int max, int *out) {
+    char *end;
+    long v = strtol(text, &end, 10);
+    if (!*text || *end || v < min || v > max) {
+        return false;
+    }
+    *out = (int)v;
+    return true;
+}
+
+static esp_err_t set_handler(httpd_req_t *req) {
+    static const struct {
+        const char *key;
+        ui_setting_t setting;
+        int min, max;
+    } k_keys[] = {
+        {"brightness", UI_SETTING_BRIGHTNESS, 5, 100},
+        {"clock24", UI_SETTING_CLOCK_24H, 0, 1},
+        {"fahrenheit", UI_SETTING_FAHRENHEIT, 0, 1},
+        {"haptics", UI_SETTING_HAPTICS, 0, 1},
+        {"bluetooth", UI_SETTING_BLUETOOTH, 0, 1},
+        {"airplay", UI_SETTING_AIRPLAY, 0, UI_AIRPLAY_1 | UI_AIRPLAY_2},
+    };
+    char form[FORM_MAX + 1], key[16], value[48];
+    if (!read_post(req, form, sizeof(form))) {
+        return ESP_OK;
+    }
+    web_form_value(form, "key", key, sizeof(key));
+    web_form_value(form, "value", value, sizeof(value));
+
+    if (!strcmp(key, "tz")) {
+        // "" is automatic; anything else has to be a zone tz_db knows.
+        if (value[0] && tz_db_find(value) < 0) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown timezone");
+        }
+        settings_ui_change(UI_SETTING_TIMEZONE, 0, value[0] ? value : NULL);
+        return send_ok(req);
+    }
+    for (size_t i = 0; i < sizeof(k_keys) / sizeof(k_keys[0]); i++) {
+        if (strcmp(key, k_keys[i].key)) {
+            continue;
+        }
+        int v;
+        if (!parse_int(value, k_keys[i].min, k_keys[i].max, &v)) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Value out of range");
+        }
+        settings_ui_change(k_keys[i].setting, v, NULL);
+        return send_ok(req);
+    }
+    return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown setting");
+}
+
+static esp_err_t name_handler(httpd_req_t *req) {
     char form[FORM_MAX + 1];
-    if (!web_read_form(req, form, sizeof(form))) {
-        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad form");
+    if (!read_post(req, form, sizeof(form))) {
+        return ESP_OK;
     }
     char name[DEVICE_NAME_MAX * 3 + 1];
     web_form_value(form, "name", name, sizeof(name));
-    return web_redirect(req, device_name_set(name) ? "/?saved=1" : "/?invalid=1");
+    if (!device_name_set(name)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Names need 1 to 32 characters");
+    }
+    return send_ok(req);
+}
+
+static esp_err_t volume_handler(httpd_req_t *req) {
+    char form[FORM_MAX + 1], text[8];
+    if (!read_post(req, form, sizeof(form))) {
+        return ESP_OK;
+    }
+    int v;
+    bool used;
+    web_form_value(form, "value", text, sizeof(text));
+    if (parse_int(text, 0, 100, &v)) {
+        used = now_playing_set_volume((uint8_t)v);
+    } else {
+        web_form_value(form, "step", text, sizeof(text));
+        if (!parse_int(text, -100, 100, &v)) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad volume");
+        }
+        used = now_playing_adjust_volume(v);
+    }
+    return used ? send_ok(req) : httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Nothing is playing");
+}
+
+static esp_err_t transport_handler(httpd_req_t *req) {
+    char form[FORM_MAX + 1], action[8];
+    if (!read_post(req, form, sizeof(form))) {
+        return ESP_OK;
+    }
+    web_form_value(form, "action", action, sizeof(action));
+    if (!strcmp(action, "prev")) {
+        now_playing_transport(UI_TRANSPORT_PREV);
+    } else if (!strcmp(action, "play")) {
+        now_playing_transport(UI_TRANSPORT_PLAY_PAUSE);
+    } else if (!strcmp(action, "next")) {
+        now_playing_transport(UI_TRANSPORT_NEXT);
+    } else {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown action");
+    }
+    return send_ok(req);
+}
+
+// Opens the pairing window, or forgets every paired device. The code
+// check itself stays on the device's screen.
+static esp_err_t pairing_handler(httpd_req_t *req) {
+    char form[FORM_MAX + 1], action[8];
+    if (!read_post(req, form, sizeof(form))) {
+        return ESP_OK;
+    }
+    pairing_status_t pairing;
+    if (!uart_link_get_pairing(&pairing)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bluetooth isn't on");
+    }
+    web_form_value(form, "action", action, sizeof(action));
+    if (!strcmp(action, "open")) {
+        uart_link_send_command(CMD_PAIRING_OPEN);
+    } else if (!strcmp(action, "forget")) {
+        uart_link_send_command(CMD_FORGET_DEVICES);
+    } else {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown action");
+    }
+    return send_ok(req);
+}
+
+static esp_err_t forget_handler(httpd_req_t *req) {
+    char form[FORM_MAX + 1];
+    if (!read_post(req, form, sizeof(form))) {
+        return ESP_OK;
+    }
+    send_ok(req);
+    vTaskDelay(pdMS_TO_TICKS(FORGET_DELAY_MS));
+    settings_ui_change(UI_SETTING_FORGET_WIFI, 0, NULL);
+    return ESP_OK;
 }
 
 void web_settings_start(void) {
     if (s_server) {
         return;
     }
+    static const httpd_uri_t uris[] = {
+        {.uri = "/", .method = HTTP_GET, .handler = root_handler},
+        {.uri = "/api/state", .method = HTTP_GET, .handler = state_handler},
+        {.uri = "/api/zones", .method = HTTP_GET, .handler = zones_handler},
+        {.uri = "/api/art.bmp", .method = HTTP_GET, .handler = art_handler},
+        {.uri = "/api/set", .method = HTTP_POST, .handler = set_handler},
+        {.uri = "/api/name", .method = HTTP_POST, .handler = name_handler},
+        {.uri = "/api/volume", .method = HTTP_POST, .handler = volume_handler},
+        {.uri = "/api/transport", .method = HTTP_POST, .handler = transport_handler},
+        {.uri = "/api/pairing", .method = HTTP_POST, .handler = pairing_handler},
+        {.uri = "/api/forget", .method = HTTP_POST, .handler = forget_handler},
+    };
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.stack_size = 4096;
+    cfg.stack_size = 5120;
+    cfg.max_uri_handlers = sizeof(uris) / sizeof(uris[0]);
     if (httpd_start(&s_server, &cfg) != ESP_OK) {
         ESP_LOGE(TAG, "HTTP server failed to start");
         s_server = NULL;
         return;
     }
-    const httpd_uri_t uris[] = {
-        {.uri = "/", .method = HTTP_GET, .handler = root_handler},
-        {.uri = "/name", .method = HTTP_POST, .handler = name_handler},
-    };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         httpd_register_uri_handler(s_server, &uris[i]);
     }

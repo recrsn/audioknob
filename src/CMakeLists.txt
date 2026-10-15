@@ -56,10 +56,14 @@ endif()
 
 file(GLOB AK_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/${AK_TARGET}/*.c")
 set(AK_INCLUDE_DIRS "${AK_TARGET}")
+set(AK_EMBED_TXTFILES "")
 
 if(AK_TARGET STREQUAL "s3")
     # main_native.c is the env:native (SDL/desktop) entry point only.
     list(REMOVE_ITEM AK_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/s3/main_native.c")
+
+    # The device web page (web_settings.c), served as is.
+    list(APPEND AK_EMBED_TXTFILES "s3/web/index.html")
 
     # Shared by both receivers (s3/airplay/): raop.h, the receiver interface
     # airplay.c uses, the AirPlay 1 RTP receiver and session setup, DACP,
@@ -91,4 +95,5 @@ idf_component_register(
     SRCS ${AK_SRCS}
     INCLUDE_DIRS ${AK_INCLUDE_DIRS}
     REQUIRES ${AK_REQUIRES}
+    EMBED_TXTFILES ${AK_EMBED_TXTFILES}
 )

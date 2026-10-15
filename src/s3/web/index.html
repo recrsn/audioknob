@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>AudioKnob</title>
+<style>
+:root{--bg:#0b0b10;--card:#15151d;--line:#262631;--text:#eeeef2;--dim:#8d8d99;--accent:#4ea1ff;--ok:#6fd08c;--err:#ff7a7a;--ap:#4ea1ff;--bt:#5b7cff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+main{max-width:460px;margin:0 auto;padding:20px 16px 48px}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 4px 16px}
+h1{font-size:24px;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#conn{font-size:13px;color:var(--dim);white-space:nowrap}
+#conn.off{color:var(--err)}
+h2{font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:28px 4px 8px}
+.card{background:var(--card);border-radius:16px;overflow:hidden}
+.row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;padding:10px 16px;border-top:1px solid var(--line)}
+.row:first-child{border-top:0}
+.row>span:first-child{flex:none}
+.val{color:var(--dim);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.col{flex-direction:column;align-items:stretch;gap:8px}
+.hint{font-size:13px;color:var(--dim);margin:0}
+/* Now playing */
+#np{padding:16px}
+#np .top{display:flex;gap:14px;align-items:center}
+#art{width:88px;height:88px;border-radius:12px;flex:none;background:#22222c center/cover no-repeat;display:grid;place-items:center;color:#55556a;font-size:34px}
+#np .meta{min-width:0}
+#src{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:#22222c;color:var(--dim)}
+#src.airplay{background:rgba(78,161,255,.16);color:var(--ap)}
+#src.bluetooth{background:rgba(91,124,255,.18);color:#8ea4ff}
+#title{font-size:18px;font-weight:600;margin-top:6px}
+#artist,#album{color:var(--dim);font-size:14px}
+#title,#artist,#album{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.transport{display:flex;justify-content:center;gap:18px;margin:16px 0 6px}
+.transport button{width:52px;height:52px;border-radius:50%;border:0;background:#22222c;color:var(--text);display:grid;place-items:center;padding:0}
+.transport #play{width:60px;height:60px;background:var(--accent);color:#fff}
+.transport svg{width:24px;height:24px;fill:currentColor}
+.vol{display:flex;align-items:center;gap:10px;margin-top:10px}
+.vol button{flex:none;width:36px;height:36px;border-radius:50%;border:0;background:#22222c;color:var(--text);font-size:20px;line-height:1;padding:0}
+#volval{width:3ch;text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
+.disabled{opacity:.4;pointer-events:none}
+/* Controls */
+input[type=range]{flex:1;width:100%;accent-color:var(--accent);height:28px;margin:0}
+.slider{display:flex;align-items:center;gap:12px;flex:1;max-width:240px}
+.slider output{width:4ch;text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
+.sw{position:relative;flex:none;width:51px;height:31px}
+.sw input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;z-index:1}
+.sw i{position:absolute;inset:0;border-radius:99px;background:#3a3a46}
+.sw i::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff}
+/* Only once loaded, so switches don't animate into their first state. */
+.ready .sw i{transition:background .2s}.ready .sw i::after{transition:transform .2s}
+.sw input:checked+i{background:var(--ok)}
+.sw input:checked+i::after{transform:translateX(20px)}
+.seg{display:flex;background:#22222c;border-radius:9px;padding:2px;flex:none}
+.seg button{border:0;background:none;color:var(--dim);padding:6px 12px;border-radius:7px;font-size:14px}
+.seg button.on{background:#3a3a46;color:var(--text)}
+select,input[type=text]{width:100%;padding:11px 12px;font-size:16px;border-radius:10px;border:1px solid var(--line);background:#0f0f15;color:var(--text)}
+.inline{display:flex;gap:8px}
+.btn{border:0;border-radius:10px;padding:11px 16px;font-size:16px;background:var(--accent);color:#fff;flex:none}
+.btn.danger{background:none;color:var(--err);padding:0 4px;font-size:16px}
+#btactions .inline{justify-content:space-between;align-items:center}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#2a2a35;color:var(--text);padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.show{opacity:1}
+</style>
+</head>
+<body>
+<main>
+<header><h1 id="name">AudioKnob</h1><span id="conn">Connecting…</span></header>
+
+<section class="card" id="np">
+  <div class="top">
+    <div id="art">♪</div>
+    <div class="meta">
+      <span id="src">Idle</span>
+      <div id="title">Nothing playing</div>
+      <div id="artist"></div>
+      <div id="album"></div>
+    </div>
+  </div>
+  <div id="controls">
+    <div class="transport">
+      <button id="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM9.5 12 18 6v12z"/></svg></button>
+      <button id="play" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path id="playicon" d="M8 5v14l11-7z"/></svg></button>
+      <button id="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
+    </div>
+    <div class="vol">
+      <button id="voldown" aria-label="Volume down">−</button>
+      <input type="range" id="volume" min="0" max="100" aria-label="Volume">
+      <button id="volup" aria-label="Volume up">+</button>
+      <span id="volval"></span>
+    </div>
+  </div>
+</section>
+
+<h2>Display</h2>
+<section class="card">
+  <div class="row"><span>Brightness</span><div class="slider"><input type="range" id="brightness" min="5" max="100" step="5"><output id="brightval"></output></div></div>
+  <div class="row"><span>Haptics</span><label class="sw"><input type="checkbox" id="haptics"><i></i></label></div>
+</section>
+
+<h2>Time and weather</h2>
+<section class="card">
+  <div class="row"><span>Clock</span><div class="seg" id="clock24"><button data-v="0">12-hour</button><button data-v="1">24-hour</button></div></div>
+  <div class="row"><span>Units</span><div class="seg" id="fahrenheit"><button data-v="0">°C</button><button data-v="1">°F</button></div></div>
+  <div class="row col"><span>Timezone</span><select id="tz"><option value="">Automatic</option></select></div>
+</section>
+
+<h2>Audio</h2>
+<section class="card">
+  <div class="row"><span>AirPlay 2</span><label class="sw"><input type="checkbox" id="ap2"><i></i></label></div>
+  <div class="row" id="ap1row"><span>AirPlay 1</span><label class="sw"><input type="checkbox" id="ap1"><i></i></label></div>
+  <div class="row"><span>Bluetooth</span><label class="sw"><input type="checkbox" id="bluetooth"><i></i></label></div>
+  <div class="row" id="btpair"><span>Paired devices</span><span class="val" id="bonded"></span></div>
+  <div class="row col" id="btactions">
+    <div class="inline"><button class="btn" id="pair">Pair a device</button><button class="btn danger" id="unpair">Forget all…</button></div>
+    <p class="hint" id="pairhint">The knob shows a code to check against your phone's.</p>
+  </div>
+</section>
+
+<h2>Device</h2>
+<section class="card">
+  <div class="row col">
+    <label for="newname">Name</label>
+    <form class="inline" id="nameform"><input type="text" id="newname" maxlength="32" required autocomplete="off"><button class="btn">Save</button></form>
+    <p class="hint">Shown in AirPlay and Bluetooth lists. Phones already paired over Bluetooth may keep the old name until you pair again.</p>
+  </div>
+  <div class="row"><span>WiFi</span><span class="val" id="wifi"></span></div>
+  <div class="row"><span>Address</span><span class="val" id="addr"></span></div>
+  <div class="row"><button class="btn danger" id="forget">Forget WiFi network…</button></div>
+</section>
+
+<h2>About</h2>
+<section class="card">
+  <div class="row"><span>Version</span><span class="val" id="version"></span></div>
+  <div class="row"><span>Free memory</span><span class="val" id="mem"></span></div>
+</section>
+</main>
+<div id="toast"></div>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const PLAY = "M8 5v14l11-7z", PAUSE = "M6 5h4v14H6zm8 0h4v14h-4z";
+let state = null, artVersion = -1, zonesLoaded = false;
+// Inputs the user is holding keep their own value until released, so a poll
+// doesn't yank a slider out from under a finger.
+const busy = new Set();
+
+function toast(text) {
+  const t = $("toast");
+  t.textContent = text;
+  t.classList.add("show");
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => t.classList.remove("show"), 2500);
+}
+
+async function post(path, params) {
+  try {
+    const r = await fetch(path, {method: "POST", body: new URLSearchParams(params)});
+    if (!r.ok) throw new Error(await r.text() || r.statusText);
+  } catch (e) {
+    toast("Couldn't reach the device" + (e.message ? ": " + e.message : ""));
+    return false;
+  }
+  setTimeout(poll, 150);
+  return true;
+}
+
+const set = (key, value) => post("/api/set", {key, value});
+
+function setText(id, text) {
+  if ($(id).textContent !== text) $(id).textContent = text;
+}
+
+function setSeg(id, value) {
+  for (const b of $(id).children) b.classList.toggle("on", b.dataset.v === String(+value));
+}
+
+function holdable(input, send, delay) {
+  let timer;
+  input.addEventListener("pointerdown", () => busy.add(input));
+  input.addEventListener("input", () => {
+    busy.add(input);
+    clearTimeout(timer);
+    timer = setTimeout(() => send(input.value), delay);
+  });
+  input.addEventListener("change", () => {
+    clearTimeout(timer);
+    send(input.value);
+    setTimeout(() => busy.delete(input), 600);
+  });
+}
+
+function renderNowPlaying(np) {
+  const active = np.connected || np.playing;
+  $("src").className = active ? np.source : "";
+  setText("src", !active ? "Idle" : np.source === "airplay" ? "AirPlay" : "Bluetooth");
+  setText("title", np.title || (active ? (np.playing ? "Playing" : "Paused") : "Nothing playing"));
+  setText("artist", np.artist || "");
+  setText("album", np.album || "");
+  $("playicon").setAttribute("d", np.playing ? PAUSE : PLAY);
+  $("controls").classList.toggle("disabled", !active);
+  if (!busy.has($("volume"))) $("volume").value = np.volume;
+  setText("volval", String(np.volume));
+  if (np.art !== artVersion) {
+    artVersion = np.art;
+    $("art").style.backgroundImage = np.art ? `url(/api/art.bmp?v=${np.art})` : "";
+    setText("art", np.art ? "" : "♪");
+  }
+}
+
+function render(s) {
+  setText("name", s.name);
+  document.title = s.name;
+  if (document.activeElement !== $("newname") && !$("newname").value) $("newname").value = s.name;
+  renderNowPlaying(s.np);
+  if (!busy.has($("brightness"))) $("brightness").value = s.brightness;
+  setText("brightval", s.brightness + "%");
+  $("haptics").checked = s.haptics;
+  setSeg("clock24", s.clock24);
+  setSeg("fahrenheit", s.fahrenheit);
+  if (zonesLoaded) $("tz").value = s.tzAuto ? "" : s.tz;
+  $("tz").options[0].textContent = s.tzAuto && s.tz ? `Automatic (${s.tz})` : "Automatic";
+  // Without the AirPlay 2 receiver built in, the one switch means AirPlay.
+  $("ap1row").hidden = !s.airplay2;
+  $("ap2").closest(".row").firstElementChild.textContent = s.airplay2 ? "AirPlay 2" : "AirPlay";
+  $("ap2").checked = s.airplay2 ? !!(s.airplay & 2) : !!(s.airplay & 1);
+  $("ap1").checked = !!(s.airplay & 1);
+  $("bluetooth").checked = s.bluetooth;
+  $("btpair").hidden = $("btactions").hidden = !s.bt;
+  if (s.bt) {
+    setText("bonded", s.bt.bonded ? String(s.bt.bonded) : "None");
+    $("unpair").hidden = !s.bt.bonded;
+    $("pair").disabled = s.bt.pairing;
+    setText("pair", s.bt.pairing ? "Pairing…" : "Pair a device");
+  }
+  setText("wifi", s.ssid || "Not connected");
+  setText("addr", s.ip ? `${s.hostname}.local · ${s.ip}` : "—");
+  setText("version", s.version);
+  setText("mem", `${s.freeInternalKb} KB · ${(s.freePsramKb / 1024).toFixed(1)} MB PSRAM`);
+}
+
+async function poll() {
+  clearTimeout(poll.timer);
+  try {
+    const r = await fetch("/api/state", {cache: "no-store"});
+    state = await r.json();
+    render(state);
+    requestAnimationFrame(() => document.body.classList.add("ready"));
+    $("conn").textContent = "";
+    $("conn").className = "";
+  } catch (e) {
+    $("conn").textContent = "Offline";
+    $("conn").className = "off";
+  }
+  poll.timer = setTimeout(poll, document.hidden ? 5000 : 1000);
+}
+
+async function loadZones() {
+  try {
+    const zones = await (await fetch("/api/zones")).json();
+    const sel = $("tz");
+    for (const z of zones) sel.add(new Option(z.replace(/_/g, " "), z));
+    zonesLoaded = true;
+    if (state) render(state);
+  } catch (e) {
+    setTimeout(loadZones, 3000);
+  }
+}
+
+$("prev").onclick = () => post("/api/transport", {action: "prev"});
+$("play").onclick = () => post("/api/transport", {action: "play"});
+$("next").onclick = () => post("/api/transport", {action: "next"});
+holdable($("volume"), v => post("/api/volume", {value: v}), 120);
+$("volume").addEventListener("input", e => setText("volval", e.target.value));
+$("voldown").onclick = () => post("/api/volume", {step: -5});
+$("volup").onclick = () => post("/api/volume", {step: 5});
+
+holdable($("brightness"), v => set("brightness", v), 80);
+$("brightness").addEventListener("input", e => setText("brightval", e.target.value + "%"));
+$("haptics").onchange = e => set("haptics", +e.target.checked);
+for (const id of ["clock24", "fahrenheit"]) {
+  $(id).onclick = e => {
+    const v = e.target.dataset.v;
+    if (v === undefined) return;
+    setSeg(id, v);
+    set(id, v);
+  };
+}
+$("tz").onchange = e => set("tz", e.target.value);
+
+function airplayMask() {
+  if (!state.airplay2) return $("ap2").checked ? 1 : 0;
+  return ($("ap1").checked ? 1 : 0) | ($("ap2").checked ? 2 : 0);
+}
+$("ap1").onchange = $("ap2").onchange = () => set("airplay", airplayMask());
+$("bluetooth").onchange = e => {
+  set("bluetooth", +e.target.checked);
+  toast(e.target.checked ? "Bluetooth is starting" : "Bluetooth is off");
+};
+
+$("pair").onclick = async () => {
+  if (await post("/api/pairing", {action: "open"})) toast("Pairing is open: pick the device on your phone");
+};
+$("unpair").onclick = async () => {
+  if (!confirm("Forget every paired Bluetooth device? They'll need to pair again.")) return;
+  if (await post("/api/pairing", {action: "forget"})) toast("Paired devices forgotten");
+};
+
+$("nameform").onsubmit = async e => {
+  e.preventDefault();
+  const name = $("newname").value.trim();
+  if (name && await post("/api/name", {name})) {
+    toast("Saved");
+    $("newname").blur();
+  }
+};
+
+$("forget").onclick = async () => {
+  if (!confirm("Forget this WiFi network? The device restarts into setup mode, and this page stops working until it's set up again.")) return;
+  if (await post("/api/forget", {})) toast("Restarting into setup…");
+};
+
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
+poll();
+loadZones();
+</script>
+</body>
+</html>

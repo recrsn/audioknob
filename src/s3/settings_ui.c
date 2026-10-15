@@ -70,8 +70,8 @@ static void apply_airplay(void) {
     airplay_set_protocols(s_settings.airplay & UI_AIRPLAY_1, s_settings.airplay & UI_AIRPLAY_2);
 }
 
-static void push(void) {
-    ui_settings_t ui = {
+static void fill(ui_settings_t *out) {
+    *out = (ui_settings_t){
         .brightness = s_settings.brightness,
         .clock_24h = s_settings.clock_24h,
         .fahrenheit = s_settings.fahrenheit,
@@ -83,11 +83,16 @@ static void push(void) {
         .free_internal_kb = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
         .free_psram_kb = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
     };
-    snprintf(ui.tz_name, sizeof(ui.tz_name), "%s", s_zone);
-    device_name_get(ui.device_name, sizeof(ui.device_name));
-    device_name_hostname(ui.hostname, sizeof(ui.hostname));
-    snprintf(ui.version, sizeof(ui.version), "%s", esp_app_get_description()->version);
-    wifi_get_station(ui.wifi_ssid, sizeof(ui.wifi_ssid), ui.ip, sizeof(ui.ip));
+    snprintf(out->tz_name, sizeof(out->tz_name), "%s", s_zone);
+    device_name_get(out->device_name, sizeof(out->device_name));
+    device_name_hostname(out->hostname, sizeof(out->hostname));
+    snprintf(out->version, sizeof(out->version), "%s", esp_app_get_description()->version);
+    wifi_get_station(out->wifi_ssid, sizeof(out->wifi_ssid), out->ip, sizeof(out->ip));
+}
+
+static void push(void) {
+    ui_settings_t ui;
+    fill(&ui);
     ui_update_settings(&ui);
 }
 
@@ -151,6 +156,18 @@ void settings_ui_start(void) {
     ui_set_settings_handler(on_setting);
     push();
     lv_timer_create(refresh_cb, REFRESH_MS, NULL);
+}
+
+void settings_ui_snapshot(ui_settings_t *out) {
+    lcd_driver_lvgl_lock();
+    fill(out);
+    lcd_driver_lvgl_unlock();
+}
+
+void settings_ui_change(ui_setting_t setting, int value, const char *zone) {
+    lcd_driver_lvgl_lock();
+    on_setting(setting, value, zone);
+    lcd_driver_lvgl_unlock();
 }
 
 bool settings_ui_haptics(void) {
