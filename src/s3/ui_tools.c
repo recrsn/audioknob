@@ -11,6 +11,7 @@
 #define TOOL_BUTTONS_Y  92
 #define TOOL_BTN_SIZE   60
 #define TOOL_BTN_GAP    18
+#define TOOL_BTN_EXT    10
 // Inside this radius is a page's own content; the band outside it, ~7 mm
 // deep on the round panel, belongs to the ring.
 #define TOOL_TOUCH_R_IN 116
@@ -244,6 +245,9 @@ lv_obj_t *tool_button_row_create(lv_obj_t *parent) {
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(row, TOOL_BTN_GAP, 0);
+    // As far as the buttons' padded hit areas reach: LVGL looks for them
+    // only inside the row. Centered, so nothing moves.
+    lv_obj_set_style_pad_all(row, TOOL_BTN_EXT, 0);
     lv_obj_align(row, LV_ALIGN_CENTER, 0, TOOL_BUTTONS_Y);
     return row;
 }
@@ -252,7 +256,7 @@ static lv_obj_t *button_create(lv_obj_t *row, const char *text, const lv_font_t 
     lv_obj_t *label = ui_round_button_create(row, text, TOOL_BTN_SIZE, font, false);
     lv_obj_t *btn = lv_obj_get_parent(label);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(btn, 10);
+    lv_obj_set_ext_click_area(btn, TOOL_BTN_EXT);
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
     return label;
 }

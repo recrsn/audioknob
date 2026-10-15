@@ -85,6 +85,13 @@ _Static_assert(USB_TILE_Y == UI_BG_USB_TILE_Y, "regenerate backgrounds");
 // The panel is ~46 mm across, about 8 px/mm: small controls get their hit
 // area padded out to roughly 7 mm, a fingertip, past what they draw.
 #define TOUCH_EXT 12
+// LVGL only looks for a child under a touch inside its parent's bounds, so
+// a padded hit area sticking out of a content-sized container is cut off.
+// Padding the container as much as its children's hit areas reach puts
+// them back; the containers are centered, so nothing moves.
+static void touch_pad(lv_obj_t *container, int32_t ext) {
+    lv_obj_set_style_pad_all(container, ext, 0);
+}
 
 typedef struct {
     lv_obj_t *screen;
@@ -153,9 +160,11 @@ typedef struct {
         lv_obj_t *icon;
         lv_obj_t *idle_icon;
         lv_obj_t *art;
+        lv_obj_t *text;
         lv_obj_t *title;
         lv_obj_t *subtitle;
         lv_obj_t *play;
+        int8_t quiet; // the idle styling applied: 1, 0, or -1 before either
         uint32_t art_version;
         lv_color_t tint;
     } np;
@@ -594,6 +603,8 @@ static lv_obj_t *clock_pill_create(lv_obj_t *parent, const char *icon, lv_color_
 #define FACE_COMP_GAP 10
 
 #define NP_CARD_W     212
+#define NP_IDLE_GLYPH   0x4ea1ff
+#define NP_IDLE_GLYPH_W 18
 #define NP_CARD_H     48
 #define NP_CARD_PAD   8
 #define NP_THUMB      32
@@ -625,6 +636,7 @@ static void np_card_build(lv_obj_t *col) {
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     idle_screen.np.card = card;
+    idle_screen.np.quiet = -1;
 
     // Cover art when the source sends some, else the source's icon.
     lv_obj_t *thumb = lv_obj_create(card);
@@ -639,8 +651,8 @@ static void np_card_build(lv_obj_t *col) {
     lv_obj_center(idle_screen.np.icon);
     idle_screen.np.idle_icon = lv_label_create(thumb);
     lv_label_set_text(idle_screen.np.idle_icon, LV_SYMBOL_VOLUME_MAX);
-    lv_obj_set_style_text_font(idle_screen.np.idle_icon, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(idle_screen.np.idle_icon, lv_color_white(), 0);
+    lv_obj_set_style_text_font(idle_screen.np.idle_icon, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(idle_screen.np.idle_icon, lv_color_hex(NP_IDLE_GLYPH), 0);
     lv_obj_center(idle_screen.np.idle_icon);
     idle_screen.np.art = lv_image_create(thumb);
     lv_image_set_inner_align(idle_screen.np.art, LV_IMAGE_ALIGN_STRETCH);
@@ -648,6 +660,7 @@ static void np_card_build(lv_obj_t *col) {
     lv_obj_add_flag(idle_screen.np.art, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *text = lv_obj_create(card);
+    idle_screen.np.text = text;
     lv_obj_remove_style_all(text);
     lv_obj_remove_flag(text, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_height(text, LV_SIZE_CONTENT);
@@ -674,9 +687,9 @@ static void np_card_build(lv_obj_t *col) {
     idle_screen.np.play = ui_round_button_create(card, LV_SYMBOL_PLAY, NP_PLAY, &lv_font_montserrat_14, false);
     lv_obj_t *btn = lv_obj_get_parent(idle_screen.np.play);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
-    // Past the card's edge, so a fingertip's worth; the rest of the card
-    // opens the source.
-    lv_obj_set_ext_click_area(btn, NP_CARD_PAD + 6);
+    // Out to the card's edge, which is as far as LVGL looks for it; the
+    // rest of the card opens the source.
+    lv_obj_set_ext_click_area(btn, NP_CARD_PAD);
     lv_obj_add_event_cb(btn, transport_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)UI_TRANSPORT_PLAY_PAUSE);
 }
 
@@ -730,6 +743,7 @@ static void idle_screen_build(void) {
     lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(col, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(col, 5, 0);
+    touch_pad(col, TOUCH_EXT);
     lv_obj_center(col);
 
     np_card_build(col);
@@ -753,8 +767,9 @@ static void idle_screen_build(void) {
 
     lv_obj_t *chips = flex_row_create(idle_screen.screen, CLOCK_CHIP_GAP, 0);
     lv_obj_remove_flag(chips, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_max_width(chips, UI_CHIP_MAX_W, 0);
-    lv_obj_align(chips, LV_ALIGN_BOTTOM_MID, 0, -UI_CHIP_INSET);
+    touch_pad(chips, TOUCH_EXT);
+    lv_obj_set_style_max_width(chips, UI_CHIP_MAX_W + 2 * TOUCH_EXT, 0);
+    lv_obj_align(chips, LV_ALIGN_BOTTOM_MID, 0, -UI_CHIP_INSET + TOUCH_EXT);
     for (int i = 0; i < UI_APP_COUNT; i++) {
         ui_app_info_t info = ui_tools_info((ui_app_t)i);
         idle_screen.chip_labels[i] = clock_pill_create(chips, info.icon, info.tint, clock_chip_cb, (void *)(intptr_t)i);
@@ -798,9 +813,6 @@ static void idle_screen_refresh(void) {
         snprintf(range, sizeof(range), "H %d\xC2\xB0  L %d\xC2\xB0", wx.high, wx.low);
         ui_label_set_text(idle_screen.weather_range, range);
     }
-    // The idle row lists the enabled sources, which Settings can change
-    // with no audio state push to refresh it.
-    audio_chip_refresh();
     ampm_place();
 }
 
@@ -856,6 +868,7 @@ static void wireless_screen_build(void) {
     wireless_screen.art = ui_now_playing_art_create(&wireless_screen.bg, wireless_screen.screen, WIRELESS_TILE_Y);
 
     wireless_screen.transport = flex_row_create(wireless_screen.screen, TRANSPORT_GAP, WIRELESS_TRANSPORT_Y);
+    touch_pad(wireless_screen.transport, TOUCH_EXT / 2);
     wireless_screen.prev_icon = ui_round_button_create(wireless_screen.transport, LV_SYMBOL_PREV,
                                                        TRANSPORT_SECONDARY_SIZE, &lv_font_montserrat_16, true);
     wireless_screen.play_icon = ui_round_button_create(wireless_screen.transport, LV_SYMBOL_PLAY,
@@ -904,8 +917,8 @@ static void usb_screen_build(void) {
     lv_obj_t *label = status_label_create(row);
     lv_label_set_text(label, "USB Audio");
 
-    // mock-react's USB art-tile shows a generic speaker glyph, not the USB
-    // plug glyph -- that one's reserved for the status row above.
+    // The art tile shows a generic speaker glyph, not the USB plug glyph --
+    // that one's reserved for the status row above.
     lv_obj_t *tile_icon = lv_label_create(usb_screen.screen);
     lv_label_set_text(tile_icon, LV_SYMBOL_VOLUME_MAX);
     lv_obj_set_style_text_font(tile_icon, &lv_font_montserrat_32, 0);
@@ -913,6 +926,7 @@ static void usb_screen_build(void) {
     lv_obj_align(tile_icon, LV_ALIGN_CENTER, 0, USB_TILE_Y);
 
     lv_obj_t *transport = flex_row_create(usb_screen.screen, TRANSPORT_GAP, USB_TRANSPORT_Y);
+    touch_pad(transport, TOUCH_EXT / 2);
     usb_screen.prev_icon = ui_round_button_create(transport, LV_SYMBOL_PREV, TRANSPORT_SECONDARY_SIZE,
                                                   &lv_font_montserrat_16, true);
     usb_screen.play_icon = ui_round_button_create(transport, LV_SYMBOL_PLAY, TRANSPORT_PRIMARY_SIZE,
@@ -1107,22 +1121,35 @@ static void audio_chip_set_text(const char *text) {
     lv_label_set_text(audio_chip.label, text);
 }
 
-// Like the audio chip, refreshed on every state push, so each setter skips
-// no-op changes.
-#define NP_IDLE_TINT 0x3a3a46
+// Idle, the row is a plain line like the weather's: a glyph and its text,
+// centered, with no pill, tile or button.
+// Playing, it's the pill with art and play/pause. Applied only on a change:
+// the row refreshes on every state push.
+static void np_card_set_quiet(bool quiet) {
+    if (idle_screen.np.quiet == quiet) {
+        return;
+    }
+    idle_screen.np.quiet = quiet;
+    lv_obj_set_style_bg_opa(idle_screen.np.card, quiet ? LV_OPA_TRANSP : 20, 0);
+    lv_obj_set_flex_align(idle_screen.np.card, quiet ? LV_FLEX_ALIGN_CENTER : LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_opa(idle_screen.np.thumb, quiet ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+    lv_obj_set_width(idle_screen.np.thumb, quiet ? NP_IDLE_GLYPH_W : NP_THUMB);
+    lv_obj_set_flex_grow(idle_screen.np.text, quiet ? 0 : 1);
+    lv_obj_set_width(idle_screen.np.text, quiet ? LV_SIZE_CONTENT : 0);
+    lv_obj_set_width(idle_screen.np.title, quiet ? LV_SIZE_CONTENT : lv_pct(100));
+    lv_obj_set_width(idle_screen.np.subtitle, quiet ? LV_SIZE_CONTENT : lv_pct(100));
+    lv_obj_set_style_text_opa(idle_screen.np.title, quiet ? LV_OPA_70 : LV_OPA_COVER, 0);
+    ui_set_visible(idle_screen.np.idle_icon, quiet);
+    ui_set_visible(idle_screen.np.subtitle, !quiet);
+    ui_set_visible(lv_obj_get_parent(idle_screen.np.play), !quiet);
+}
 
 // With nothing connected the row still says what the device is for.
 static void np_card_idle(void) {
-    lv_color_t tint = lv_color_hex(NP_IDLE_TINT);
-    if (!lv_color_eq(tint, idle_screen.np.tint)) {
-        idle_screen.np.tint = tint;
-        lv_obj_set_style_bg_color(idle_screen.np.thumb, tint, 0);
-    }
+    np_card_set_quiet(true);
     ui_set_visible(idle_screen.np.art, false);
     ui_set_visible(idle_screen.np.icon, false);
-    ui_set_visible(idle_screen.np.idle_icon, true);
-    ui_set_visible(idle_screen.np.subtitle, false);
-    ui_set_visible(lv_obj_get_parent(idle_screen.np.play), false);
     ui_label_set_text(idle_screen.np.title, "Ready to play");
 }
 
@@ -1131,9 +1158,7 @@ static void np_card_refresh(lv_obj_t *target) {
         np_card_idle();
         return;
     }
-    ui_set_visible(lv_obj_get_parent(idle_screen.np.play), true);
-    ui_set_visible(idle_screen.np.idle_icon, false);
-    ui_set_visible(idle_screen.np.subtitle, true);
+    np_card_set_quiet(false);
 #ifdef AK_USB_AUDIO
     bool usb = target == usb_screen.screen;
     bool playing = usb ? s_audio.usb_playing : s_audio.wireless_playing;
@@ -1404,6 +1429,8 @@ void ui_init(void) {
     lv_timer_create(nav_tick_cb, NAV_TICK_MS, NULL);
 
     lv_screen_load(s_home);
+    // The clock's audio row starts idle, before any state push.
+    audio_chip_refresh();
     idle_screen_refresh();
 }
 

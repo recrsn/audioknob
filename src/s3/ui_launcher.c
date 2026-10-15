@@ -1,7 +1,6 @@
 #include "ui_launcher.h"
 
 #include "fonts.h"
-#include "icons.h"
 
 #define LAUNCHER_RADIUS    116
 #define LAUNCHER_ITEM      72
@@ -10,7 +9,6 @@
 #define LAUNCHER_STATUS_Y  13
 #define LAUNCHER_STATUS_MS 250
 #define LAUNCHER_IDLE_ITEM 0x1c1c24
-#define LAUNCHER_AUDIO_ICON 36
 #define LAUNCHER_AUDIO_TINT 0x4ea1ff
 
 // Ring positions, clockwise from the top: the audio entry, then the apps.
@@ -118,23 +116,18 @@ static void scrim_click_cb(lv_event_t *e) {
     ln.handlers.dismissed();
 }
 
-// The apps' icons are icons_48 glyphs; the audio one is the music note
-// image the now-playing screens use.
+// The apps' icons are icons_48 glyphs; the audio one is the speaker the
+// clock's idle audio row shows, from Montserrat's symbols.
 static void item_icon_create(lv_obj_t *item, int pos) {
     lv_color_t tint = entry_tint(pos);
-    if (pos == 0) {
-        lv_obj_t *icon = lv_image_create(item);
-        lv_image_set_src(icon, &icon_music_note);
-        lv_image_set_inner_align(icon, LV_IMAGE_ALIGN_STRETCH);
-        lv_obj_set_size(icon, LAUNCHER_AUDIO_ICON, LAUNCHER_AUDIO_ICON);
-        lv_obj_set_style_image_recolor(icon, tint, 0);
-        lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
-        lv_obj_center(icon);
-        return;
-    }
     lv_obj_t *icon = lv_label_create(item);
-    lv_label_set_text(icon, ui_tools_info((ui_app_t)entry_at(pos)).icon);
-    lv_obj_set_style_text_font(icon, &icons_48, 0);
+    if (pos == 0) {
+        lv_label_set_text(icon, LV_SYMBOL_VOLUME_MAX);
+        lv_obj_set_style_text_font(icon, &lv_font_montserrat_32, 0);
+    } else {
+        lv_label_set_text(icon, ui_tools_info((ui_app_t)entry_at(pos)).icon);
+        lv_obj_set_style_text_font(icon, &icons_48, 0);
+    }
     lv_obj_set_style_text_color(icon, tint, 0);
     lv_obj_center(icon);
 }
