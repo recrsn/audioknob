@@ -160,6 +160,7 @@ typedef struct {
         int8_t quiet; // the idle styling applied: 1, 0, or -1 before either
         uint32_t art_version;
         lv_color_t tint;
+        lv_color_t icon_color;
     } np;
 } idle_screen_t;
 
@@ -174,6 +175,7 @@ typedef struct {
     bool wireless_airplay;
     char wireless_text[64];
     char wireless_subtitle[64];
+    char wireless_peer[64];
 } audio_state_t;
 
 // The audio chip: a persistent "back to what's playing" pill at the top of
@@ -322,17 +324,30 @@ static void launcher_open(int entry) {
     }
 }
 
+// After playback stops, a source that's still connected keeps its screen up
+// this long before going home.
+#define AUDIO_LINGER_MS (300 * 1000)
+
+typedef struct {
+    bool was_playing;
+    uint32_t stopped_at; // lv_tick when playback last stopped
+} surface_state_t;
+
 // Shared by every source: surfaces `screen` while `playing`, falls back to
-// home when it stops, and respects an in-progress swipe home. A fresh
+// home once it stops (AUDIO_LINGER_MS later while still connected), and
+// respects an in-progress swipe home. A fresh
 // not-playing -> playing edge always un-homes, so a new stream is never
 // hidden behind the clock.
-static void surface_source(lv_obj_t *screen, bool playing, bool *was_playing) {
-    if (playing && !*was_playing) {
+static void surface_source(lv_obj_t *screen, bool playing, bool connected, surface_state_t *st) {
+    if (playing && !st->was_playing) {
         s_homed = false;
         s_pinned = false;
         ui_wake();
     }
-    *was_playing = playing;
+    if (!playing && st->was_playing) {
+        st->stopped_at = lv_tick_get();
+    }
+    st->was_playing = playing;
 
     if (playing) {
         // The switch screen is user-opened and a ringing timer must be seen;
@@ -340,7 +355,9 @@ static void surface_source(lv_obj_t *screen, bool playing, bool *was_playing) {
         if (!s_homed && lv_screen_active() != switch_screen.screen && !ui_tools_alerting()) {
             show_screen(screen);
         }
-    } else if (lv_screen_active() == screen && !s_pinned) {
+    } else if (lv_screen_active() == screen && !s_pinned &&
+               (!connected || lv_tick_elaps(st->stopped_at) >= AUDIO_LINGER_MS)) {
+        // A paused source keeps its screen, controls to hand, for a while.
         show_screen(s_home);
     }
 }
@@ -1112,9 +1129,9 @@ static void audio_chip_set_text(const char *text) {
     lv_label_set_text(audio_chip.label, text);
 }
 
-// Idle, the row is a plain line like the weather's: a glyph and its text,
-// centered, with no pill, tile or button.
-// Playing, it's the pill with art and play/pause. Applied only on a change:
+// Not playing, the row is a plain line like the weather's: a glyph and its
+// text, centered, with no pill, tile or button. Playing, it's the pill with
+// art and play/pause. Applied only on a change:
 // the row refreshes on every state push.
 static void np_card_set_quiet(bool quiet) {
     if (idle_screen.np.quiet == quiet) {
@@ -1131,7 +1148,6 @@ static void np_card_set_quiet(bool quiet) {
     lv_obj_set_width(idle_screen.np.title, quiet ? LV_SIZE_CONTENT : lv_pct(100));
     lv_obj_set_width(idle_screen.np.subtitle, quiet ? LV_SIZE_CONTENT : lv_pct(100));
     lv_obj_set_style_text_opa(idle_screen.np.title, quiet ? UI_OPA_TEXT_MUTED : LV_OPA_COVER, 0);
-    ui_set_visible(idle_screen.np.idle_icon, quiet);
     ui_set_visible(idle_screen.np.subtitle, !quiet);
     ui_set_visible(lv_obj_get_parent(idle_screen.np.play), !quiet);
 }
@@ -1141,7 +1157,22 @@ static void np_card_idle(void) {
     np_card_set_quiet(true);
     ui_set_visible(idle_screen.np.art, false);
     ui_set_visible(idle_screen.np.icon, false);
+    ui_set_visible(idle_screen.np.idle_icon, true);
     ui_label_set_text(idle_screen.np.title, "Ready to play");
+}
+
+// The source's icon, white on the pill's tinted tile while playing, in the
+// source's tint on its own when connected but idle.
+static void np_card_source_icon(lv_color_t tint, bool on_tile) {
+    const lv_image_dsc_t *icon = s_audio.wireless_airplay ? &icon_airplay : &icon_bluetooth;
+    if (lv_image_get_src(idle_screen.np.icon) != icon) {
+        lv_image_set_src(idle_screen.np.icon, icon);
+    }
+    lv_color_t color = on_tile ? lv_color_white() : tint;
+    if (!lv_color_eq(color, idle_screen.np.icon_color)) {
+        idle_screen.np.icon_color = color;
+        lv_obj_set_style_image_recolor(idle_screen.np.icon, color, 0);
+    }
 }
 
 static void np_card_refresh(lv_obj_t *target) {
@@ -1149,7 +1180,6 @@ static void np_card_refresh(lv_obj_t *target) {
         np_card_idle();
         return;
     }
-    np_card_set_quiet(false);
 #ifdef AK_USB_AUDIO
     bool usb = target == usb_screen.screen;
     bool playing = usb ? s_audio.usb_playing : s_audio.wireless_playing;
@@ -1162,10 +1192,23 @@ static void np_card_refresh(lv_obj_t *target) {
         idle_screen.np.tint = tint;
         lv_obj_set_style_bg_color(idle_screen.np.thumb, tint, 0);
     }
-    const lv_image_dsc_t *icon = s_audio.wireless_airplay ? &icon_airplay : &icon_bluetooth;
-    if (lv_image_get_src(idle_screen.np.icon) != icon) {
-        lv_image_set_src(idle_screen.np.icon, icon);
+    ui_set_visible(idle_screen.np.idle_icon, false);
+
+    // Connected but not playing: which device, quietly.
+    if (!playing) {
+        np_card_set_quiet(true);
+        np_card_source_icon(tint, false);
+        ui_set_visible(idle_screen.np.art, false);
+        ui_set_visible(idle_screen.np.icon, !usb);
+        const char *name = s_audio.wireless_peer[0] ? s_audio.wireless_peer
+                           : s_audio.wireless_airplay ? "AirPlay"
+                                                      : "Bluetooth";
+        ui_label_set_text(idle_screen.np.title, usb ? "USB Audio" : name);
+        return;
     }
+
+    np_card_set_quiet(false);
+    np_card_source_icon(tint, true);
 
     // Shares the now-playing screen's copy of the art.
     uint32_t art_version = usb ? 0 : wireless_screen.art_version;
@@ -1180,8 +1223,8 @@ static void np_card_refresh(lv_obj_t *target) {
 
     const char *subtitle = usb ? "" : s_audio.wireless_subtitle;
     ui_label_set_text(idle_screen.np.title, usb ? "USB Audio" : s_audio.wireless_text);
-    ui_label_set_text(idle_screen.np.subtitle, subtitle[0] ? subtitle : playing ? "Playing" : "Paused");
-    ui_label_set_text(idle_screen.np.play, playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
+    ui_label_set_text(idle_screen.np.subtitle, subtitle[0] ? subtitle : "Playing");
+    ui_label_set_text(idle_screen.np.play, LV_SYMBOL_PAUSE);
 }
 
 // Runs on every state push; each setter below skips no-op changes.
@@ -1461,7 +1504,7 @@ static void format_subtitle(const ui_track_info_t *track, char *out, size_t len)
 }
 
 void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *track) {
-    static bool was_playing;
+    static surface_state_t surface;
     bool airplay = state->source == SOURCE_AIRPLAY;
     lv_color_t tint = lv_color_hex(airplay ? UI_TINT_AIRPLAY : UI_TINT_BLUETOOTH);
     s_current_source = airplay ? UI_SOURCE_AIRPLAY : UI_SOURCE_BLUETOOTH;
@@ -1503,6 +1546,9 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     format_subtitle(track, subtitle, sizeof(subtitle));
     bool has_track = track && track->title[0];
     const char *source_name = airplay ? "AirPlay" : "Bluetooth";
+    const char *peer = track ? track->peer : "";
+    // With no track, what's connected is the next best title.
+    const char *idle_title = peer[0] ? peer : source_name;
 
     if (waiting) {
         lv_image_set_src(wireless_screen.wait_icon, airplay ? &icon_airplay : &icon_bluetooth);
@@ -1513,7 +1559,7 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
         ui_label_set_text(wireless_screen.play_icon,
                            state->muted ? LV_SYMBOL_MUTE : (state->playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));
         lv_obj_set_style_text_color(wireless_screen.play_icon, lv_color_hex(state->muted ? UI_COLOR_DANGER : UI_COLOR_TEXT), 0);
-        ui_label_set_text(wireless_screen.title_label, has_track ? track->title : source_name);
+        ui_label_set_text(wireless_screen.title_label, has_track ? track->title : idle_title);
         ui_label_set_text(wireless_screen.subtitle_label, subtitle);
         update_artwork(track);
     }
@@ -1523,23 +1569,24 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     s_audio.wireless_connected = state->connected;
     s_audio.wireless_playing = state->playing;
     s_audio.wireless_airplay = airplay;
-    snprintf(s_audio.wireless_text, sizeof(s_audio.wireless_text), "%s", has_track ? track->title : source_name);
+    snprintf(s_audio.wireless_peer, sizeof(s_audio.wireless_peer), "%s", peer);
+    snprintf(s_audio.wireless_text, sizeof(s_audio.wireless_text), "%s", has_track ? track->title : idle_title);
     snprintf(s_audio.wireless_subtitle, sizeof(s_audio.wireless_subtitle), "%s",
              !has_track ? "" : track->artist[0] ? track->artist : track->album);
-    surface_source(wireless_screen.screen, state->playing, &was_playing);
+    surface_source(wireless_screen.screen, state->playing, state->connected, &surface);
     audio_chip_refresh();
 }
 
 #ifdef AK_USB_AUDIO
 void ui_update_usb(uint8_t volume, bool muted, bool playing) {
-    static bool was_playing;
+    static surface_state_t surface;
     ring_set_volume(usb_screen.ring, volume);
 
     ui_label_set_text(usb_screen.play_icon, muted ? LV_SYMBOL_MUTE : (playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));
     lv_obj_set_style_text_color(usb_screen.play_icon, lv_color_hex(muted ? UI_COLOR_DANGER : UI_COLOR_TEXT), 0);
 
     s_audio.usb_playing = playing;
-    surface_source(usb_screen.screen, playing, &was_playing);
+    surface_source(usb_screen.screen, playing, false, &surface);
     audio_chip_refresh();
 }
 #endif

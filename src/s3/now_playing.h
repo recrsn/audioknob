@@ -18,6 +18,10 @@ bool now_playing_airplay_in_front(void);
 // ESP32 hasn't reported yet; track is zeroed when there's no metadata.
 bool now_playing_get(wireless_state_t *state, track_info_t *track);
 
+// The name of the sender in front ("Amitosh's iPhone"), or "" when it gave
+// none.
+void now_playing_peer_name(char *out, size_t len);
+
 // The front source's cover art (ARTWORK_SIZE^2 RGB565), or NULL.
 const uint16_t *now_playing_artwork(uint32_t *version);
 

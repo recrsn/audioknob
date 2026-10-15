@@ -49,6 +49,7 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
         memcpy(track.artist, wire_track.artist, sizeof(track.artist));
         memcpy(track.album, wire_track.album, sizeof(track.album));
         track.art = now_playing_artwork(&track.art_version);
+        now_playing_peer_name(track.peer, sizeof(track.peer));
         ui_update_wireless(&state, &track);
     }
 

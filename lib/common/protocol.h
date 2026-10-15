@@ -25,7 +25,15 @@ typedef enum {
     // pairing_status_t, sent like MSG_STATE_UPDATE: on change and resent
     // every ~1 s.
     MSG_PAIRING = 0x09,
+    // The connected phone's Bluetooth name, raw UTF-8 like MSG_DEVICE_NAME
+    // (0 to PEER_NAME_MAX bytes; none while nothing is connected or before
+    // the name has been read). Sent on change and resent every ~1 s.
+    MSG_PEER_NAME = 0x0A,
 } protocol_msg_type_t;
+
+// The longest sender name either source passes to the UI, in bytes; longer
+// ones are cut at a UTF-8 boundary.
+#define PEER_NAME_MAX 63
 
 // MSG_DEVICE_NAME's payload is the name's UTF-8 bytes, no NUL, 1 to
 // DEVICE_NAME_MAX of them. The S3 owns the name (it's also the AirPlay name

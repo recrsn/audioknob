@@ -205,7 +205,7 @@ static void become_principal(ap2_conn_t *conn) {
         dacp_start(conn->ap1.dacp_id[0] ? conn->ap1.dacp_id : NULL,
                    conn->ap1.active_remote[0] ? conn->ap1.active_remote : NULL);
     }
-    ap2_emit_type(RAOP_EVENT_SESSION_START);
+    ap2_emit(&(raop_event_t){.type = RAOP_EVENT_SESSION_START, .session.client = conn->client_name});
 }
 
 // Caller holds s.lock.

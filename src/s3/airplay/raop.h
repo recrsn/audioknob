@@ -29,6 +29,12 @@ typedef enum {
 typedef struct {
     raop_event_type_t type;
     union {
+        // SESSION_START: the sender's name ("Amitosh's iPhone"), from its
+        // X-Apple-Client-Name header or SETUP; NULL or empty if it sent none.
+        // Only valid during the callback.
+        struct {
+            const char *client;
+        } session;
         // 0.0 = muted, else linear over AirPlay's -30..0 dB slider range.
         float volume;
         struct {

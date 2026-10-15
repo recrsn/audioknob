@@ -18,3 +18,9 @@ void app_state_set_muted(bool muted);
 
 // Snapshot for state_sync to send. Cheap: a lock + memcpy.
 wireless_state_t app_state_get(void);
+
+// The connected phone's name (NUL-terminated UTF-8; cut at a character
+// boundary past PEER_NAME_MAX bytes). "" clears it.
+void app_state_set_peer_name(const char *name);
+// Copies it into out, PEER_NAME_MAX + 1 bytes; "" when there's none.
+void app_state_get_peer_name(char out[PEER_NAME_MAX + 1]);

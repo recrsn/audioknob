@@ -70,6 +70,7 @@ static void state_sync_task(void *arg) {
     (void)arg;
     wireless_state_t last_sent = {0};
     pairing_status_t last_pairing = {0};
+    char last_peer[PEER_NAME_MAX + 1] = "";
     int ticks_since_send = RESYNC_TICKS;  // force an initial send
 
     for (;;) {
@@ -91,6 +92,12 @@ static void state_sync_task(void *arg) {
         if (pairing_changed || ticks_since_send >= RESYNC_TICKS) {
             send_frame(MSG_PAIRING, &pairing, sizeof(pairing));
             last_pairing = pairing;
+        }
+        char peer[PEER_NAME_MAX + 1];
+        app_state_get_peer_name(peer);
+        if (strcmp(peer, last_peer) || ticks_since_send >= RESYNC_TICKS) {
+            send_frame(MSG_PEER_NAME, peer, (uint8_t)strlen(peer));
+            memcpy(last_peer, peer, sizeof(last_peer));
         }
         if (ticks_since_send >= RESYNC_TICKS) {
             ticks_since_send = 0;

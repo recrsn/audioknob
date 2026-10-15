@@ -22,6 +22,10 @@ bool uart_link_get_latest(wireless_state_t *out);
 // e.g. nothing has played since boot.
 bool uart_link_get_latest_track(track_info_t *out);
 
+// The connected phone's Bluetooth name from the latest MSG_PEER_NAME, or ""
+// when none is connected or its name isn't known.
+void uart_link_get_peer_name(char *out, size_t len);
+
 // Copies the ESP32's latest pairing status into *out. Returns false (and
 // leaves *out untouched) when none has arrived in the last few seconds,
 // e.g. Bluetooth is off or the ESP32 is restarting.

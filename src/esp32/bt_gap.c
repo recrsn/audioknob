@@ -7,6 +7,7 @@
 #include "esp_bt_device.h"
 #include "esp_bt_main.h"
 #include "esp_gap_bt_api.h"
+#include "app_state.h"
 #include "bt_pairing.h"
 #include "esp_log.h"
 #include "protocol.h"
@@ -22,6 +23,13 @@ static void bt_gap_cb(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
     case ESP_BT_GAP_PIN_REQ_EVT:
     case ESP_BT_GAP_REMOVE_BOND_DEV_COMPLETE_EVT:
         bt_pairing_gap_event(event, param);
+        break;
+    case ESP_BT_GAP_READ_REMOTE_NAME_EVT:
+        // Asked for by a2dp_sink once a phone connects.
+        if (param->read_rmt_name.stat == ESP_BT_STATUS_SUCCESS) {
+            ESP_LOGI(TAG, "connected to \"%s\"", (const char *)param->read_rmt_name.rmt_name);
+            app_state_set_peer_name((const char *)param->read_rmt_name.rmt_name);
+        }
         break;
     case ESP_BT_GAP_ACL_CONN_CMPL_STAT_EVT:
         ESP_LOGI(TAG, "ACL connected");

@@ -181,6 +181,7 @@ static void cycle_sample_playback(void) {
         .title = "Sample Track Title",
         .artist = "Sample Artist",
         .album = "Sample Album",
+        .peer = "Sample iPhone",
     };
     static const ui_track_info_t k_none;
     static size_t step;

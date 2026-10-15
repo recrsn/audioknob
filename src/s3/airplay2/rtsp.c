@@ -671,10 +671,6 @@ static void handle_feedback(ap2_conn_t *conn, const rtsp_req_t *req, rtsp_resp_t
 }
 
 static void handle_post(ap2_conn_t *conn, const rtsp_req_t *req, rtsp_resp_t *resp) {
-    const char *name = rtsp_header(req, "X-Apple-Client-Name");
-    if (name) {
-        snprintf(conn->client_name, sizeof(conn->client_name), "%s", name);
-    }
     const char *p = req->path;
     if (!strcmp(p, "/pair-setup")) {
         handle_pair_setup(conn, req, resp);
@@ -823,6 +819,11 @@ static void dispatch(ap2_conn_t *conn, const rtsp_req_t *req, rtsp_resp_t *resp)
         ESP_LOGI(TAG, "conn %d: %s refused, protocol turned off", conn->id, req->method);
         resp->code = 503;
         return;
+    }
+    // Senders of both versions name themselves on any request.
+    const char *name = rtsp_header(req, "X-Apple-Client-Name");
+    if (name) {
+        snprintf(conn->client_name, sizeof(conn->client_name), "%s", name);
     }
     ap1_apple_challenge(conn, req, resp);
     for (size_t i = 0; conn->airplay1 && i < sizeof(s_ap1_methods) / sizeof(s_ap1_methods[0]); i++) {

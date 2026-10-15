@@ -43,6 +43,7 @@ static const char *TAG = "airplay";
 static SemaphoreHandle_t s_lock;
 static wireless_state_t s_state = {.volume = 50, .source = SOURCE_AIRPLAY};
 static track_info_t s_track;
+static char s_client[PEER_NAME_MAX + 1]; // the session's sender
 static artwork_slot_t *s_art;
 static raop_ctx_t *s_raop;
 static uint8_t s_mac[6];
@@ -140,6 +141,7 @@ static void end_session(void) {
     s_state.connected = false;
     s_state.playing = false;
     memset(&s_track, 0, sizeof(s_track));
+    s_client[0] = '\0';
     xSemaphoreGive(s_lock);
     post_artwork(NULL, 0);
     audio_source_release_airplay();
@@ -148,11 +150,12 @@ static void end_session(void) {
 static bool on_raop_event(const raop_event_t *event) {
     switch (event->type) {
     case RAOP_EVENT_SESSION_START:
-        ESP_LOGI(TAG, "session start");
+        ESP_LOGI(TAG, "session start from \"%s\"", event->session.client ? event->session.client : "");
         xSemaphoreTake(s_lock, portMAX_DELAY);
         s_state.connected = true;
         s_state.playing = false;
         memset(&s_track, 0, sizeof(s_track));
+        snprintf(s_client, sizeof(s_client), "%s", event->session.client ? event->session.client : "");
         xSemaphoreGive(s_lock);
         post_artwork(NULL, 0);
         break;
@@ -321,6 +324,12 @@ void airplay_get_state(wireless_state_t *state, track_info_t *track) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     *state = s_state;
     *track = s_track;
+    xSemaphoreGive(s_lock);
+}
+
+void airplay_get_client_name(char *out, size_t len) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    snprintf(out, len, "%s", s_client);
     xSemaphoreGive(s_lock);
 }
 

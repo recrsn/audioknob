@@ -26,6 +26,9 @@ void airplay_get_state(wireless_state_t *state, track_info_t *track);
 // Current cover art as an ARTWORK_SIZE^2 RGB565 bitmap, or NULL if the
 // sender has provided none. version changes whenever the bitmap does.
 const uint16_t *airplay_get_artwork(uint32_t *version);
+// The connected sender's name ("Amitosh's iPhone"), or "" when there's no
+// session or it gave none.
+void airplay_get_client_name(char *out, size_t len);
 
 // Which AirPlay versions to take; neither turns AirPlay off. Applies once
 // the network is up, and live after that, dropping a session of a version

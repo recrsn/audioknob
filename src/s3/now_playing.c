@@ -39,6 +39,14 @@ bool now_playing_get(wireless_state_t *state, track_info_t *track) {
     return true;
 }
 
+void now_playing_peer_name(char *out, size_t len) {
+    if (now_playing_airplay_in_front()) {
+        airplay_get_client_name(out, len);
+    } else {
+        uart_link_get_peer_name(out, len);
+    }
+}
+
 const uint16_t *now_playing_artwork(uint32_t *version) {
     return now_playing_airplay_in_front() ? airplay_get_artwork(version) : uart_link_get_artwork(version);
 }

@@ -5,6 +5,7 @@
 
 #include "app_state.h"
 #include "bt_app_core.h"
+#include "esp_gap_bt_api.h"
 #include "esp_log.h"
 #include "i2s_out.h"
 
@@ -23,6 +24,10 @@ static void handle_event(uint16_t event, void *param) {
         app_state_set_connected(connected);
         if (connected) {
             memcpy(s_peer, a2d->conn_stat.remote_bda, sizeof(s_peer));
+            // For the S3's home screen; bt_gap stores the reply.
+            esp_bt_gap_read_remote_name(s_peer);
+        } else {
+            app_state_set_peer_name("");
         }
         s_has_peer = connected;
         if (!connected) {

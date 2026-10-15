@@ -118,7 +118,8 @@ static bool handle_setup(raop_ctx_t *ctx, const key_data_t *headers, key_data_t 
         return false;
     }
     if (!ctx->session_active) {
-        raop_event_t event = {.type = RAOP_EVENT_SESSION_START};
+        raop_event_t event = {.type = RAOP_EVENT_SESSION_START,
+                              .session.client = kd_lookup(headers, "X-Apple-Client-Name")};
         if (!ctx->event_cb(&event)) {
             return false;
         }
