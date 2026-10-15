@@ -3,8 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 
-// One light at a time: the ring is its dimmer, the knob turns it, a tap on
-// the bulb toggles it, a knob press (or a tap on the name) moves to the
+// One light at a time: the ring is its dimmer, the knob or a finger on the
+// ring sets it, a tap on the bulb toggles it, a knob press (or a tap on the name) moves to the
 // next light.
 
 #define LIGHTS_TINT     0xffc35a
@@ -132,6 +132,24 @@ static bool lights_rotate(int steps) {
     return true;
 }
 
+// The finger's angle on the ring is the level; the very start of it is off.
+static void ring_touch_cb(int32_t deg, bool first, void *user) {
+    (void)first;
+    (void)user;
+    if (!selected_usable()) {
+        return;
+    }
+    const ui_light_t *l = &lt.lights[lt.selected];
+    int32_t pct = tool_ring_value_at(lt.ring, deg);
+    if (pct < LIGHTS_MIN_PCT) {
+        if (l->on) {
+            set_power(false);
+        }
+    } else if (!l->on || pct != l->brightness) {
+        set_brightness((uint8_t)pct);
+    }
+}
+
 static void next_light(void) {
     if (lt.count > 1) {
         lt.selected = (lt.selected + 1) % lt.count;
@@ -167,6 +185,7 @@ void lights_page_build(lv_obj_t *screen) {
                                                    .press = next_light});
 
     lt.ring = tool_ring_create(screen, lv_color_hex(LIGHTS_TINT), 100);
+    tool_ring_touch_create(screen, ring_touch_cb, NULL);
     tool_title_create(screen, "LIGHTS", lv_color_hex(LIGHTS_TINT));
 
     lt.bulb_btn = lv_obj_create(screen);
@@ -189,7 +208,7 @@ void lights_page_build(lv_obj_t *screen) {
 
     lt.name = label_create(screen, &inter_semi_16, 0xffffff, LIGHTS_NAME_Y);
     lv_obj_add_flag(lt.name, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(lt.name, 12);
+    lv_obj_set_ext_click_area(lt.name, 20);
     lv_obj_add_event_cb(lt.name, name_cb, LV_EVENT_CLICKED, NULL);
 
     lt.dots_row = lv_obj_create(screen);

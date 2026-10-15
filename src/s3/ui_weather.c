@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define WX_TITLE_Y    (-112)
+#define WX_TITLE_Y    TOOL_TITLE_TOP_Y
 #define WX_NOW_Y      (-52)
 #define WX_SKY_Y      (-2)
 #define WX_RANGE_Y    20
@@ -140,12 +140,15 @@ void ui_update_weather(const ui_weather_t *weather) {
     render();
 }
 
-bool ui_weather_glance(const char **icon, char *temp, size_t len) {
+bool ui_weather_glance(ui_weather_glance_t *out) {
     if (!wx.data.valid) {
         return false;
     }
-    *icon = sky_icon(wx.data.code, wx.data.is_day);
-    snprintf(temp, len, "%d\xC2\xB0", display_temp(wx.data.temp_c));
+    out->icon = sky_icon(wx.data.code, wx.data.is_day);
+    out->sky = sky_text(wx.data.code);
+    out->temp = display_temp(wx.data.temp_c);
+    out->high = display_temp(wx.data.high_c);
+    out->low = display_temp(wx.data.low_c);
     return true;
 }
 

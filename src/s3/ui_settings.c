@@ -10,25 +10,26 @@
 // distance so the clipped top and bottom of the circle stay quiet. Rows are
 // grouped under section headers the selection skips. The knob moves the
 // selection and a press (or a tap on a row) acts on it: switches flip at
-// once, brightness, sleep and timezone enter an edit mode where the knob changes
-// the value until the next press/tap, and the name, web page and (automatic)
-// location rows open a QR code for the device's web page, which has every
-// setting too (a name or a city can't be typed here).
+// once, brightness, sleep and timezone enter an edit mode where the knob (or
+// the -/+ buttons that cover the rows below meanwhile) changes the value
+// until the next press/tap, and the name, web page and (automatic) location
+// rows open a QR code for the device's web page, which has every setting
+// too (a name or a city can't be typed here).
 
 #define SET_TINT        0x9a9aa4
 #define SET_ACCENT      0x4ea1ff
 #define SET_DANGER      0xff7a7a
 #define SET_SWITCH_OFF  0x3a3a46
-#define SET_TITLE_Y     (-134)
+#define SET_TITLE_Y     TOOL_TITLE_TOP_Y
 #define SET_LIST_W      272
 #define SET_LIST_H      236
 #define SET_LIST_Y      14
-#define SET_ROW_H       40
-#define SET_HEADER_H    30
+#define SET_ROW_H       48
+#define SET_HEADER_H    28
 #define SET_ROW_PAD     16
-#define SET_SWITCH_W    36
-#define SET_SWITCH_H    22
-#define SET_KNOB        18
+#define SET_SWITCH_W    44
+#define SET_SWITCH_H    26
+#define SET_KNOB        22
 #define SET_LEVEL_W     52
 #define SET_FADE_ROWS   3   // rows from the middle to the faintest
 #define SET_FADE_MIN    40
@@ -39,6 +40,13 @@ static const uint16_t k_sleep_options[] = {0, 30, 60, 120, 300, 600, 1800, UI_SL
 #define SLEEP_OPTION_COUNT (int)(sizeof(k_sleep_options) / sizeof(k_sleep_options[0]))
 // Timezone picker position for "automatic", ahead of tz_db's entries.
 #define TZ_AUTO (-1)
+// The edit mode's -/+ buttons, below the highlight down to the list's end.
+#define SET_STEPPER_TOP  (SET_LIST_Y + SET_ROW_H / 2 + 6)
+#define SET_STEPPER_H    (SET_LIST_H / 2 - SET_ROW_H / 2 - 6)
+#define SET_STEP_SIZE    56
+#define SET_STEP_GAP     32
+// Held, the timezone steps faster the longer it's held: there are hundreds.
+#define SET_TZ_FAST_REPS 10
 #define SET_QR_SIZE     150
 #define SET_QR_Y        (-4)
 #define SET_QR_TITLE_Y  (-112)
@@ -149,6 +157,8 @@ static struct {
     lv_obj_t *values[ROW_COUNT];   // KIND_VALUE and KIND_LEVEL
     lv_obj_t *switches[ROW_COUNT]; // KIND_SWITCH: the track; its child is the knob
     lv_obj_t *level;               // brightness bar
+    lv_obj_t *stepper;             // the -/+ buttons, while editing
+    int step_reps;                 // long-press repeats of the held one
     int selected;
     bool editing;
     bool forget_armed; // the selected row (a Forget one, or a pinned location) pressed once
@@ -360,6 +370,7 @@ static void render(void) {
     lv_bar_set_value(st.level, s_settings.brightness, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(st.level, lv_color_hex(st.editing && st.selected == ROW_BRIGHTNESS ? SET_ACCENT : 0xffffff),
                               LV_PART_INDICATOR);
+    ui_set_visible(st.stepper, st.editing);
     lv_obj_set_style_bg_opa(st.highlight, st.editing ? 56 : 26, 0);
     lv_obj_set_style_bg_color(st.highlight, lv_color_hex(st.editing ? SET_ACCENT : 0xffffff), 0);
 }
@@ -686,6 +697,57 @@ static void list_scroll_end_cb(lv_event_t *e) {
     select_row(best, false);
 }
 
+static void step_cb(lv_event_t *e) {
+    int dir = (int)(intptr_t)lv_event_get_user_data(e);
+    int steps = 1;
+    if (lv_event_get_code(e) == LV_EVENT_PRESSED) {
+        st.step_reps = 0;
+        return;
+    }
+    if (lv_event_get_code(e) == LV_EVENT_LONG_PRESSED_REPEAT && st.selected == ROW_TIMEZONE) {
+        steps += ++st.step_reps / SET_TZ_FAST_REPS;
+    }
+    if (st.editing) {
+        settings_rotate(dir * steps);
+    }
+}
+
+// A tap beside the buttons finishes editing, as a tap on the row does.
+static void stepper_click_cb(lv_event_t *e) {
+    (void)e;
+    if (st.editing) {
+        activate();
+    }
+}
+
+static void step_button_create(lv_obj_t *parent, const char *symbol, int dir) {
+    lv_obj_t *btn = lv_obj_get_parent(ui_round_button_create(parent, symbol, SET_STEP_SIZE, &lv_font_montserrat_22, false));
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(btn, SET_STEP_GAP / 4);
+    lv_obj_add_event_cb(btn, step_cb, LV_EVENT_PRESSED, (void *)(intptr_t)dir);
+    lv_obj_add_event_cb(btn, step_cb, LV_EVENT_SHORT_CLICKED, (void *)(intptr_t)dir);
+    lv_obj_add_event_cb(btn, step_cb, LV_EVENT_LONG_PRESSED_REPEAT, (void *)(intptr_t)dir);
+}
+
+// Opaque, so the rows it covers don't show through, and clickable, so taps
+// on it don't reach them.
+static void stepper_create(lv_obj_t *screen) {
+    st.stepper = lv_obj_create(screen);
+    lv_obj_remove_style_all(st.stepper);
+    lv_obj_remove_flag(st.stepper, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(st.stepper, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_size(st.stepper, SET_LIST_W, SET_STEPPER_H);
+    lv_obj_set_style_bg_color(st.stepper, lv_obj_get_style_bg_color(screen, 0), 0);
+    lv_obj_set_style_bg_opa(st.stepper, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(st.stepper, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(st.stepper, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(st.stepper, SET_STEP_GAP, 0);
+    lv_obj_align(st.stepper, LV_ALIGN_CENTER, 0, SET_STEPPER_TOP + SET_STEPPER_H / 2);
+    lv_obj_add_event_cb(st.stepper, stepper_click_cb, LV_EVENT_CLICKED, NULL);
+    step_button_create(st.stepper, LV_SYMBOL_MINUS, -1);
+    step_button_create(st.stepper, LV_SYMBOL_PLUS, 1);
+}
+
 static lv_obj_t *label_create(lv_obj_t *parent, const lv_font_t *font, uint32_t color) {
     lv_obj_t *label = lv_label_create(parent);
     lv_obj_set_style_text_font(label, font, 0);
@@ -753,7 +815,7 @@ static lv_obj_t *row_create(lv_obj_t *list, int index) {
     lv_obj_set_style_pad_column(row, 12, 0);
     lv_obj_add_event_cb(row, row_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
 
-    st.names[index] = label_create(row, &inter_semi_14, 0xffffff);
+    st.names[index] = label_create(row, &inter_semi_16, 0xffffff);
     lv_label_set_text(st.names[index], k_rows[index].name);
     switch (k_rows[index].kind) {
     case KIND_SWITCH:
@@ -822,6 +884,7 @@ void settings_page_build(lv_obj_t *screen) {
                                           : row_create(st.list, k_layout[i].row);
     }
     lv_obj_set_flag(st.rows[ROW_AIRPLAY2], LV_OBJ_FLAG_HIDDEN, !row_visible(ROW_AIRPLAY2));
+    stepper_create(screen);
     lv_obj_add_event_cb(screen, screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 
     st.selected = ROW_BRIGHTNESS;

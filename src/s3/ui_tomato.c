@@ -164,6 +164,7 @@ void tomato_page_build(lv_obj_t *screen) {
     }
 
     tomato.cd.ring = tool_dial_create(screen, tint, COUNTDOWN_RING_RANGE);
+    tool_ring_jog_create(screen, tomato_rotate);
     dots_create(screen);
     tomato.cd.time_label = tool_time_label_create(screen);
     lv_obj_align(tomato.cd.time_label, LV_ALIGN_CENTER, 0, 0);

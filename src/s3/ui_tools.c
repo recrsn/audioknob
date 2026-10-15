@@ -8,9 +8,16 @@
 #define TOOL_TICKS      8
 #define TOOL_TICK_OUT   140
 #define TOOL_TICK_MS    33
-#define TOOL_BUTTONS_Y  96
-#define TOOL_BTN_SIZE   56
+#define TOOL_BUTTONS_Y  92
+#define TOOL_BTN_SIZE   60
 #define TOOL_BTN_GAP    18
+// Inside this radius is a page's own content; the band outside it, ~7 mm
+// deep on the round panel, belongs to the ring.
+#define TOOL_TOUCH_R_IN 116
+// Closer to the middle than this, a moving finger's angle is too jumpy to
+// follow.
+#define TOOL_TOUCH_R_MIN 48
+#define TOOL_JOG_DEG     10
 
 // Haptics may be missing, so a ringing countdown doesn't pulse forever.
 #define ALERT_MS 60000
@@ -57,6 +64,98 @@ void tool_ring_set(lv_obj_t *ring, int32_t value) {
     lv_obj_set_style_arc_opa(ring, value ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_INDICATOR);
 }
 
+int32_t tool_ring_value_at(lv_obj_t *ring, int32_t deg) {
+    int32_t start = (int32_t)lv_arc_get_bg_angle_start(ring);
+    int32_t sweep = (int32_t)lv_arc_get_bg_angle_end(ring) - start;
+    int32_t rel = ((deg - (int32_t)lv_arc_get_rotation(ring) - start) % 360 + 360) % 360;
+    if (rel > sweep) {
+        rel = rel - sweep < (360 - sweep) / 2 ? sweep : 0;
+    }
+    int32_t min = lv_arc_get_min_value(ring);
+    int32_t max = lv_arc_get_max_value(ring);
+    return min + (rel * (max - min) + sweep / 2) / sweep;
+}
+
+typedef struct {
+    tool_ring_touch_cb_t cb;
+    void *user;
+    bool active; // this press started on the band
+} ring_touch_t;
+
+static void ring_touch_event_cb(lv_event_t *e) {
+    ring_touch_t *rt = lv_event_get_user_data(e);
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+        rt->active = false;
+        return;
+    }
+    lv_point_t p;
+    lv_indev_get_point(lv_indev_active(), &p);
+    lv_area_t a;
+    lv_obj_get_coords(lv_event_get_current_target_obj(e), &a);
+    int32_t dx = p.x - (a.x1 + a.x2) / 2;
+    int32_t dy = p.y - (a.y1 + a.y2) / 2;
+    int32_t r2 = dx * dx + dy * dy;
+    bool first = code == LV_EVENT_PRESSED;
+    if (first) {
+        rt->active = r2 >= TOOL_TOUCH_R_IN * TOOL_TOUCH_R_IN;
+    }
+    if (rt->active && r2 >= TOOL_TOUCH_R_MIN * TOOL_TOUCH_R_MIN) {
+        rt->cb(lv_atan2(dy, dx), first, rt->user);
+    }
+}
+
+// Covers the whole page so a drag can wander inwards; presses that start
+// inside the band fall through to nothing but still bubble their click to
+// the screen (which silences a ringing countdown).
+void tool_ring_touch_create(lv_obj_t *parent, tool_ring_touch_cb_t cb, void *user) {
+    ring_touch_t *rt = lv_malloc_zeroed(sizeof(*rt));
+    LV_ASSERT_MALLOC(rt);
+    rt->cb = cb;
+    rt->user = user;
+    lv_obj_t *zone = lv_obj_create(parent);
+    lv_obj_remove_style_all(zone);
+    lv_obj_remove_flag(zone, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(zone, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_size(zone, lv_pct(100), lv_pct(100));
+    lv_obj_center(zone);
+    lv_obj_add_event_cb(zone, ring_touch_event_cb, LV_EVENT_PRESSED, rt);
+    lv_obj_add_event_cb(zone, ring_touch_event_cb, LV_EVENT_PRESSING, rt);
+    lv_obj_add_event_cb(zone, ring_touch_event_cb, LV_EVENT_RELEASED, rt);
+    lv_obj_add_event_cb(zone, ring_touch_event_cb, LV_EVENT_PRESS_LOST, rt);
+}
+
+typedef struct {
+    bool (*rotate)(int steps);
+    int32_t last_deg;
+    int32_t travel; // degrees not yet turned into steps
+} ring_jog_t;
+
+static void ring_jog_cb(int32_t deg, bool first, void *user) {
+    ring_jog_t *jog = user;
+    if (first) {
+        jog->last_deg = deg;
+        jog->travel = 0;
+        return;
+    }
+    int32_t d = deg - jog->last_deg;
+    d += d > 180 ? -360 : d < -180 ? 360 : 0;
+    jog->last_deg = deg;
+    jog->travel += d;
+    int steps = jog->travel / TOOL_JOG_DEG;
+    if (steps) {
+        jog->travel -= steps * TOOL_JOG_DEG;
+        jog->rotate(steps);
+    }
+}
+
+void tool_ring_jog_create(lv_obj_t *parent, bool (*rotate)(int steps)) {
+    ring_jog_t *jog = lv_malloc_zeroed(sizeof(*jog));
+    LV_ASSERT_MALLOC(jog);
+    jog->rotate = rotate;
+    tool_ring_touch_create(parent, ring_jog_cb, jog);
+}
+
 // Eighth-turn ticks inside the dial, quarters longer and brighter, like a
 // kitchen timer's face; 6 o'clock is left out, the buttons sit there.
 // Static, so it only repaints where the ring does.
@@ -73,7 +172,9 @@ static void ticks_draw_cb(lv_event_t *e) {
     line.round_start = 1;
     line.round_end = 1;
     for (int i = 0; i < TOOL_TICKS; i++) {
-        if (i == TOOL_TICKS / 2) {
+        // The bottom one would sit under the home pill, the top one in the
+        // chip safe area.
+        if (i == 0 || i == TOOL_TICKS / 2) {
             continue;
         }
         bool quarter = i % 2 == 0;
@@ -151,7 +252,7 @@ static lv_obj_t *button_create(lv_obj_t *row, const char *text, const lv_font_t 
     lv_obj_t *label = ui_round_button_create(row, text, TOOL_BTN_SIZE, font, false);
     lv_obj_t *btn = lv_obj_get_parent(label);
     lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_ext_click_area(btn, 8);
+    lv_obj_set_ext_click_area(btn, 10);
     lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
     return label;
 }

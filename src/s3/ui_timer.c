@@ -26,7 +26,7 @@ static void timer_changed(countdown_t *cd) {
         [COUNTDOWN_ALERT] = "Time's up",
     };
     ui_label_set_text(timer.hint_label,
-                      cd->state == COUNTDOWN_IDLE && cd->total_ms == 0 ? "Turn to set" : hints[cd->state]);
+                      cd->state == COUNTDOWN_IDLE && cd->total_ms == 0 ? "Turn or drag the dial" : hints[cd->state]);
     ui_label_set_text(timer.start_icon, countdown_play_symbol(cd));
     tool_button_set_enabled(timer.start_icon, cd->state != COUNTDOWN_IDLE || cd->total_ms > 0);
     tool_button_set_enabled(timer.reset_icon, cd->state != COUNTDOWN_IDLE);
@@ -71,6 +71,7 @@ void timer_page_build(lv_obj_t *screen) {
                                                    .press = timer_press});
 
     timer.cd.ring = tool_dial_create(screen, tint, COUNTDOWN_RING_RANGE);
+    tool_ring_jog_create(screen, timer_rotate);
     tool_title_create(screen, "TIMER", tint);
     timer.cd.time_label = tool_time_label_create(screen);
     lv_obj_align(timer.cd.time_label, LV_ALIGN_CENTER, 0, 0);

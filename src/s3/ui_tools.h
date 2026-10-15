@@ -11,6 +11,8 @@
 #include "ui_internal.h"
 
 #define TOOL_TITLE_Y         (-96)
+// A title as high as the chip safe area allows, for pages that need the room.
+#define TOOL_TITLE_TOP_Y     UI_SAFE_TOP_Y(14)
 #define TOOL_HINT_Y          44
 #define COUNTDOWN_RING_RANGE 1000
 
@@ -19,6 +21,18 @@ lv_obj_t *tool_ring_create(lv_obj_t *parent, lv_color_t tint, int32_t range);
 // pages; returns the ring, driven with tool_ring_set() like the open one.
 lv_obj_t *tool_dial_create(lv_obj_t *parent, lv_color_t tint, int32_t range);
 void tool_ring_set(lv_obj_t *ring, int32_t value);
+// The value of `ring`'s range at `deg` (lv_arc degrees: 0 at 3 o'clock,
+// clockwise); a point in an open ring's gap takes the nearer end.
+int32_t tool_ring_value_at(lv_obj_t *ring, int32_t deg);
+
+// Touch on the outer band of a page, where its ring is: cb gets the finger's
+// angle in lv_arc degrees on the press (`first`) and as it moves. Create it
+// before the page's buttons so they stay on top of it.
+typedef void (*tool_ring_touch_cb_t)(int32_t deg, bool first, void *user);
+void tool_ring_touch_create(lv_obj_t *parent, tool_ring_touch_cb_t cb, void *user);
+// A finger circling the ring turns the knob: rotate() gets a step per
+// TOOL_JOG_DEG travelled, clockwise positive.
+void tool_ring_jog_create(lv_obj_t *parent, bool (*rotate)(int steps));
 lv_obj_t *tool_title_create(lv_obj_t *parent, const char *text, lv_color_t tint);
 lv_obj_t *tool_time_label_create(lv_obj_t *parent);
 lv_obj_t *tool_hint_label_create(lv_obj_t *parent);

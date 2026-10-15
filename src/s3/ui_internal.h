@@ -8,6 +8,18 @@
 
 #include "lvgl.h"
 
+// The chip safe area. Chips -- the audio chip and a now-playing screen's
+// source pill at the top, the clock's app chips at the bottom -- sit in a
+// band UI_CHIP_INSET in from the round edge, where the panel is still ~190 px
+// wide; they're capped to UI_CHIP_MAX_W so their corners stay on the glass.
+// Page content starts at UI_SAFE_TOP so a chip never lands on it.
+#define UI_CHIP_H     28
+#define UI_CHIP_INSET 28
+#define UI_CHIP_MAX_W 176
+#define UI_SAFE_TOP   (UI_CHIP_INSET + UI_CHIP_H + 6)
+// A label's LV_ALIGN_CENTER y offset that puts its top at UI_SAFE_TOP.
+#define UI_SAFE_TOP_Y(line_h) (UI_SAFE_TOP + (line_h) / 2 - 180)
+
 void ui_label_set_text(lv_obj_t *label, const char *text);
 void ui_set_visible(lv_obj_t *obj, bool visible);
 
@@ -79,9 +91,16 @@ int ui_tools_app_of(lv_obj_t *screen);
 // time -- for the clock's chips and the launcher; false when nothing is.
 bool ui_tools_status(ui_app_t app, char *buf, size_t len);
 
-// Current conditions for the clock face: an icons_20 glyph and the
-// temperature in the configured unit. False until weather has arrived.
-bool ui_weather_glance(const char **icon, char *temp, size_t len);
+// Current conditions for the clock face's weather complication, in the
+// configured unit. False until weather has arrived.
+typedef struct {
+    const char *icon; // an icons_48/icons_20 glyph
+    const char *sky;  // "Partly cloudy"
+    int temp;
+    int high;
+    int low;
+} ui_weather_glance_t;
+bool ui_weather_glance(ui_weather_glance_t *out);
 
 bool ui_tools_alerting(void);
 void ui_tools_dismiss(lv_obj_t *screen);

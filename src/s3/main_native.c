@@ -164,6 +164,44 @@ static void show_sample_weather(void) {
     ui_update_weather(&w);
 }
 
+// Stands in for a source so the now-playing screens can be laid out: P steps
+// through nothing, Bluetooth waiting to pair, and AirPlay playing a track,
+// paused, then playing again.
+static void cycle_sample_playback(void) {
+    static const struct {
+        wireless_state_t state;
+        bool track;
+    } k_steps[] = {
+        {{.volume = 0, .connected = 0, .playing = 0, .source = SOURCE_AIRPLAY}, false},
+        {{.volume = 0, .connected = 0, .playing = 1, .source = SOURCE_A2DP}, false},
+        {{.volume = 45, .connected = 1, .playing = 1, .source = SOURCE_AIRPLAY}, true},
+        {{.volume = 45, .connected = 1, .playing = 0, .source = SOURCE_AIRPLAY}, true},
+    };
+    static const ui_track_info_t k_track = {
+        .title = "Sample Track Title",
+        .artist = "Sample Artist",
+        .album = "Sample Album",
+    };
+    static const ui_track_info_t k_none;
+    static size_t step;
+    step = (step + 1) % (sizeof(k_steps) / sizeof(k_steps[0]));
+    ui_update_wireless(&k_steps[step].state, k_steps[step].track ? &k_track : &k_none);
+}
+
+// The panel is round; everything outside its circle is bezel.
+static void panel_mask_create(void) {
+    lv_obj_t *mask = lv_obj_create(lv_layer_sys());
+    lv_obj_remove_style_all(mask);
+    lv_obj_remove_flag(mask, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(mask, WINDOW_WIDTH, WINDOW_HEIGHT);
+    lv_obj_set_style_radius(mask, LV_RADIUS_CIRCLE, 0);
+    // Wide enough to reach the window's corners from the circle's edge.
+    lv_obj_set_style_outline_width(mask, WINDOW_WIDTH / 4, 0);
+    lv_obj_set_style_outline_color(mask, lv_color_hex(0x2a2a30), 0);
+    lv_obj_set_style_outline_opa(mask, LV_OPA_COVER, 0);
+    lv_obj_center(mask);
+}
+
 // Stands in for the hardware knob: Up/Down arrows turn it, Enter presses it
 // and holding Enter (or Esc) long-presses it; the mouse wheel (turn +
 // middle-click) works too. Everything lands here through one focused,
@@ -182,7 +220,9 @@ static void knob_key_cb(lv_event_t *e) {
     // those stay unmapped.
     bool wheel = lv_indev_get_type(lv_indev_active()) == LV_INDEV_TYPE_ENCODER;
     uint32_t key = lv_event_get_key(e);
-    if (key == LV_KEY_ESC) {
+    if (key == 'p' || key == 'P') {
+        cycle_sample_playback();
+    } else if (key == LV_KEY_ESC) {
         ui_knob_long_press();
     } else if (key == LV_KEY_UP || (wheel && key == LV_KEY_RIGHT)) {
         ui_knob_rotate(1);
@@ -221,6 +261,7 @@ int main(void) {
     lights_ui_start();
     show_sample_weather();
     knob_emulation_create();
+    panel_mask_create();
     lv_timer_create(clock_tick_cb, 1000, NULL);
     ui_set_pairing_handler(on_pairing);
     lv_timer_create(pairing_tick_cb, 1000, NULL);
