@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "audio_out.h"
+#include "audio_source.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -334,6 +335,10 @@ void airplay_player_push(const int16_t *pcm, size_t frames, int64_t playtime_us)
     size_t offset = 0;
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (audio_source_suspended()) {
+        xSemaphoreGive(s_lock);
+        return;
+    }
     while (offset < frames) {
         if (s_count == SLOT_COUNT) {
             if (s_dropped++ % 100 == 0) {

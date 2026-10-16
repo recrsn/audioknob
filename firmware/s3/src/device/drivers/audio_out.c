@@ -1,5 +1,7 @@
 #include "audio_out.h"
 
+#include "audio_source.h"
+
 #include "driver/i2s_std.h"
 #include "esp_attr.h"
 #include "esp_log.h"
@@ -66,7 +68,7 @@ void audio_out_write(const int16_t *pcm, size_t frames) {
     size_t len = frames * FRAME_BYTES;
     size_t written = 0;
 
-    while (written < len) {
+    while (written < len && !audio_source_suspended()) {
         size_t n = 0;
         esp_err_t err = i2s_channel_write(s_tx_chan, data + written, len - written, &n, portMAX_DELAY);
         __atomic_add_fetch(&s_submitted, n / FRAME_BYTES, __ATOMIC_RELAXED);

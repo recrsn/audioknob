@@ -24,6 +24,9 @@ static const char *TAG = "audio_source";
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static audio_source_t s_active = AUDIO_SOURCE_ESP32;
 static bool s_esp32_was_playing;
+static bool s_suspended;
+
+static void pause_a2dp(void);
 static void (*s_on_airplay_preempted)(void);
 static void (*s_on_local_preempted)(void);
 
@@ -46,6 +49,11 @@ static void esp32_watch(void) {
     }
 
     taskENTER_CRITICAL(&s_lock);
+    if (s_suspended) {
+        taskEXIT_CRITICAL(&s_lock);
+        pause_a2dp();
+        return;
+    }
     audio_source_t was = s_active;
     select_locked(AUDIO_SOURCE_ESP32);
     taskEXIT_CRITICAL(&s_lock);
@@ -94,8 +102,12 @@ static void pause_a2dp(void) {
     }
 }
 
-void audio_source_claim_airplay(void) {
+bool audio_source_claim_airplay(void) {
     taskENTER_CRITICAL(&s_lock);
+    if (s_suspended) {
+        taskEXIT_CRITICAL(&s_lock);
+        return false;
+    }
     bool local = s_active == AUDIO_SOURCE_LOCAL;
     select_locked(AUDIO_SOURCE_AIRPLAY);
     taskEXIT_CRITICAL(&s_lock);
@@ -105,11 +117,12 @@ void audio_source_claim_airplay(void) {
         s_on_local_preempted();
     }
     pause_a2dp();
+    return true;
 }
 
 void audio_source_release_airplay(void) {
     taskENTER_CRITICAL(&s_lock);
-    if (s_active == AUDIO_SOURCE_AIRPLAY) {
+    if (!s_suspended && s_active == AUDIO_SOURCE_AIRPLAY) {
         select_locked(AUDIO_SOURCE_ESP32);
     }
     taskEXIT_CRITICAL(&s_lock);
@@ -119,8 +132,12 @@ void audio_source_set_local_preempted(void (*on_preempted)(void)) {
     s_on_local_preempted = on_preempted;
 }
 
-void audio_source_claim_local(void) {
+bool audio_source_claim_local(void) {
     taskENTER_CRITICAL(&s_lock);
+    if (s_suspended) {
+        taskEXIT_CRITICAL(&s_lock);
+        return false;
+    }
     bool airplay = s_active == AUDIO_SOURCE_AIRPLAY;
     select_locked(AUDIO_SOURCE_LOCAL);
     taskEXIT_CRITICAL(&s_lock);
@@ -130,11 +147,12 @@ void audio_source_claim_local(void) {
         s_on_airplay_preempted();
     }
     pause_a2dp();
+    return true;
 }
 
 void audio_source_release_local(void) {
     taskENTER_CRITICAL(&s_lock);
-    if (s_active == AUDIO_SOURCE_LOCAL) {
+    if (!s_suspended && s_active == AUDIO_SOURCE_LOCAL) {
         select_locked(AUDIO_SOURCE_ESP32);
     }
     taskEXIT_CRITICAL(&s_lock);
@@ -145,4 +163,26 @@ audio_source_t audio_source_active(void) {
     audio_source_t active = s_active;
     taskEXIT_CRITICAL(&s_lock);
     return active;
+}
+
+void audio_source_suspend(bool suspended) {
+    taskENTER_CRITICAL(&s_lock);
+    s_suspended = suspended;
+    // Keep Bluetooth off the DAC even while its remote pause is in flight.
+    select_locked(suspended ? AUDIO_SOURCE_AIRPLAY : AUDIO_SOURCE_ESP32);
+    taskEXIT_CRITICAL(&s_lock);
+    if (suspended) {
+        s_on_airplay_preempted();
+        if (s_on_local_preempted) {
+            s_on_local_preempted();
+        }
+        pause_a2dp();
+    }
+}
+
+bool audio_source_suspended(void) {
+    taskENTER_CRITICAL(&s_lock);
+    bool suspended = s_suspended;
+    taskEXIT_CRITICAL(&s_lock);
+    return suspended;
 }

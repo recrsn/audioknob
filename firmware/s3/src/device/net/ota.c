@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "audio_source.h"
 #include "esp32_fw.h"
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
@@ -80,6 +81,7 @@ static void set_status(ota_state_t state, const char *error) {
 
 static bool fail(const char *error) {
     ESP_LOGW(TAG, "update failed: %s", error);
+    audio_source_suspend(false);
     set_status(OTA_FAILED, error);
     return false;
 }
@@ -131,7 +133,7 @@ static const char *check_header(const char *buf, ota_target_t *target, char vers
 // upload arriving on the web server can't both proceed.
 static bool start_receiving(void) {
     taskENTER_CRITICAL(&s_lock);
-    bool ok = s_status.state != OTA_INSTALLING;
+    bool ok = s_status.state != OTA_INSTALLING && s_status.state != OTA_RECEIVING;
     if (ok) {
         s_status.state = OTA_RECEIVING;
         s_status.progress = 0;
@@ -148,6 +150,7 @@ bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
     if (!start_receiving()) {
         return false;
     }
+    audio_source_suspend(true);
     if (size < HEADER_LEN) {
         return fail("Not a firmware image");
     }
@@ -213,6 +216,7 @@ static void esp32_install_task(void *arg) {
     if (error) {
         fail(error);
     } else {
+        audio_source_suspend(false);
         set_status(OTA_INSTALLED, NULL);
     }
     vTaskDelete(NULL);
@@ -229,6 +233,7 @@ void ota_install(void) {
     if (status.state != OTA_READY) {
         return;
     }
+    audio_source_suspend(true);
     if (status.target == OTA_TARGET_ESP32) {
         if (xTaskCreate(esp32_install_task, "esp32_fw", INSTALL_TASK_STACK, NULL, 3, NULL) != pdPASS) {
             fail("Out of memory");
@@ -247,6 +252,7 @@ void ota_decline(void) {
     ota_status_t status;
     ota_get_status(&status);
     if (status.state == OTA_READY) {
+        audio_source_suspend(false);
         set_status(OTA_DECLINED, NULL);
     }
 }

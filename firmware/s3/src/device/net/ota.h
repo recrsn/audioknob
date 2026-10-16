@@ -40,7 +40,8 @@ typedef struct {
 typedef int (*ota_read_fn)(void *ctx, char *buf, size_t len);
 
 // Receives a `size`-byte image into the spare slot, blocking until it's all
-// written and checked. On failure, false with the reason in the status.
+// written and checked. Audio stays paused through confirmation and install.
+// On failure, false with the reason in the status; playback is allowed again.
 bool ota_receive(size_t size, ota_read_fn read, void *ctx);
 
 void ota_get_status(ota_status_t *out);

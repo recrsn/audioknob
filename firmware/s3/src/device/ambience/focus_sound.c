@@ -108,7 +108,10 @@ static void render_chunk(player_t *p, float fade_target, float step, float gain_
 }
 
 static void start(player_t *p, ambience_kind_t kind) {
-    audio_source_claim_local();
+    if (!audio_source_claim_local()) {
+        focus_sound_stop();
+        return;
+    }
     ambience_synth_reset(s_synth, kind);
     p->running = true;
     p->kind = kind;
@@ -146,6 +149,9 @@ static void player_task(void *arg) {
             }
             p.gain = gain_target;
             start(&p, kind);
+            if (!p.running) {
+                continue;
+            }
         }
 
         bool swapping = want && kind != p.kind;
