@@ -31,6 +31,7 @@ now_playing_front_t now_playing_front(void) {
     case AUDIO_SOURCE_RADIO:
         return NOW_PLAYING_RADIO;
     case AUDIO_SOURCE_ESP32:
+    case AUDIO_SOURCE_LOCAL:
         break;
     }
     wireless_state_t esp32;
