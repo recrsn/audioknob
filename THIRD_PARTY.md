@@ -13,3 +13,7 @@ of this project.
 
 Managed components (LVGL, ESP-IDF components) are fetched at build time and
 keep their own licenses.
+
+Microphone noise suppression uses the managed Espressif ESP-SR component
+(`espressif/esp-sr`), under its Espressif MIT License; its `esp_ns.h` interface
+is Apache-2.0. The component retains its license in `managed_components/`.

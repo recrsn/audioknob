@@ -14,17 +14,27 @@
 // often.
 #define MIC_BUFFER_MS 160
 
+#define MIC_DEFAULT_GAIN_DB 30
+#define MIC_MAX_GAIN_DB 36
+
+typedef struct {
+    uint8_t gain_db;
+    bool suppress_noise;
+    bool raw;
+    bool right_slot;
+} mic_config_t;
+
 void mic_init(void);
 
-// Claims the mic and starts its clock; false while someone else holds it.
-// Stopped, the mic's clock is off and it sleeps.
-bool mic_start(void);
+// Claims the mic and starts its clock; NULL config uses +30 dB and ESP-SR
+// noise suppression. Raw capture bypasses all processing. False if busy
+// or the capture/processing buffers cannot be allocated.
+bool mic_start(const mic_config_t *config);
 void mic_stop(void);
 
-// Blocks for up to timeout_ms; returns the frames read.
+// Blocks for up to timeout_ms; returns the frames read. Processed capture
+// keeps partial 10 ms blocks across calls, so callers may request any size.
 size_t mic_read(int16_t *pcm, size_t frames, uint32_t timeout_ms);
 
-// Debug: the PDM filter's output as is, DC included, and which edge of
-// the clock the mic answers on (its L/R select pin), for bring-up.
-void mic_set_raw(bool raw);
-void mic_set_right_slot(bool right);
+// Cost of the latest capture, as a share of one core, excluding I2S waits.
+float mic_processing_cpu_pct(void);

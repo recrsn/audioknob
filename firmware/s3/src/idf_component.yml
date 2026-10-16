@@ -19,3 +19,5 @@ dependencies:
   # AirPlay 2 pairing (Ed25519, X25519) and stream encryption
   # (ChaCha20-Poly1305).
   espressif/libsodium: "^1.0.22~1"
+  # Microphone noise suppression (standalone ESP-SR NS, no model partition).
+  espressif/esp-sr: "^2.6.0"

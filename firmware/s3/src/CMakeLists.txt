@@ -27,6 +27,7 @@ set(AK_REQUIRES
     mbedtls
     mdns
     esp_audio_codec
+    esp-sr
     libsodium
 )
 

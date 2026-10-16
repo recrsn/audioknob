@@ -300,10 +300,11 @@ static bool parse_int(const char *text, int min, int max, int *out) {
 }
 
 // Debug: records ?s= seconds (1-30) from the mic as a 16 kHz mono WAV.
-// ?raw=1 skips the DC blocker, ?slot=r reads the other clock edge.
+// ?raw=1 bypasses processing; ?gain=0..36 and ?ns=0 tune voice processing.
+// ?slot=r reads the other PDM clock edge.
 static esp_err_t mic_wav_handler(httpd_req_t *req) {
     enum { HEADER = 44, MAX_SECONDS = 30 };
-    char query[64] = "", value[8];
+    char query[96] = "", value[8];
     httpd_req_get_url_query_str(req, query, sizeof(query));
     int seconds = 5;
     if (httpd_query_key_value(query, "s", value, sizeof(value)) == ESP_OK && !parse_int(value, 1, MAX_SECONDS, &seconds)) {
@@ -312,17 +313,30 @@ static esp_err_t mic_wav_handler(httpd_req_t *req) {
     bool raw = httpd_query_key_value(query, "raw", value, sizeof(value)) == ESP_OK && !strcmp(value, "1");
     bool right = httpd_query_key_value(query, "slot", value, sizeof(value)) == ESP_OK && !strcmp(value, "r");
 
+    int gain = MIC_DEFAULT_GAIN_DB;
+    if (httpd_query_key_value(query, "gain", value, sizeof(value)) == ESP_OK &&
+        !parse_int(value, 0, MIC_MAX_GAIN_DB, &gain)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gain must be 0-36 dB");
+    }
+    bool suppress_noise = true;
+    if (httpd_query_key_value(query, "ns", value, sizeof(value)) == ESP_OK) {
+        int enabled;
+        if (!parse_int(value, 0, 1, &enabled)) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "ns must be 0 or 1");
+        }
+        suppress_noise = enabled;
+    }
     size_t frames = (size_t)seconds * MIC_SAMPLE_RATE;
     uint32_t data_bytes = frames * sizeof(int16_t);
     uint8_t *wav = heap_caps_malloc(HEADER + data_bytes, MALLOC_CAP_SPIRAM);
     if (!wav) {
         return httpd_resp_send_500(req);
     }
-    mic_set_raw(raw);
-    mic_set_right_slot(right);
-    if (!mic_start()) {
+    const mic_config_t config = {.gain_db = (uint8_t)gain, .suppress_noise = suppress_noise,
+                                 .raw = raw, .right_slot = right};
+    if (!mic_start(&config)) {
         free(wav);
-        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Mic busy");
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Mic busy or processing memory unavailable");
     }
     int16_t *pcm = (int16_t *)(wav + HEADER);
     size_t got = 0;
@@ -334,7 +348,6 @@ static esp_err_t mic_wav_handler(httpd_req_t *req) {
         got += n;
     }
     mic_stop();
-    mic_set_raw(false);
     data_bytes = got * sizeof(int16_t);
 
     const uint32_t byte_rate = MIC_SAMPLE_RATE * sizeof(int16_t);
@@ -345,6 +358,9 @@ static esp_err_t mic_wav_handler(httpd_req_t *req) {
     };
     memcpy(wav, "RIFF", 4);
     memcpy(wav + 4, fields, sizeof(fields));
+    char cost[16];
+    snprintf(cost, sizeof(cost), "%.2f", (double)mic_processing_cpu_pct());
+    httpd_resp_set_hdr(req, "X-Mic-CPU-Percent", cost);
     httpd_resp_set_type(req, "audio/wav");
     esp_err_t err = httpd_resp_send(req, (const char *)wav, HEADER + data_bytes);
     free(wav);
