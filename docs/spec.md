@@ -103,7 +103,7 @@ Both sub-sources are always available; there is no manual sub-source toggle. **L
 |---|---|---|
 | DRV2605 haptic driver | I2C (`HAPTIC_SCL/SDA/TRIG/EN`, shares S3's touch I2C bus) | Mode-switch confirm tap, connect/disconnect event, timer-complete buzz |
 | Battery ADC | `BATT_ADC` → ESP32-S3 GPIO01, resistor divider (R62/R63, 10K/10K) | Battery icon in status bar (relevant mainly for untethered wireless-only use — USB mode implies wired anyway) |
-| PDM mic | MSM261D4030H1CPM | **Not used** — spectrum analyzer sources from the live audio buffer instead |
+| PDM mic | MSM261D4030H1CPM, `PDM_MIC_SCK` GPIO45 / `PDM_MIC_DATA` GPIO46 (both strapping pins, sampled before firmware runs) | Voice: push-to-talk between knobs, later a memo recorder / voice assistant. Read on I2S0, the S3's only port with PDM RX (so the DAC output is on I2S1), through the PDM-to-PCM filter at 16 kHz mono, 2.048 MHz clock. Not the spectrum analyzer's source, which taps the live audio buffer |
 | microSD | SDMMC bus | Reserved, not required for MVP |
 ---
 ## 6. Non-Functional Notes
