@@ -29,6 +29,9 @@ static portMUX_TYPE s_shared_lock = portMUX_INITIALIZER_UNLOCKED;
 // The device being paired in CONFIRM, PASSKEY and BUSY.
 static esp_bd_addr_t s_peer;
 static bool s_has_peer;
+// s_peer bonded Just Works in this window and owes us the numeric
+// comparison: the stack re-pairs for it as soon as a profile asks for MITM.
+static bool s_weak_bond;
 static uint8_t s_hold_s;
 static esp_timer_handle_t s_tick;
 
@@ -68,6 +71,10 @@ static void window_open(void) {
 static void window_close(pairing_state_t next) {
     if (s_has_peer && s_status.state == PAIRING_CONFIRM) {
         esp_bt_gap_ssp_confirm_reply(s_peer, false);
+    }
+    if (s_weak_bond) {
+        esp_bt_gap_remove_bond_device(s_peer);
+        s_weak_bond = false;
     }
     s_has_peer = false;
     s_status.seconds_left = 0;
@@ -164,10 +171,14 @@ static bool is_peer(const uint8_t *bda) {
     return s_has_peer && !memcmp(bda, s_peer, ESP_BD_ADDR_LEN);
 }
 
+static bool is_authenticated(esp_bt_link_key_type_t type) {
+    return type == ESP_BT_LINK_KEY_AUTHED_COMB_P192 || type == ESP_BT_LINK_KEY_AUTHED_COMB_P256;
+}
+
 static void on_paired(esp_bt_gap_cb_param_t *param) {
     // OPEN: Just Works, which Bluedroid completes without asking us.
     bool expected = s_status.seconds_left &&
-                    (s_status.state == PAIRING_OPEN ||
+                    ((s_status.state == PAIRING_OPEN && (!s_has_peer || is_peer(param->auth_cmpl.bda))) ||
                      ((s_status.state == PAIRING_BUSY || s_status.state == PAIRING_PASSKEY) &&
                       is_peer(param->auth_cmpl.bda)));
     if (!expected) {
@@ -178,6 +189,21 @@ static void on_paired(esp_bt_gap_cb_param_t *param) {
         esp_bt_gap_remove_bond_device(param->auth_cmpl.bda);
         return;
     }
+    if (!is_authenticated(param->auth_cmpl.lk_type)) {
+        // As acceptor Bluedroid never asks for MITM, so a phone that doesn't
+        // either (iPhones don't) bonds Just Works first. A2DP and AVRCP
+        // need MITM, so the numeric comparison follows right away; that's
+        // what the user confirms.
+        ESP_LOGI(TAG, "unauthenticated key (type %d), waiting for the code", param->auth_cmpl.lk_type);
+        memcpy(s_peer, param->auth_cmpl.bda, ESP_BD_ADDR_LEN);
+        s_has_peer = true;
+        s_weak_bond = true;
+        if (s_status.seconds_left < ACCEPT_GRACE_S) {
+            s_status.seconds_left = ACCEPT_GRACE_S;
+        }
+        return;
+    }
+    s_weak_bond = false;
     ESP_LOGI(TAG, "paired with %s, link key type %d", param->auth_cmpl.device_name, param->auth_cmpl.lk_type);
     copy_name(s_status.peer, sizeof(s_status.peer), param->auth_cmpl.device_name);
     window_close(PAIRING_DONE);
@@ -194,7 +220,7 @@ static void on_gap_event(uint16_t event, void *arg) {
     esp_bt_gap_cb_param_t *param = arg;
     switch (event) {
     case ESP_BT_GAP_CFM_REQ_EVT:
-        if (s_status.state != PAIRING_OPEN) {
+        if (s_status.state != PAIRING_OPEN || (s_has_peer && !is_peer(param->cfm_req.bda))) {
             ESP_LOGW(TAG, "pairing request outside the window, refused");
             esp_bt_gap_ssp_confirm_reply(param->cfm_req.bda, false);
             break;
@@ -223,6 +249,10 @@ static void on_gap_event(uint16_t event, void *arg) {
             on_paired(param);
         } else if (is_peer(param->auth_cmpl.bda)) {
             ESP_LOGW(TAG, "pairing failed, status %d", param->auth_cmpl.stat);
+            if (s_weak_bond) {
+                esp_bt_gap_remove_bond_device(s_peer);
+                s_weak_bond = false;
+            }
             s_has_peer = false;
             set_state(PAIRING_FAILED);
             s_hold_s = RESULT_HOLD_S;
