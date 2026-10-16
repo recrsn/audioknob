@@ -133,5 +133,5 @@ direct_dependencies:
 - espressif/libsodium
 - espressif/mdns
 manifest_hash: 2015b8934c5bc778219135cc42780db5943840ecd501e76286e4ef440668fece
-target: esp32
+target: esp32s3
 version: 2.0.0

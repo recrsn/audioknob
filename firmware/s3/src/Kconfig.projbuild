@@ -37,10 +37,10 @@ menu "AudioKnob"
             player and UI.
 
         config AK_AIRPLAY1
-            bool "AirPlay 1 only (src/s3/airplay1/)"
+            bool "AirPlay 1 only (src/airplay/v1/)"
 
         config AK_AIRPLAY2
-            bool "AirPlay 2 and AirPlay 1 (src/s3/airplay2/)"
+            bool "AirPlay 2 and AirPlay 1 (src/airplay/v2/)"
             select MBEDTLS_CHACHA20_C
             select MBEDTLS_POLY1305_C
             select MBEDTLS_CHACHAPOLY_C

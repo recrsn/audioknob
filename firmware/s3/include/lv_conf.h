@@ -37,7 +37,7 @@
 #ifdef AK_NATIVE
     #define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB
 #else
-    /* src/s3/lv_mem_esp.c: everything in PSRAM. */
+    /* src/drivers/lv_mem_esp.c: everything in PSRAM. */
     #define LV_USE_STDLIB_MALLOC LV_STDLIB_CUSTOM
 #endif
 

@@ -1,7 +1,7 @@
-# Generates src/s3/tz_db.c: every zone in the host's zone.tab (plus UTC)
+# Generates firmware/s3/src/assets/tz_db.c: every zone in the host's zone.tab (plus UTC)
 # with its POSIX TZ rule, which is the footer line of each TZif v2+ file.
 # newlib's tzset() only understands POSIX rules, not IANA names.
-# Usage: python3 tools/gen_tz_db.py [/usr/share/zoneinfo] > src/s3/tz_db.c
+# Usage: python3 tools/gen_tz_db.py [/usr/share/zoneinfo] > firmware/s3/src/assets/tz_db.c
 import os
 import sys
 

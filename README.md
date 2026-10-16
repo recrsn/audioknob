@@ -39,34 +39,42 @@ The board has two MCUs, each with its own firmware and PlatformIO environment:
 | ESP32-S3 (8 MB PSRAM) | `s3` | UI, Wi-Fi, AirPlay, SNTP, weather, I2S output, USB |
 | ESP32-U4WDH | `esp32` | Classic Bluetooth: A2DP/AVRCP |
 
-They talk over a UART carrying control and metadata only; audio never crosses it. Shared protocol code lives in `lib/common/`. [spec.md](spec.md) has the hardware facts, pin map and protocol design; [CLAUDE.md](CLAUDE.md) has per-module notes.
+They talk over a UART carrying control and metadata only; audio never crosses it. Shared protocol code lives in `firmware/lib/common/`. [docs/spec.md](docs/spec.md) has the hardware facts, pin map and protocol design; [CLAUDE.md](CLAUDE.md) has per-module notes.
 
 ## Building
 
 Requires [PlatformIO](https://platformio.org/).
 
 ```bash
-pio run -e s3 -t upload      # flash the ESP32-S3
-pio run -e esp32 -t upload   # flash the ESP32-U4WDH
-pio run -e native -t exec    # run the UI on the desktop
+pio run -d firmware/s3 -e s3 -t upload       # flash the ESP32-S3
+pio run -d firmware/esp32 -e esp32 -t upload # flash the ESP32-U4WDH
+pio run -d firmware/s3 -e native -t exec     # run the UI on the desktop
 ```
 
-The native target needs SDL2 (`brew install sdl2` on macOS) and expects Homebrew under `/opt/homebrew`; adjust `build_flags` in `platformio.ini` otherwise.
+The native target needs SDL2 (`brew install sdl2` on macOS) and expects Homebrew under `/opt/homebrew`; adjust `build_flags` in `firmware/s3/platformio.ini` otherwise.
 
 Emulator keys: Up/Down turn the knob, Enter presses it, Esc long-presses it (opens the launcher), `P` cycles sample playback states.
 
 ### Configuration
 
-`sdkconfig.defaults.*` hold the defaults. Wi-Fi credentials are entered on the device (captive portal or web page); the `AK_WIFI_SSID` / `AK_WIFI_PASSWORD` Kconfig options are optional development fallbacks and ship empty. Don't commit real values.
+`sdkconfig.defaults.*` in each firmware project hold the defaults. Wi-Fi credentials are entered on the device (captive portal or web page); the `AK_WIFI_SSID` / `AK_WIFI_PASSWORD` Kconfig options are optional development fallbacks and ship empty. Don't commit real values.
 
 ## Repository layout
 
 ```
-src/s3/      ESP32-S3 firmware (UI, AirPlay, audio out)
-src/esp32/   ESP32-U4WDH firmware (Bluetooth)
-lib/common/  UART protocol shared by both
-hardware/    OpenSCAD desk stand
-tools/       font, wallpaper and time-zone generators
+firmware/s3/        ESP32-S3 project (PlatformIO + ESP-IDF, plus the native UI emulator)
+  src/airplay/        receivers and player
+  src/ui/             LVGL screens and apps
+  src/drivers/        LCD, touch, knob, haptics, I2S, UART link
+  src/net/            Wi-Fi, NTP, weather, web page, OTA
+  src/core/           settings, device name, time zones
+  src/assets/         generated fonts, backgrounds, tz database
+firmware/esp32/     ESP32-U4WDH project (Bluetooth)
+firmware/lib/common/  UART protocol shared by both
+third_party/        vendored libraries (pair_ap)
+docs/               spec, stock firmware notes, screenshots
+hardware/           OpenSCAD desk stand
+tools/              generators for the files in src/assets
 ```
 
 ## License

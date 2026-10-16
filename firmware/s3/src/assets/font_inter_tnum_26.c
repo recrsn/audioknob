@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 26 px
  * Bpp: 4
- * Opts: --font inter-700-tnum.ttf -r 0x20,0x2D,0x2E,0x30-0x3A --size 26 --bpp 4 --format lvgl --no-compress --lv-font-name inter_tnum_26 --lv-fallback lv_font_montserrat_14 --lv-include lvgl.h -o src/s3/font_inter_tnum_26.c
+ * Opts: --font inter-700-tnum.ttf -r 0x20,0x2D,0x2E,0x30-0x3A --size 26 --bpp 4 --format lvgl --no-compress --lv-font-name inter_tnum_26 --lv-fallback lv_font_montserrat_14 --lv-include lvgl.h -o firmware/s3/src/assets/font_inter_tnum_26.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE
