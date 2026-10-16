@@ -63,18 +63,14 @@ Emulator keys: Up/Down turn the knob, Enter presses it, Esc long-presses it (ope
 
 ```
 firmware/s3/        ESP32-S3 project (PlatformIO + ESP-IDF, plus the native UI emulator)
-  src/airplay/        receivers and player
-  src/ui/             LVGL screens and apps
-  src/drivers/        LCD, touch, knob, haptics, I2S, UART link
-  src/net/            Wi-Fi, NTP, weather, web page, OTA
-  src/core/           settings, device name, time zones
-  src/assets/         generated fonts, backgrounds, tz database
+  src/ui/             LVGL screens, apps, generated fonts/backgrounds (builds natively too)
+  src/device/         hardware-only code: airplay/, drivers/, net/, core/
+  lib/pair_ap/        vendored AirPlay 2 pairing library
 firmware/esp32/     ESP32-U4WDH project (Bluetooth)
 firmware/lib/common/  UART protocol shared by both
-  lib/                vendored pair_ap (PlatformIO library)
 docs/               spec, stock firmware notes, screenshots
 hardware/           OpenSCAD desk stand
-tools/              generators for the files in src/assets
+tools/              generators for the files in src/ui/assets
 ```
 
 ## License
