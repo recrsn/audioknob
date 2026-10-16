@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "artwork_png.h"
 
 #include <png.h>
@@ -168,5 +166,3 @@ bool artwork_png_decode(const uint8_t *data, size_t len, uint16_t *out) {
     png_destroy_read_struct(&png, &info, NULL);
     return ok;
 }
-
-#endif  // !AK_NATIVE

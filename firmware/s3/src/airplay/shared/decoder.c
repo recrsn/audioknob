@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "decoder.h"
 
 #include <stdbool.h>
@@ -183,5 +181,3 @@ int decoder_decode(decoder_t *dec, uint8_t *in, size_t len, int16_t *out, size_t
     }
     return (int)(frame.decoded_size / (2 * sizeof(int16_t)));
 }
-
-#endif  // !AK_NATIVE

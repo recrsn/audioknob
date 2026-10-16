@@ -7,8 +7,6 @@
  * AirPlay 1 senders use the same RTSP port, as with shairport-sync (ap1.c).
  */
 
-#ifndef AK_NATIVE
-
 #include <errno.h>
 #include <math.h>
 #include <stdarg.h>
@@ -493,5 +491,3 @@ bool raop_remote_volume(raop_ctx_t *ctx, float volume) {
 uint32_t raop_time_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
-
-#endif  // !AK_NATIVE

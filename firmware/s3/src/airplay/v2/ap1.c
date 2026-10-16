@@ -8,8 +8,6 @@
  * SET_PARAMETER in both protocols and share rtsp.c's handler.
  */
 
-#ifndef AK_NATIVE
-
 #include "ap1.h"
 
 #include <stdio.h>
@@ -129,5 +127,3 @@ void ap1_teardown(ap2_conn_t *conn, const rtsp_req_t *req, rtsp_resp_t *resp) {
     rtsp_resp_header(resp, "Connection", "close");
     conn->stop = true;
 }
-
-#endif  // !AK_NATIVE

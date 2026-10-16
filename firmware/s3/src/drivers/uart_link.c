@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "uart_link.h"
 
 #include <stdio.h>
@@ -348,5 +346,3 @@ bool uart_link_fw_request(uint8_t type, const void *payload, uint8_t len, uint32
         }
     }
 }
-
-#endif  // !AK_NATIVE

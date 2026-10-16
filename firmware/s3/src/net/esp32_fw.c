@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "esp32_fw.h"
 
 #include <string.h>
@@ -215,5 +213,3 @@ const char *esp32_fw_install(void (*progress)(unsigned percent)) {
     }
     return "The Bluetooth chip didn't come back";
 }
-
-#endif  // !AK_NATIVE

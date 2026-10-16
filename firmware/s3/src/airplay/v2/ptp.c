@@ -17,8 +17,6 @@
  * Follow_Up, and when the grandmaster's time stops early in a sequence.
  */
 
-#ifndef AK_NATIVE
-
 #include "ptp.h"
 
 #include "ap2.h"
@@ -489,5 +487,3 @@ bool ptp_clock(ptp_clock_t *out) {
     portEXIT_CRITICAL(&s_pub_lock);
     return out->clock_id != 0;
 }
-
-#endif  // !AK_NATIVE

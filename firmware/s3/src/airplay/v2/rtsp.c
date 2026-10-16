@@ -9,8 +9,6 @@
  * stream methods go to ap1.c.
  */
 
-#ifndef AK_NATIVE
-
 #include "rtsp.h"
 
 #include <errno.h>
@@ -1019,5 +1017,3 @@ void rtsp_disconnect_all(void) {
     }
     xSemaphoreGive(s_conns_lock);
 }
-
-#endif  // !AK_NATIVE

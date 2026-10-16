@@ -7,8 +7,6 @@
  * is near.
  */
 
-#ifndef AK_NATIVE
-
 #include "buffered.h"
 
 #include <string.h>
@@ -443,5 +441,3 @@ void buffered_stop(buffered_t *b) {
     xSemaphoreTake(b->decoder_done, portMAX_DELAY);
     destroy(b);
 }
-
-#endif  // !AK_NATIVE

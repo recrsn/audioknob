@@ -5,8 +5,6 @@
 // Putting render-time scratch (draw tasks, mask buffers) in internal RAM was
 // measured and gained nothing: the cache already absorbs those accesses.
 
-#ifndef AK_NATIVE
-
 #include "esp_heap_caps.h"
 #include "lvgl.h"
 
@@ -47,5 +45,3 @@ void lv_mem_monitor_core(lv_mem_monitor_t *mon_p) {
 lv_result_t lv_mem_test_core(void) {
     return LV_RESULT_OK;
 }
-
-#endif  // !AK_NATIVE

@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "bplist.h"
 
 #include <stdlib.h>
@@ -684,5 +682,3 @@ uint8_t *bpw_serialize(bpw_t *w, bpw_obj root, size_t *len) {
     *len = o.len;
     return o.p;
 }
-
-#endif  // !AK_NATIVE

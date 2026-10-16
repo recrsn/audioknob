@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "online.h"
 
 #include <stdio.h>
@@ -272,5 +270,3 @@ uint32_t online_get_weather(ui_weather_t *out) {
     xSemaphoreGive(s_lock);
     return v;
 }
-
-#endif  // !AK_NATIVE

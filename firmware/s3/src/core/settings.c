@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "settings.h"
 
 #include <string.h>
@@ -79,5 +77,3 @@ void settings_save(const settings_t *s) {
     nvs_commit(nvs);
     nvs_close(nvs);
 }
-
-#endif  // !AK_NATIVE

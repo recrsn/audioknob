@@ -5,8 +5,6 @@
  * 2014--2025, MIT License).
  */
 
-#ifndef AK_NATIVE
-
 #include "rtp.h"
 
 #include <string.h>
@@ -398,5 +396,3 @@ void rtp_stop(rtp_t *r) {
     }
     destroy(r);
 }
-
-#endif  // !AK_NATIVE

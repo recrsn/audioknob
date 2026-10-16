@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "dmap.h"
 
 #include <stdint.h>
@@ -56,5 +54,3 @@ bool dmap_parse_track(const char *buf, size_t len, dmap_track_t *out) {
     }
     return true;
 }
-
-#endif  // !AK_NATIVE

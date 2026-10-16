@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "haptic.h"
 
 #include <stdbool.h>
@@ -136,5 +134,3 @@ void haptic_alarm_stop(void) {
         esp_timer_stop(s_alarm_timer);
     }
 }
-
-#endif  // !AK_NATIVE

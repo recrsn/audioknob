@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "artwork.h"
 
 #include <string.h>
@@ -170,5 +168,3 @@ const uint16_t *artwork_slot_get(artwork_slot_t *slot, uint32_t *version) {
     xSemaphoreGive(slot->lock);
     return art;
 }
-
-#endif  // !AK_NATIVE

@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "now_playing.h"
 
 #include <string.h>
@@ -112,5 +110,3 @@ void now_playing_pick(ui_source_t source) {
     }
     s_pick_dac = audio_source_active();
 }
-
-#endif  // !AK_NATIVE

@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "http_get.h"
 
 #include "esp_crt_bundle.h"
@@ -46,5 +44,3 @@ int http_get(const char *url, char *buf, size_t cap) {
     esp_http_client_cleanup(client);
     return len;
 }
-
-#endif  // !AK_NATIVE

@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "audio_out.h"
 
 #include "driver/i2s_std.h"
@@ -107,5 +105,3 @@ uint32_t audio_out_queued_us(int64_t *now_us) {
 uint32_t audio_out_underruns(void) {
     return s_underruns;
 }
-
-#endif  // !AK_NATIVE

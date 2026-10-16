@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "device_name.h"
 
 #include <ctype.h>
@@ -132,5 +130,3 @@ bool device_name_set(const char *name) {
     }
     return true;
 }
-
-#endif  // !AK_NATIVE

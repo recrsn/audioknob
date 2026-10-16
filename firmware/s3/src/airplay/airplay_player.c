@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "airplay_player.h"
 
 #include <stdbool.h>
@@ -369,5 +367,3 @@ void airplay_player_set_volume(uint8_t volume_pct) {
     float v = volume_pct / 100.0f;
     s_gain_target = (int32_t)(v * v * v * GAIN_UNITY);
 }
-
-#endif  // !AK_NATIVE

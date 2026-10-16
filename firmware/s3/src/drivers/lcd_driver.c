@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "lcd_driver.h"
 
 #include "lcd_init_cmds.h"
@@ -433,5 +431,3 @@ i2c_master_bus_handle_t lcd_driver_i2c_bus(void) {
 lv_indev_t *lcd_driver_touch_indev(void) {
     return s_touch_indev;
 }
-
-#endif  // !AK_NATIVE

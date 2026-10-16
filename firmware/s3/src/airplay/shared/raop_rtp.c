@@ -27,8 +27,6 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef AK_NATIVE
-
 #include "raop_rtp.h"
 
 #include <stdlib.h>
@@ -785,5 +783,3 @@ static bool rtp_request_resend(raop_rtp_t *ctx, seq_t first, seq_t last) {
     }
     return true;
 }
-
-#endif  // !AK_NATIVE

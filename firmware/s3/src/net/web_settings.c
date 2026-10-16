@@ -1,5 +1,3 @@
-#ifndef AK_NATIVE
-
 #include "web_settings.h"
 
 #include <assert.h>
@@ -477,5 +475,3 @@ bool web_settings_start(void) {
     ESP_LOGI(TAG, "device page up");
     return true;
 }
-
-#endif  // !AK_NATIVE
