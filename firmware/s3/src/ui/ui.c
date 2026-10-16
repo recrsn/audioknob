@@ -948,6 +948,14 @@ static void wireless_tint_cb(uint32_t tint) {
     }
 }
 
+static void source_chip_cb(lv_event_t *e) {
+    if (s_current_source == UI_SOURCE_RADIO) {
+        open_app(UI_APP_RADIO);
+    } else {
+        open_switch_cb(e);
+    }
+}
+
 static void wireless_screen_build(void) {
     wireless_screen.screen = screen_create();
     ui_now_playing_bg_create(&wireless_screen.bg, wireless_screen.screen, UI_BG_WIRELESS, UI_TINT_AIRPLAY,
@@ -956,7 +964,7 @@ static void wireless_screen_build(void) {
 
     // Y is set per-update (WIRELESS_STATUS_ROW_Y_CONNECTED vs. _WAITING) --
     // the mock's flex column re-centers around whichever block is showing.
-    lv_obj_t *row = status_pill_create(wireless_screen.screen, open_switch_cb);
+    lv_obj_t *row = status_pill_create(wireless_screen.screen, source_chip_cb);
     wireless_screen.source_icon = icon_create(row, &icon_airplay, STATUS_ICON_SIZE, lv_color_hex(UI_COLOR_TEXT));
     wireless_screen.source_label = status_label_create(row);
 
@@ -1418,7 +1426,11 @@ static void audio_chip_refresh(void) {
 
 static void audio_chip_cb(lv_event_t *e) {
     (void)e;
-    open_audio();
+    if (audio_chip.target == wireless_screen.screen && s_audio.wireless_source == UI_SOURCE_RADIO) {
+        open_app(UI_APP_RADIO);
+    } else {
+        open_audio();
+    }
 }
 
 static void audio_chip_build(void) {
