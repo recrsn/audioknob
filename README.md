@@ -71,7 +71,7 @@ firmware/s3/        ESP32-S3 project (PlatformIO + ESP-IDF, plus the native UI e
   src/assets/         generated fonts, backgrounds, tz database
 firmware/esp32/     ESP32-U4WDH project (Bluetooth)
 firmware/lib/common/  UART protocol shared by both
-third_party/        vendored libraries (pair_ap)
+  lib/                vendored pair_ap (PlatformIO library)
 docs/               spec, stock firmware notes, screenshots
 hardware/           OpenSCAD desk stand
 tools/              generators for the files in src/assets

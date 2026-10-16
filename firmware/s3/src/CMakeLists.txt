@@ -42,8 +42,6 @@ endif()
 # include/ dir is added to every component's compile flags.
 idf_build_set_property(COMPILE_OPTIONS "-I${CMAKE_SOURCE_DIR}/include" APPEND)
 
-set(AK_THIRD_PARTY "${CMAKE_SOURCE_DIR}/../../third_party")
-
 # Sources include each other by bare file name, so every directory is on the
 # include path.
 set(AK_DIRS ui assets drivers net core airplay airplay/shared)
@@ -60,15 +58,10 @@ set(AK_EMBED_TXTFILES "net/web/index.html")
 
 if(CONFIG_AK_AIRPLAY2)
     # AirPlay 2 after shairport-sync, which takes AirPlay 1 senders on the
-    # same port, with owntone's pair_ap on an mbedtls backend (PAIR_MBEDTLS).
+    # same port. Pairing is owntone's pair_ap, built from lib/ by PlatformIO.
     file(GLOB AK_AIRPLAY2_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/airplay/v2/*.c")
-    file(GLOB AK_PAIR_AP_SRCS "${AK_THIRD_PARTY}/pair_ap/*.c")
-    list(APPEND AK_SRCS ${AK_AIRPLAY2_SRCS} ${AK_PAIR_AP_SRCS})
-    list(APPEND AK_INCLUDE_DIRS "airplay/v2" "${AK_THIRD_PARTY}/pair_ap")
-    # Upstream style; unused parameters and signed/unsigned compares are its own.
-    set_source_files_properties(${AK_PAIR_AP_SRCS} PROPERTIES
-        COMPILE_DEFINITIONS "PAIR_MBEDTLS=1"
-        COMPILE_OPTIONS "-Wno-sign-compare;-Wno-unused-parameter;-Wno-unused-function")
+    list(APPEND AK_SRCS ${AK_AIRPLAY2_SRCS})
+    list(APPEND AK_INCLUDE_DIRS "airplay/v2")
 else()
     # AirPlay 1 only: the RAOP receiver on its own port.
     file(GLOB AK_AIRPLAY1_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/airplay/v1/*.c")

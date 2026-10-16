@@ -1,0 +1,16 @@
+{
+  "name": "pair_ap",
+  "version": "0.0.0",
+  "description": "owntone's AirPlay 2 / HomeKit pairing, on an mbedtls backend",
+  "license": "MIT",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": ".",
+    "flags": [
+      "-DPAIR_MBEDTLS=1",
+      "-Wno-sign-compare",
+      "-Wno-unused-parameter",
+      "-Wno-unused-function"
+    ]
+  }
+}
