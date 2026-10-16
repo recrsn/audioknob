@@ -55,6 +55,7 @@ typedef enum {
     ROW_LOCATION,
     ROW_TIMEZONE,
     ROW_UNITS,
+    ROW_AIR,
     ROW_AIRPLAY2,
     ROW_AIRPLAY1,
     ROW_BLUETOOTH,
@@ -87,6 +88,7 @@ static const struct {
     [ROW_LOCATION] = {"Auto location", KIND_SWITCH},
     [ROW_TIMEZONE] = {"Timezone", KIND_VALUE},
     [ROW_UNITS] = {"Units", KIND_VALUE},
+    [ROW_AIR] = {"Show air quality", KIND_VALUE},
     [ROW_AIRPLAY2] = {"AirPlay 2", KIND_SWITCH},
     [ROW_AIRPLAY1] = {"AirPlay 1", KIND_SWITCH},
     [ROW_BLUETOOTH] = {"Bluetooth", KIND_SWITCH},
@@ -116,6 +118,7 @@ static const struct {
     {NULL, ROW_LOCATION},
     {NULL, ROW_TIMEZONE},
     {NULL, ROW_UNITS},
+    {NULL, ROW_AIR},
     HEADER("AUDIO"),
     {NULL, ROW_AIRPLAY2},
     {NULL, ROW_AIRPLAY1},
@@ -141,6 +144,7 @@ static ui_settings_t s_settings = {
     .art_colors = true,
     .bluetooth = true,
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
+    .air_show = UI_AIR_SHOW_HIGH,
     .tz_auto = true,
     .location_auto = true,
 };
@@ -302,6 +306,11 @@ static void value_text(int row, char *buf, size_t len) {
     case ROW_TIMEZONE:
         timezone_text(buf, len);
         break;
+    case ROW_AIR: {
+        static const char *const k_air[] = {"Off", "When high", "Always"};
+        snprintf(buf, len, "%s", k_air[s->air_show <= UI_AIR_SHOW_ALWAYS ? s->air_show : UI_AIR_SHOW_HIGH]);
+        break;
+    }
     case ROW_NAME:
         snprintf(buf, len, "%s", s->device_name);
         break;
@@ -595,6 +604,9 @@ static void activate(void) {
         break;
     case ROW_UNITS:
         emit(UI_SETTING_FAHRENHEIT, !s->fahrenheit, NULL);
+        break;
+    case ROW_AIR:
+        emit(UI_SETTING_AIR_SHOW, (s->air_show + 1) % (UI_AIR_SHOW_ALWAYS + 1), NULL);
         break;
     case ROW_HAPTICS:
         emit(UI_SETTING_HAPTICS, !s->haptics, NULL);

@@ -15,6 +15,7 @@ typedef struct {
     bool art_colors;
     bool bluetooth;
     uint8_t airplay; // UI_AIRPLAY_* mask; 0 = off
+    uint8_t air_show; // ui_air_show_t
     char tz[40]; // manual IANA zone; "" follows the IP-detected one
 } settings_t;
 

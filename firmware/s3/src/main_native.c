@@ -37,6 +37,7 @@ static ui_settings_t s_settings = {
     .bluetooth = true,
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .airplay2_available = true,
+    .air_show = UI_AIR_SHOW_HIGH,
     .tz_auto = true,
     .location = "Lisbon",
     .device_name = "AudioKnob-K7MXQ2PA",
@@ -103,6 +104,9 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         break;
     case UI_SETTING_AIRPLAY:
         s_settings.airplay = (uint8_t)value;
+        break;
+    case UI_SETTING_AIR_SHOW:
+        s_settings.air_show = (uint8_t)value;
         break;
     }
     ui_update_settings(&s_settings);
@@ -210,8 +214,18 @@ static void on_firmware(bool install) {
 }
 
 // Fixed sample so the Weather page can be laid out without a network; the
-// place name says so.
+// place name says so. A steps its air quality and UV through both over the
+// threshold, one each, both under it, and none known.
 static void show_sample_weather(void) {
+    static const struct {
+        bool has_aqi;
+        uint16_t aqi;
+        bool has_uv;
+        float uv;
+    } k_air[] = {
+        {true, 162, true, 8.3f}, {true, 112, true, 2.1f}, {true, 42, true, 6.4f}, {true, 38, true, 3.0f}, {false, 0, false, 0},
+    };
+    static size_t step;
     ui_weather_t w = {
         .valid = true,
         .place = "Sample data",
@@ -221,8 +235,15 @@ static void show_sample_weather(void) {
         .code = 2,
         .is_day = true,
         .hours = {{15, 28.1f, 2, true}, {16, 27.0f, 80, true}, {17, 25.6f, 95, true}, {18, 24.2f, 3, false}},
+        .has_aqi = k_air[step].has_aqi,
+        .aqi = k_air[step].aqi,
+        .pm2_5 = 61.0f,
+        .has_uv = k_air[step].has_uv,
+        .uv = k_air[step].uv,
+        .uv_max = 9.1f,
     };
     ui_update_weather(&w);
+    step = (step + 1) % (sizeof(k_air) / sizeof(k_air[0]));
 }
 
 // Procedural stand-ins for cover art, so the art colour can be checked: a
@@ -350,6 +371,8 @@ static void knob_key_cb(lv_event_t *e) {
         cycle_sample_playback();
     } else if (key == 'u' || key == 'U') {
         start_sample_update();
+    } else if (key == 'a' || key == 'A') {
+        show_sample_weather();
     } else if (key == LV_KEY_ESC) {
         ui_knob_long_press();
     } else if (key == LV_KEY_UP || (wheel && key == LV_KEY_RIGHT)) {

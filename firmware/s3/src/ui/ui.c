@@ -141,6 +141,11 @@ typedef struct {
     lv_obj_t *weather_temp;
     lv_obj_t *weather_sky;
     lv_obj_t *weather_range;
+    // A third line under the weather, per the Settings page's "Show air
+    // quality": per reading, a glyph tinted by severity, then the value.
+    lv_obj_t *weather_air_row;
+    lv_obj_t *weather_air_icon[2];
+    lv_obj_t *weather_air[2];
     // One per app, shown while that app has something in progress.
     lv_obj_t *chips[UI_APP_COUNT];
     lv_obj_t *chip_labels[UI_APP_COUNT];
@@ -735,6 +740,25 @@ static void weather_complication_build(lv_obj_t *col) {
     idle_screen.weather_range = lv_label_create(comp);
     lv_obj_set_style_text_font(idle_screen.weather_range, UI_FONT_CAPTION, 0);
     lv_obj_set_style_text_color(idle_screen.weather_range, lv_color_hex(UI_COLOR_TEXT_DIM), 0);
+
+    // On the screen rather than in the column, so showing it never moves
+    // the clock; it follows the complication by hand.
+    lv_obj_t *air = flex_row_create(lv_obj_get_screen(col), UI_SPACE_S, 0);
+    lv_obj_add_flag(air, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_ext_click_area(air, UI_TOUCH_EXT);
+    lv_obj_add_event_cb(air, clock_weather_cb, LV_EVENT_CLICKED, NULL);
+    idle_screen.weather_air_row = air;
+    static const char *const k_air_icons[2] = {ICON_AIR, ICON_UV};
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *icon = lv_label_create(air);
+        lv_obj_set_style_text_font(icon, UI_FONT_ICON_SM, 0);
+        lv_obj_set_style_margin_left(icon, i ? UI_SPACE_XS : 0, 0);
+        lv_label_set_text(icon, k_air_icons[i]);
+        idle_screen.weather_air_icon[i] = icon;
+        idle_screen.weather_air[i] = lv_label_create(air);
+        lv_obj_set_style_text_font(idle_screen.weather_air[i], UI_FONT_LABEL, 0);
+        lv_obj_set_style_text_color(idle_screen.weather_air[i], lv_color_hex(UI_COLOR_TEXT), 0);
+    }
 }
 
 static void idle_screen_build(void) {
@@ -800,6 +824,34 @@ static void ampm_place(void) {
                     -(UI_FONT_CLOCK->base_line - UI_FONT_TITLE->base_line));
 }
 
+// Air quality and UV on their own line under the weather when they matter (or
+// always, per settings), each a glyph in its severity's color and the reading.
+static void weather_air_refresh(bool have_weather) {
+    ui_air_reading_t r[2];
+    ui_air_readings(&r[0], &r[1]);
+    uint8_t mode = ui_settings_current()->air_show;
+    bool show[2];
+    for (int i = 0; i < 2; i++) {
+        show[i] = have_weather && r[i].known && (mode == UI_AIR_SHOW_ALWAYS || (mode == UI_AIR_SHOW_HIGH && r[i].high));
+        ui_set_visible(idle_screen.weather_air_icon[i], show[i]);
+        ui_set_visible(idle_screen.weather_air[i], show[i]);
+        if (!show[i]) {
+            continue;
+        }
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", r[i].value);
+        ui_label_set_text(idle_screen.weather_air[i], buf);
+        lv_obj_set_style_text_color(idle_screen.weather_air_icon[i],
+                                    lv_color_hex(r[i].high ? r[i].color : UI_TINT_WEATHER), 0);
+    }
+    lv_obj_t *row = idle_screen.weather_air_row;
+    ui_set_visible(row, show[0] || show[1]);
+    if (show[0] || show[1]) {
+        lv_obj_update_layout(idle_screen.weather);
+        lv_obj_align_to(row, idle_screen.weather, LV_ALIGN_OUT_BOTTOM_MID, 0, UI_SPACE_XS);
+    }
+}
+
 // Polled: what's in progress changes every second, the weather every 15 min.
 static void idle_screen_refresh(void) {
     char buf[16];
@@ -822,6 +874,7 @@ static void idle_screen_refresh(void) {
         snprintf(range, sizeof(range), "H %d\xC2\xB0  L %d\xC2\xB0", wx.high, wx.low);
         ui_label_set_text(idle_screen.weather_range, range);
     }
+    weather_air_refresh(have_weather);
     ampm_place();
 }
 

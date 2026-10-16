@@ -106,6 +106,17 @@ typedef struct {
 } ui_weather_glance_t;
 bool ui_weather_glance(ui_weather_glance_t *out);
 
+// Air quality (US AQI) or UV now, for the clock face's chip and the weather
+// page.
+typedef struct {
+    bool known;
+    int value;            // the AQI, or the UV index rounded
+    const char *category; // "Moderate", "Very high"
+    bool high;            // at or past UI_AQI_HIGH / UI_UV_HIGH
+    uint32_t color;       // UI_COLOR_TEXT_DIM below that, then accent, danger past the next step
+} ui_air_reading_t;
+void ui_air_readings(ui_air_reading_t *aqi, ui_air_reading_t *uv);
+
 bool ui_tools_alerting(void);
 void ui_tools_dismiss(lv_obj_t *screen);
 

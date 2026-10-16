@@ -81,6 +81,7 @@ static void fill(ui_settings_t *out) {
         .bluetooth = s_settings.bluetooth,
         .airplay = s_settings.airplay,
         .airplay2_available = airplay_supports_airplay2(),
+        .air_show = s_settings.air_show,
         .tz_auto = !s_settings.tz[0],
         .free_internal_kb = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
         .free_psram_kb = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
@@ -136,6 +137,9 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
     case UI_SETTING_AIRPLAY:
         s_settings.airplay = (uint8_t)value;
         apply_airplay();
+        break;
+    case UI_SETTING_AIR_SHOW:
+        s_settings.air_show = (uint8_t)value;
         break;
     case UI_SETTING_LOCATION:
         // online.c persists the location itself.

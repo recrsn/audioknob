@@ -19,6 +19,7 @@ static const settings_t k_defaults = {
     .art_colors = true,
     .bluetooth = true,
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
+    .air_show = UI_AIR_SHOW_HIGH,
     .tz = "",
 };
 
@@ -55,6 +56,7 @@ void settings_load(settings_t *out) {
     out->art_colors = get_u8(nvs, "art_colors", k_defaults.art_colors);
     out->bluetooth = get_u8(nvs, "bluetooth", k_defaults.bluetooth);
     out->airplay = get_u8(nvs, "airplay", k_defaults.airplay);
+    out->air_show = get_u8(nvs, "air_show", k_defaults.air_show);
     size_t len = sizeof(out->tz);
     if (nvs_get_str(nvs, "tz", out->tz, &len) != ESP_OK) {
         out->tz[0] = '\0';
@@ -76,6 +78,7 @@ void settings_save(const settings_t *s) {
     nvs_set_u8(nvs, "art_colors", s->art_colors);
     nvs_set_u8(nvs, "bluetooth", s->bluetooth);
     nvs_set_u8(nvs, "airplay", s->airplay);
+    nvs_set_u8(nvs, "air_show", s->air_show);
     nvs_set_str(nvs, "tz", s->tz);
     nvs_commit(nvs);
     nvs_close(nvs);

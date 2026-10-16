@@ -40,6 +40,10 @@ static bool parse(const cJSON *root, ui_weather_t *out) {
     out->is_day = number_of(current, "is_day") != 0;
     out->high_c = (float)number_at(cJSON_GetObjectItem(daily, "temperature_2m_max"), 0);
     out->low_c = (float)number_at(cJSON_GetObjectItem(daily, "temperature_2m_min"), 0);
+    const cJSON *uv = cJSON_GetObjectItem(current, "uv_index");
+    out->has_uv = cJSON_IsNumber(uv);
+    out->uv = (float)number_of(current, "uv_index");
+    out->uv_max = (float)number_at(cJSON_GetObjectItem(daily, "uv_index_max"), 0);
 
     // Times are local ISO 8601 ("2026-10-06T21:00"), so they compare as
     // strings and the hour is at a fixed offset.
@@ -65,8 +69,8 @@ bool weather_fetch(double lat, double lon, ui_weather_t *out, char *buf, int cap
     char url[384];
     snprintf(url, sizeof(url),
              "https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f"
-             "&current=temperature_2m,weather_code,is_day&hourly=temperature_2m,weather_code,is_day"
-             "&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=2&forecast_hours=%d",
+             "&current=temperature_2m,weather_code,is_day,uv_index&hourly=temperature_2m,weather_code,is_day"
+             "&daily=temperature_2m_max,temperature_2m_min,uv_index_max&timezone=auto&forecast_days=2&forecast_hours=%d",
              lat, lon, FORECAST_HOURS);
     if (http_get(url, buf, cap) < 0) {
         return false;
@@ -77,5 +81,30 @@ bool weather_fetch(double lat, double lon, ui_weather_t *out, char *buf, int cap
     if (!ok) {
         ESP_LOGW(TAG, "unexpected forecast response");
     }
+    return ok;
+}
+
+bool air_quality_fetch(double lat, double lon, ui_weather_t *out, char *buf, int cap) {
+    char url[192];
+    snprintf(url, sizeof(url),
+             "https://air-quality-api.open-meteo.com/v1/air-quality?latitude=%.4f&longitude=%.4f"
+             "&current=us_aqi,pm2_5",
+             lat, lon);
+    if (http_get(url, buf, cap) < 0) {
+        return false;
+    }
+    cJSON *root = cJSON_Parse(buf);
+    const cJSON *current = cJSON_GetObjectItem(root, "current");
+    const cJSON *aqi = cJSON_GetObjectItem(current, "us_aqi");
+    // Null where the model has no coverage yet.
+    bool ok = cJSON_IsNumber(aqi);
+    if (ok) {
+        out->has_aqi = true;
+        out->aqi = (uint16_t)(aqi->valueint < 0 ? 0 : aqi->valueint);
+        out->pm2_5 = (float)number_of(current, "pm2_5");
+    } else {
+        ESP_LOGW(TAG, "unexpected air quality response");
+    }
+    cJSON_Delete(root);
     return ok;
 }

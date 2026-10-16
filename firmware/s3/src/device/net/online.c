@@ -191,6 +191,9 @@ static void online_task(void *arg) {
             ui_weather_t w = {.valid = true};
             snprintf(w.place, sizeof(w.place), "%s", geo.city);
             if (weather_fetch(geo.lat, geo.lon, &w, buf, BODY_CAP)) {
+                // Optional: without it the forecast still shows, and the next
+                // refresh tries again.
+                air_quality_fetch(geo.lat, geo.lon, &w, buf, BODY_CAP);
                 set_weather(&w);
                 weather_for = version;
                 weather_due = now + WEATHER_REFRESH_S;

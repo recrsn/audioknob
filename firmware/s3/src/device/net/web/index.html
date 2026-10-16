@@ -67,6 +67,7 @@ progress{-webkit-appearance:none;appearance:none;width:100%;height:6px;border:0;
 progress::-webkit-progress-bar{background:var(--line)}
 progress::-webkit-progress-value{background:var(--accent);transition:width .3s}
 progress::-moz-progress-bar{background:var(--accent)}
+.val.high{color:var(--accent)}.val.danger{color:var(--err)}
 .btn.ghost{background:none;color:var(--accent);padding:0 4px;align-self:flex-start}
 #locresults{display:flex;flex-direction:column}
 #locresults button{display:flex;flex-direction:column;align-items:flex-start;border:0;border-top:1px solid var(--line);background:none;color:var(--text);padding:10px 4px;font-size:16px;text-align:left}
@@ -116,6 +117,13 @@ progress::-moz-progress-bar{background:var(--accent)}
 <section class="card">
   <div class="row"><span>Clock</span><div class="seg" id="clock24"><button data-v="0">12-hour</button><button data-v="1">24-hour</button></div></div>
   <div class="row"><span>Units</span><div class="seg" id="fahrenheit"><button data-v="0">°C</button><button data-v="1">°F</button></div></div>
+  <div class="row" id="wxrow"><span>Now</span><span class="val" id="wxnow"></span></div>
+  <div class="row"><span>Air quality</span><span class="val" id="aqi"></span></div>
+  <div class="row"><span>UV index</span><span class="val" id="uv"></span></div>
+  <div class="row col">
+    <div class="inline split"><span>Show air quality</span><div class="seg" id="airShow"><button data-v="0">Off</button><button data-v="1">When high</button><button data-v="2">Always</button></div></div>
+    <p class="hint">Air quality and UV on the clock face, beside the weather.</p>
+  </div>
   <div class="row col">
     <div class="inline split"><span>Location</span><span class="val" id="loc"></span></div>
     <form class="inline" id="locform"><input type="text" id="locq" placeholder="Search for a city" autocomplete="off"><button class="btn">Search</button></form>
@@ -246,6 +254,35 @@ function renderNowPlaying(np) {
   }
 }
 
+// Same categories and thresholds as the device (ui_weather.c, ui.h).
+const AQI_LEVELS = [[50, "Good"], [100, "Moderate"], [150, "Unhealthy for sensitive groups"], [200, "Unhealthy"], [300, "Very unhealthy"], [Infinity, "Hazardous"]];
+const UV_LEVELS = [[2, "Low"], [5, "Moderate"], [7, "High"], [10, "Very high"], [Infinity, "Extreme"]];
+const category = (levels, v) => levels.find(([max]) => v <= max)[1];
+
+function setReading(id, text, high, danger) {
+  setText(id, text);
+  $(id).className = "val" + (danger ? " danger" : high ? " high" : "");
+}
+
+function renderWeather(w, fahrenheit) {
+  if (!w) {
+    setText("wxnow", "—");
+    setReading("aqi", "—");
+    setReading("uv", "—");
+    return;
+  }
+  const t = Math.round(fahrenheit ? w.tempC * 9 / 5 + 32 : w.tempC);
+  setText("wxnow", `${t}°${fahrenheit ? "F" : "C"}` + (w.place ? ` · ${w.place}` : ""));
+  if (w.aqi === undefined) setReading("aqi", "—");
+  else setReading("aqi", `${w.aqi} ${category(AQI_LEVELS, w.aqi)} · PM2.5 ${Math.round(w.pm25)} µg/m³`, w.aqi >= 100, w.aqi > 150);
+  if (w.uv === undefined) {
+    setReading("uv", "—");
+  } else {
+    const uv = Math.round(w.uv), peak = Math.round(w.uvMax);
+    setReading("uv", `${uv} ${category(UV_LEVELS, uv)}` + (peak > uv ? ` · peak ${peak}` : ""), uv >= 6, uv >= 8);
+  }
+}
+
 function render(s) {
   setText("name", s.name);
   document.title = s.name;
@@ -258,6 +295,8 @@ function render(s) {
   $("haptics").checked = s.haptics;
   setSeg("clock24", s.clock24);
   setSeg("fahrenheit", s.fahrenheit);
+  setSeg("airShow", s.airShow);
+  renderWeather(s.weather, s.fahrenheit);
   setText("loc", s.locationAuto ? (s.location ? `Automatic (${s.location})` : "Automatic") : s.location);
   $("locauto").hidden = s.locationAuto;
   if (zonesLoaded) $("tz").value = s.tzAuto ? "" : s.tz;
@@ -363,7 +402,7 @@ $("brightness").addEventListener("input", e => setText("brightval", e.target.val
 $("sleep").onchange = e => set("sleep", e.target.value);
 $("artColors").onchange = e => set("artColors", +e.target.checked);
 $("haptics").onchange = e => set("haptics", +e.target.checked);
-for (const id of ["clock24", "fahrenheit"]) {
+for (const id of ["clock24", "fahrenheit", "airShow"]) {
   $(id).onclick = e => {
     const v = e.target.dataset.v;
     if (v === undefined) return;

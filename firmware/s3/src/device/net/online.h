@@ -7,7 +7,8 @@
 #include "ui.h"
 
 // Background task for the internet-backed features: locates the device by IP
-// (for the timezone and the forecast), then keeps the weather fresh.
+// (for the timezone and the forecast), then keeps the weather, UV and air
+// quality fresh.
 // Producers only: callers poll the getters, per spec.md's decoupling.
 
 void online_start(void);

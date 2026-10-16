@@ -5,10 +5,11 @@
 #include <string.h>
 
 #define WX_TITLE_Y    UI_TITLE_TOP_Y
-#define WX_NOW_Y      (-52)
-#define WX_SKY_Y      (-2)
-#define WX_RANGE_Y    20
-#define WX_HOURS_Y    74
+#define WX_NOW_Y      (-60)
+#define WX_SKY_Y      (-10)
+#define WX_RANGE_Y    12
+#define WX_AIR_Y      38
+#define WX_HOURS_Y    90
 #define WX_HOUR_W     52
 #define WX_HOUR_GAP   UI_SPACE_S
 
@@ -19,6 +20,13 @@ static struct {
     lv_obj_t *temp;
     lv_obj_t *sky;
     lv_obj_t *range;
+    lv_obj_t *air_row;
+    struct {
+        lv_obj_t *group;
+        lv_obj_t *icon;
+        lv_obj_t *value;
+        lv_obj_t *category;
+    } air[2]; // air quality, UV
     lv_obj_t *hours_row;
     lv_obj_t *hour_time[UI_WEATHER_HOURS];
     lv_obj_t *hour_icon[UI_WEATHER_HOURS];
@@ -76,6 +84,33 @@ static const char *sky_icon(uint8_t code, bool is_day) {
     return ICON_RAIN;
 }
 
+// US AQI categories (EPA), shortened to fit a chip.
+static const char *aqi_category(int aqi) {
+    return aqi <= 50 ? "Good" : aqi <= 100 ? "Moderate" : aqi <= 150 ? "Sensitive groups" : aqi <= 200 ? "Unhealthy"
+         : aqi <= 300 ? "Very unhealthy" : "Hazardous";
+}
+
+// WHO UV index categories.
+static const char *uv_category(int uv) {
+    return uv <= 2 ? "Low" : uv <= 5 ? "Moderate" : uv <= 7 ? "High" : uv <= 10 ? "Very high" : "Extreme";
+}
+
+// Accent from the threshold, danger from the category after it (Unhealthy,
+// Very high).
+static void reading_fill(ui_air_reading_t *out, bool known, int value, int high_from, int danger_from,
+                         const char *category) {
+    *out = (ui_air_reading_t){.known = known, .value = value, .category = category};
+    out->high = known && value >= high_from;
+    out->color = !out->high ? UI_COLOR_TEXT_DIM : value >= danger_from ? UI_COLOR_DANGER : UI_COLOR_ACCENT;
+}
+
+void ui_air_readings(ui_air_reading_t *aqi, ui_air_reading_t *uv) {
+    const ui_weather_t *w = &wx.data;
+    int uv_now = (int)lroundf(w->uv);
+    reading_fill(aqi, w->valid && w->has_aqi, w->aqi, UI_AQI_HIGH, 151, aqi_category(w->aqi));
+    reading_fill(uv, w->valid && w->has_uv, uv_now, UI_UV_HIGH, 8, uv_category(uv_now));
+}
+
 static int display_temp(float c) {
     return (int)lroundf(ui_settings_current()->fahrenheit ? c * 9.0f / 5.0f + 32.0f : c);
 }
@@ -88,6 +123,23 @@ static void format_hour(uint8_t hour, char *out, size_t len) {
     }
 }
 
+static void render_air(void) {
+    ui_air_reading_t r[2];
+    ui_air_readings(&r[0], &r[1]);
+    char buf[24];
+    for (int i = 0; i < 2; i++) {
+        ui_set_visible(wx.air[i].group, r[i].known);
+        if (!r[i].known) {
+            continue;
+        }
+        snprintf(buf, sizeof(buf), i == 0 ? "AQI %d" : "UV %d", r[i].value);
+        ui_label_set_text(wx.air[i].value, buf);
+        ui_label_set_text(wx.air[i].category, r[i].category);
+        lv_color_t color = lv_color_hex(r[i].high ? r[i].color : UI_COLOR_TEXT_DIM);
+        lv_obj_set_style_text_color(wx.air[i].category, color, 0);
+    }
+}
+
 static void render(void) {
     const ui_weather_t *w = &wx.data;
     wx.rendered_fahrenheit = ui_settings_current()->fahrenheit;
@@ -97,6 +149,7 @@ static void render(void) {
     ui_set_visible(wx.sky, w->valid);
     ui_set_visible(wx.range, w->valid);
     ui_set_visible(wx.hours_row, w->valid);
+    ui_set_visible(wx.air_row, w->valid && (w->has_aqi || w->has_uv));
     ui_set_visible(wx.status, !w->valid);
 
     char buf[48];
@@ -123,6 +176,8 @@ static void render(void) {
     ui_label_set_text(wx.sky, sky_text(w->code));
     snprintf(buf, sizeof(buf), "H %d\xC2\xB0   L %d\xC2\xB0", display_temp(w->high_c), display_temp(w->low_c));
     ui_label_set_text(wx.range, buf);
+
+    render_air();
 
     for (int i = 0; i < UI_WEATHER_HOURS; i++) {
         format_hour(w->hours[i].hour, buf, sizeof(buf));
@@ -192,6 +247,17 @@ void weather_page_build(lv_obj_t *screen) {
     lv_obj_align(wx.sky, LV_ALIGN_CENTER, 0, WX_SKY_Y);
     wx.range = label_create(screen, UI_FONT_BODY, UI_COLOR_TEXT_DIM);
     lv_obj_align(wx.range, LV_ALIGN_CENTER, 0, WX_RANGE_Y);
+
+    wx.air_row = row_create(screen, LV_FLEX_FLOW_ROW, UI_SPACE_L, WX_AIR_Y);
+    static const char *const k_air_icons[2] = {ICON_AIR, ICON_UV};
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *group = row_create(wx.air_row, LV_FLEX_FLOW_ROW, UI_SPACE_XS, 0);
+        wx.air[i].group = group;
+        wx.air[i].icon = label_create(group, UI_FONT_ICON_SM, UI_TINT_WEATHER);
+        ui_label_set_text(wx.air[i].icon, k_air_icons[i]);
+        wx.air[i].value = label_create(group, UI_FONT_LABEL, UI_COLOR_TEXT);
+        wx.air[i].category = label_create(group, UI_FONT_BODY, UI_COLOR_TEXT_DIM);
+    }
 
     wx.hours_row = row_create(screen, LV_FLEX_FLOW_ROW, WX_HOUR_GAP, WX_HOURS_Y);
     for (int i = 0; i < UI_WEATHER_HOURS; i++) {

@@ -156,7 +156,19 @@ typedef struct {
         uint8_t code;
         bool is_day;
     } hours[UI_WEATHER_HOURS];
+    // From Open-Meteo's air quality API, fetched after the forecast; a
+    // failure there leaves has_aqi false and the forecast still valid.
+    bool has_aqi;
+    uint16_t aqi; // US AQI, 0-500
+    float pm2_5;  // ug/m3
+    bool has_uv;
+    float uv;     // now
+    float uv_max; // today's peak
 } ui_weather_t;
+
+// Past these the clock face shows air quality / UV under "When high".
+#define UI_AQI_HIGH 100
+#define UI_UV_HIGH  6
 
 // Pushes the weather page's data; call when it changes, not every poll.
 void ui_update_weather(const ui_weather_t *weather);
@@ -193,6 +205,7 @@ typedef struct {
     bool bluetooth;
     uint8_t airplay;   // UI_AIRPLAY_* mask; 0 = off
     bool airplay2_available; // else only UI_AIRPLAY_1 means anything
+    uint8_t air_show;  // ui_air_show_t: the clock face's air quality/UV chip
     bool tz_auto;      // following the location's zone
     bool location_auto; // following the IP-detected location
     char location[32]; // city in effect; "" while still unknown
@@ -205,6 +218,12 @@ typedef struct {
     uint32_t free_internal_kb;
     uint32_t free_psram_kb;
 } ui_settings_t;
+
+typedef enum {
+    UI_AIR_SHOW_OFF,
+    UI_AIR_SHOW_HIGH, // only past UI_AQI_HIGH / UI_UV_HIGH
+    UI_AIR_SHOW_ALWAYS,
+} ui_air_show_t;
 
 // Pushes the settings page's values; cheap to call every poll.
 void ui_update_settings(const ui_settings_t *settings);
@@ -221,6 +240,7 @@ typedef enum {
     UI_SETTING_SLEEP,      // value: seconds, 0-UI_SLEEP_MAX_S; 0 = never
     UI_SETTING_LOCATION,   // back to the IP-detected one; picking one is the web page's
     UI_SETTING_ART_COLORS, // value: 0/1
+    UI_SETTING_AIR_SHOW,   // value: ui_air_show_t
 } ui_setting_t;
 
 #define UI_AIRPLAY_1 (1u << 0)

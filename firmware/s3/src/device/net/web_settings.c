@@ -14,6 +14,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "now_playing.h"
+#include "online.h"
 #include "ota.h"
 #include "settings_ui.h"
 #include "tz.h"
@@ -100,6 +101,26 @@ static cJSON *update_json(void) {
     return update;
 }
 
+// Celsius; the page converts per the units setting. Missing values are null.
+static cJSON *weather_json(void) {
+    ui_weather_t w;
+    if (!online_get_weather(&w) || !w.valid) {
+        return cJSON_CreateNull();
+    }
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "place", w.place);
+    cJSON_AddNumberToObject(json, "tempC", w.temp_c);
+    if (w.has_aqi) {
+        cJSON_AddNumberToObject(json, "aqi", w.aqi);
+        cJSON_AddNumberToObject(json, "pm25", w.pm2_5);
+    }
+    if (w.has_uv) {
+        cJSON_AddNumberToObject(json, "uv", w.uv);
+        cJSON_AddNumberToObject(json, "uvMax", w.uv_max);
+    }
+    return json;
+}
+
 static esp_err_t state_handler(httpd_req_t *req) {
     ui_settings_t s;
     settings_ui_snapshot(&s);
@@ -122,12 +143,14 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddBoolToObject(json, "artColors", s.art_colors);
     cJSON_AddBoolToObject(json, "bluetooth", s.bluetooth);
     cJSON_AddNumberToObject(json, "airplay", s.airplay);
+    cJSON_AddNumberToObject(json, "airShow", s.air_show);
     cJSON_AddBoolToObject(json, "airplay2", s.airplay2_available);
     cJSON_AddBoolToObject(json, "tzAuto", s.tz_auto);
     cJSON_AddStringToObject(json, "tz", s.tz_name);
     cJSON_AddBoolToObject(json, "locationAuto", s.location_auto);
     cJSON_AddStringToObject(json, "location", s.location);
     cJSON_AddItemToObject(json, "np", now_playing_json());
+    cJSON_AddItemToObject(json, "weather", weather_json());
     cJSON_AddItemToObject(json, "update", update_json());
     // null while Bluetooth is off or the ESP32 isn't answering.
     pairing_status_t pairing;
@@ -252,6 +275,7 @@ static esp_err_t set_handler(httpd_req_t *req) {
         {"artColors", UI_SETTING_ART_COLORS, 0, 1},
         {"bluetooth", UI_SETTING_BLUETOOTH, 0, 1},
         {"airplay", UI_SETTING_AIRPLAY, 0, UI_AIRPLAY_1 | UI_AIRPLAY_2},
+        {"airShow", UI_SETTING_AIR_SHOW, UI_AIR_SHOW_OFF, UI_AIR_SHOW_ALWAYS},
     };
     char form[FORM_MAX + 1], key[16], value[48];
     if (!read_post(req, form, sizeof(form))) {
