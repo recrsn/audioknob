@@ -38,6 +38,9 @@ static ui_settings_t s_settings = {
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .airplay2_available = true,
     .air_show = UI_AIR_SHOW_HIGH,
+    .ambience_sound = UI_AMBIENCE_RAIN,
+    .ambience_volume = 40,
+    .focus_sound = UI_AMBIENCE_RAIN + 1,
     .tz_auto = true,
     .location = "Lisbon",
     .device_name = "AudioKnob-K7MXQ2PA",
@@ -108,8 +111,29 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
     case UI_SETTING_AIR_SHOW:
         s_settings.air_show = (uint8_t)value;
         break;
+    case UI_SETTING_AMBIENCE_SOUND:
+        s_settings.ambience_sound = (uint8_t)value;
+        break;
+    case UI_SETTING_AMBIENCE_VOLUME:
+        s_settings.ambience_volume = (uint8_t)value;
+        break;
+    case UI_SETTING_FOCUS_SOUND:
+        s_settings.focus_sound = (uint8_t)value;
+        break;
     }
     ui_update_settings(&s_settings);
+}
+
+// Ambient sound makes no noise here: playing is only the state the device
+// would push back.
+static void on_ambience_play(ui_ambience_t kind) {
+    printf("ambience: play %d\n", kind);
+    ui_update_ambience(true, kind);
+}
+
+static void on_ambience_stop(void) {
+    printf("ambience: stop\n");
+    ui_update_ambience(false, UI_AMBIENCE_BROWN);
 }
 
 // Stands in for the ESP32's pairing state machine so the prompt can be laid
@@ -409,6 +433,7 @@ int main(void) {
     host_zone(s_settings.tz_name, sizeof(s_settings.tz_name));
     ui_update_settings(&s_settings);
     ui_set_settings_handler(on_setting);
+    ui_set_ambience_handler(&(ui_ambience_handler_t){.play = on_ambience_play, .stop = on_ambience_stop});
 #ifdef AK_LIGHTS
     lights_ui_start();
 #endif

@@ -63,6 +63,7 @@ typedef enum {
 #endif
     UI_APP_TIMER,
     UI_APP_TOMATO,
+    UI_APP_AMBIENCE,
     UI_APP_STOPWATCH,
     UI_APP_WEATHER,
     UI_APP_SETTINGS,
@@ -83,6 +84,25 @@ void ui_tools_build(lv_obj_t *const screens[UI_APP_COUNT], void (*on_alert)(lv_o
 
 // The last settings pushed by ui_update_settings() (clock format, units).
 const ui_settings_t *ui_settings_current(void);
+// A change from outside the Settings page, through the same handler.
+void ui_settings_change(ui_setting_t setting, int value);
+
+// Ambient sound (ui_ambience.c), shared by its page, the Pomodoro and the
+// now-playing row. What plays is as last pushed, or as last asked for.
+const char *ui_ambience_name(ui_ambience_t kind);
+// focus: the Pomodoro started it, and stops it at the break.
+bool ui_ambience_playing(ui_ambience_t *kind, bool *focus);
+void ui_ambience_play(ui_ambience_t kind, bool focus);
+void ui_ambience_stop(void);
+// The knob as its volume while it plays; false when it isn't playing.
+bool ui_ambience_knob(int steps);
+
+// For ui_ambience.c: what's playing changed, so the now-playing row and
+// audio chip need redrawing.
+void ui_audio_changed(void);
+// A Bluetooth or AirPlay stream is playing (the Pomodoro won't start a
+// focus sound over one).
+bool ui_stream_playing(void);
 
 // Counts as user activity and lights a sleeping display; true if it was
 // asleep. For whatever must be seen at once (an alert, a pairing request).

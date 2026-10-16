@@ -8,6 +8,7 @@
 #include "device_name.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "focus_sound.h"
 #include "haptic.h"
 #include "knob.h"
 #include "lcd_driver.h"
@@ -86,6 +87,10 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
         now_playing_peer_name(track.peer, sizeof(track.peer));
         ui_update_wireless(&state, &track);
     }
+
+    ambience_kind_t kind;
+    bool ambience = focus_sound_playing(&kind);
+    ui_update_ambience(ambience, (ui_ambience_t)kind);
 
     static uint32_t weather_version;
     ui_weather_t weather;
@@ -174,6 +179,12 @@ static void on_alert(bool ringing) {
     }
 }
 
+_Static_assert((int)UI_AMBIENCE_COUNT == (int)AMBIENCE_COUNT, "ui_ambience_t mirrors ambience_kind_t");
+
+static void on_ambience_play(ui_ambience_t kind) {
+    focus_sound_play((ambience_kind_t)kind);
+}
+
 static void on_network_up(const uint8_t mac[6]) {
     airplay_network_up(mac);
     online_network_up();
@@ -200,6 +211,7 @@ void app_main(void) {
     airplay_init();
     // Past boot strapping, so GPIO0 (CH445P select) is safe to drive now.
     audio_source_init(airplay_preempt);
+    focus_sound_init();
 
     lcd_driver_init();
     haptic_init(lcd_driver_i2c_bus());
@@ -214,6 +226,7 @@ void app_main(void) {
     ui_set_firmware_handler(on_firmware);
     ui_set_alert_handler(on_alert);
     ui_set_display_handler(lcd_driver_set_backlight_on);
+    ui_set_ambience_handler(&(ui_ambience_handler_t){.play = on_ambience_play, .stop = focus_sound_stop});
     lv_indev_add_event_cb(lcd_driver_touch_indev(), on_touch_clicked, LV_EVENT_CLICKED, NULL);
     settings_ui_start();
 #ifdef AK_LIGHTS

@@ -48,6 +48,32 @@ typedef enum {
     UI_SOURCE_BLUETOOTH,
 } ui_source_t;
 
+// Ambient sounds generated on the device, for focus or on their own. In
+// the order the pickers show them.
+typedef enum {
+    UI_AMBIENCE_BROWN,
+    UI_AMBIENCE_PINK,
+    UI_AMBIENCE_RAIN,
+    UI_AMBIENCE_OCEAN,
+    UI_AMBIENCE_FOREST,
+    UI_AMBIENCE_COUNT,
+} ui_ambience_t;
+
+// Pushes whether an ambient sound is playing, and which. Cheap to call
+// every poll. Volume and the default sound are settings (ui_settings_t).
+void ui_update_ambience(bool playing, ui_ambience_t kind);
+
+typedef struct {
+    void (*play)(ui_ambience_t kind); // fades in, or over from the one playing
+    void (*stop)(void);               // fades out
+} ui_ambience_handler_t;
+
+// Called on the LVGL task from the Ambience page, the Pomodoro's focus
+// blocks and the now-playing row; must not block. Playing takes the DAC
+// from whatever was playing; a stream that starts later stops it, which
+// shows in the next ui_update_ambience().
+void ui_set_ambience_handler(const ui_ambience_handler_t *handler);
+
 // Pushes the ESP32's Bluetooth pairing status, or NULL while there is none
 // (Bluetooth off, ESP32 not answering). Cheap to call every poll. Anything
 // past PAIRING_IDLE shows a prompt over whatever screen is up.
@@ -208,6 +234,9 @@ typedef struct {
     uint8_t air_show;  // ui_air_show_t: the clock face's air quality/UV chip
     bool tz_auto;      // following the location's zone
     bool location_auto; // following the IP-detected location
+    uint8_t ambience_sound;  // ui_ambience_t the Ambience page starts on
+    uint8_t ambience_volume; // 0-100
+    uint8_t focus_sound;     // played during Pomodoro focus: ui_ambience_t + 1, 0 = none
     char location[32]; // city in effect; "" while still unknown
     char tz_name[40];  // zone in effect; "" while still unknown
     char device_name[33];
@@ -241,6 +270,9 @@ typedef enum {
     UI_SETTING_LOCATION,   // back to the IP-detected one; picking one is the web page's
     UI_SETTING_ART_COLORS, // value: 0/1
     UI_SETTING_AIR_SHOW,   // value: ui_air_show_t
+    UI_SETTING_AMBIENCE_SOUND,  // value: ui_ambience_t
+    UI_SETTING_AMBIENCE_VOLUME, // value: 0-100
+    UI_SETTING_FOCUS_SOUND,     // value: ui_ambience_t + 1, or 0 for none
 } ui_setting_t;
 
 #define UI_AIRPLAY_1 (1u << 0)

@@ -25,11 +25,12 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static audio_source_t s_active = AUDIO_SOURCE_ESP32;
 static bool s_esp32_was_playing;
 static void (*s_on_airplay_preempted)(void);
+static void (*s_on_local_preempted)(void);
 
 // Caller holds s_lock, so the GPIO level can never disagree with s_active.
 static void select_locked(audio_source_t source) {
     s_active = source;
-    gpio_set_level(PIN_I2S_SWITCH, source == AUDIO_SOURCE_AIRPLAY ? SWITCH_LEVEL_S3 : SWITCH_LEVEL_ESP32);
+    gpio_set_level(PIN_I2S_SWITCH, source == AUDIO_SOURCE_ESP32 ? SWITCH_LEVEL_ESP32 : SWITCH_LEVEL_S3);
 }
 
 // Only a rising edge of A2DP playback counts as "started": when AirPlay
@@ -45,13 +46,16 @@ static void esp32_watch(void) {
     }
 
     taskENTER_CRITICAL(&s_lock);
-    bool preempted = s_active == AUDIO_SOURCE_AIRPLAY;
+    audio_source_t was = s_active;
     select_locked(AUDIO_SOURCE_ESP32);
     taskEXIT_CRITICAL(&s_lock);
 
-    if (preempted) {
+    if (was == AUDIO_SOURCE_AIRPLAY) {
         ESP_LOGI(TAG, "A2DP started: taking the DAC back from AirPlay");
         s_on_airplay_preempted();
+    } else if (was == AUDIO_SOURCE_LOCAL && s_on_local_preempted) {
+        ESP_LOGI(TAG, "A2DP started: taking the DAC from local audio");
+        s_on_local_preempted();
     }
 }
 
@@ -82,12 +86,7 @@ void audio_source_init(void (*on_airplay_preempted)(void)) {
     ESP_ERROR_CHECK(ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }
 
-void audio_source_claim_airplay(void) {
-    taskENTER_CRITICAL(&s_lock);
-    select_locked(AUDIO_SOURCE_AIRPLAY);
-    taskEXIT_CRITICAL(&s_lock);
-    ESP_LOGI(TAG, "AirPlay has the DAC");
-
+static void pause_a2dp(void) {
     wireless_state_t esp32;
     if (uart_link_get_latest(&esp32) && esp32.connected && esp32.playing) {
         ESP_LOGI(TAG, "pausing A2DP");
@@ -95,9 +94,47 @@ void audio_source_claim_airplay(void) {
     }
 }
 
+void audio_source_claim_airplay(void) {
+    taskENTER_CRITICAL(&s_lock);
+    bool local = s_active == AUDIO_SOURCE_LOCAL;
+    select_locked(AUDIO_SOURCE_AIRPLAY);
+    taskEXIT_CRITICAL(&s_lock);
+    ESP_LOGI(TAG, "AirPlay has the DAC");
+
+    if (local && s_on_local_preempted) {
+        s_on_local_preempted();
+    }
+    pause_a2dp();
+}
+
 void audio_source_release_airplay(void) {
     taskENTER_CRITICAL(&s_lock);
     if (s_active == AUDIO_SOURCE_AIRPLAY) {
+        select_locked(AUDIO_SOURCE_ESP32);
+    }
+    taskEXIT_CRITICAL(&s_lock);
+}
+
+void audio_source_set_local_preempted(void (*on_preempted)(void)) {
+    s_on_local_preempted = on_preempted;
+}
+
+void audio_source_claim_local(void) {
+    taskENTER_CRITICAL(&s_lock);
+    bool airplay = s_active == AUDIO_SOURCE_AIRPLAY;
+    select_locked(AUDIO_SOURCE_LOCAL);
+    taskEXIT_CRITICAL(&s_lock);
+    ESP_LOGI(TAG, "local audio has the DAC");
+
+    if (airplay) {
+        s_on_airplay_preempted();
+    }
+    pause_a2dp();
+}
+
+void audio_source_release_local(void) {
+    taskENTER_CRITICAL(&s_lock);
+    if (s_active == AUDIO_SOURCE_LOCAL) {
         select_locked(AUDIO_SOURCE_ESP32);
     }
     taskEXIT_CRITICAL(&s_lock);

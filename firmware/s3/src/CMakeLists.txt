@@ -44,7 +44,7 @@ idf_build_set_property(COMPILE_OPTIONS "-I${CMAKE_SOURCE_DIR}/include" APPEND)
 
 # Sources include each other by bare file name, so every directory is on the
 # include path.
-set(AK_DIRS ui ui/assets device/core device/drivers device/net device/airplay device/airplay/shared)
+set(AK_DIRS ui ui/assets device/core device/drivers device/net device/airplay device/airplay/shared device/ambience)
 set(AK_INCLUDE_DIRS ${AK_DIRS})
 set(AK_SRCS "")
 foreach(dir ${AK_DIRS})

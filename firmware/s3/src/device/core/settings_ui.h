@@ -6,7 +6,7 @@
 #include "ui.h"
 
 // Applies the user's settings (backlight, timezone, Bluetooth, AirPlay
-// versions) and connects them to the Settings page: loads them from NVS,
+// versions, ambience volume) and connects them to the Settings page: loads them from NVS,
 // handles changes from the UI, persists them, follows the
 // location's timezone while that's on "automatic", and pushes values (including
 // WiFi/memory info) back to the page.

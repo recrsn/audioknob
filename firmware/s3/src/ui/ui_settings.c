@@ -182,6 +182,10 @@ static void emit(ui_setting_t setting, int value, const char *zone) {
     }
 }
 
+void ui_settings_change(ui_setting_t setting, int value) {
+    emit(setting, value, NULL);
+}
+
 static bool row_visible(int row) {
     // Without the AirPlay 2 receiver, the AirPlay 1 switch is all there is.
     return row != ROW_AIRPLAY2 || s_settings.airplay2_available;

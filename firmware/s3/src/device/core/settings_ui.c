@@ -9,6 +9,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "focus_sound.h"
 #include "lcd_driver.h"
 #include "lvgl.h"
 #include "online.h"
@@ -82,6 +83,9 @@ static void fill(ui_settings_t *out) {
         .airplay = s_settings.airplay,
         .airplay2_available = airplay_supports_airplay2(),
         .air_show = s_settings.air_show,
+        .ambience_sound = s_settings.ambience_sound,
+        .ambience_volume = s_settings.ambience_volume,
+        .focus_sound = s_settings.focus_sound,
         .tz_auto = !s_settings.tz[0],
         .free_internal_kb = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
         .free_psram_kb = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
@@ -141,6 +145,16 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
     case UI_SETTING_AIR_SHOW:
         s_settings.air_show = (uint8_t)value;
         break;
+    case UI_SETTING_AMBIENCE_SOUND:
+        s_settings.ambience_sound = (uint8_t)value;
+        break;
+    case UI_SETTING_AMBIENCE_VOLUME:
+        s_settings.ambience_volume = (uint8_t)value;
+        focus_sound_set_volume(s_settings.ambience_volume);
+        break;
+    case UI_SETTING_FOCUS_SOUND:
+        s_settings.focus_sound = (uint8_t)value;
+        break;
     case UI_SETTING_LOCATION:
         // online.c persists the location itself.
         online_set_location(NULL);
@@ -172,6 +186,7 @@ void settings_ui_init(void) {
     apply_timezone();
     uart_link_set_bluetooth(s_settings.bluetooth);
     apply_airplay();
+    focus_sound_set_volume(s_settings.ambience_volume);
     const esp_timer_create_args_t args = {.callback = save_cb, .name = "settings_save"};
     ESP_ERROR_CHECK(esp_timer_create(&args, &s_save_timer));
 }

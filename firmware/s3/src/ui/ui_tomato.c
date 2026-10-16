@@ -2,11 +2,13 @@
 
 // Pomodoro: focus, short break, repeat; every TOMATO_SETS-th focus earns a long
 // break instead. Each phase rings at its end and waits for a press to start
-// the next one, so a break never begins while you're still away.
+// the next one, so a break never begins while you're still away. A focus
+// sound picked here plays while a focus block runs and fades out with it.
 
 #define TOMATO_SETS       4
 #define TOMATO_MAX_MIN    90
 #define TOMATO_DOT        8
+#define TOMATO_SOUND_Y    (-58)
 
 typedef enum {
     PHASE_FOCUS,
@@ -31,6 +33,10 @@ static struct {
     lv_obj_t *phase_label;
     lv_obj_t *start_icon;
     lv_obj_t *side_icon; // Skip while idle, Reset otherwise
+    lv_obj_t *sound_icon;
+    lv_obj_t *sound_label;
+    int sound_shown;  // the pick last drawn, -1 before any
+    bool sound_wanted; // a focus block with a sound picked is running
     phase_t phase;
     uint32_t minutes[PHASE_COUNT];
     uint32_t sessions; // focus sessions completed in this set
@@ -74,6 +80,77 @@ static void advance(void) {
     set_phase(next);
 }
 
+static uint8_t sound_pick(void) {
+    uint8_t pick = ui_settings_current()->focus_sound;
+    return pick <= UI_AMBIENCE_COUNT ? pick : 0;
+}
+
+static void sound_chip_refresh(void) {
+    int pick = sound_pick();
+    if (pick == tomato.sound_shown) {
+        return;
+    }
+    tomato.sound_shown = pick;
+    ui_label_set_text(tomato.sound_label, pick ? ui_ambience_name((ui_ambience_t)(pick - 1)) : "No sound");
+    lv_obj_set_style_text_color(tomato.sound_icon, lv_color_hex(pick ? UI_TINT_AMBIENCE : UI_COLOR_TEXT_FAINT), 0);
+    lv_obj_set_style_text_opa(tomato.sound_label, pick ? LV_OPA_COVER : UI_OPA_TEXT_MUTED, 0);
+}
+
+// Starts the sound as a focus block starts (or resumes) and stops it as the
+// block ends, pauses or is reset. It never starts over a stream that's
+// playing, nor takes over ambience started on its own page; `picked`
+// applies a new pick mid-block.
+static void sound_sync(bool picked) {
+    uint8_t pick = sound_pick();
+    bool want = tomato.phase == PHASE_FOCUS && tomato.cd.state == COUNTDOWN_RUNNING && pick;
+    bool started = want && !tomato.sound_wanted;
+    tomato.sound_wanted = want;
+
+    ui_ambience_t kind;
+    bool ours;
+    bool playing = ui_ambience_playing(&kind, &ours);
+    if (!want) {
+        if (ours) {
+            ui_ambience_stop();
+        }
+    } else if (started || picked ? ours || (!playing && !ui_stream_playing()) : ours && kind != pick - 1) {
+        ui_ambience_play((ui_ambience_t)(pick - 1), true);
+    }
+    sound_chip_refresh();
+}
+
+static void sound_chip_cb(lv_event_t *e) {
+    (void)e;
+    ui_settings_change(UI_SETTING_FOCUS_SOUND, (sound_pick() + 1) % (UI_AMBIENCE_COUNT + 1));
+    sound_sync(true);
+}
+
+static void sound_chip_create(lv_obj_t *screen) {
+    lv_obj_t *chip = lv_obj_create(screen);
+    lv_obj_remove_style_all(chip);
+    lv_obj_remove_flag(chip, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(chip, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(chip, LV_SIZE_CONTENT, UI_CHIP_H);
+    lv_obj_set_style_pad_hor(chip, UI_CHIP_PAD_X, 0);
+    lv_obj_set_style_pad_column(chip, UI_SPACE_XS, 0);
+    lv_obj_set_style_radius(chip, UI_RADIUS_PILL, 0);
+    lv_obj_set_style_bg_color(chip, lv_color_white(), 0);
+    lv_obj_set_style_bg_opa(chip, UI_OPA_GLASS, 0);
+    lv_obj_set_flex_flow(chip, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(chip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_ext_click_area(chip, UI_TOUCH_EXT);
+    lv_obj_add_event_cb(chip, sound_chip_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_align(chip, LV_ALIGN_CENTER, 0, TOMATO_SOUND_Y);
+
+    tomato.sound_icon = lv_label_create(chip);
+    lv_label_set_text(tomato.sound_icon, ICON_RAIN);
+    lv_obj_set_style_text_font(tomato.sound_icon, UI_FONT_ICON_SM, 0);
+    tomato.sound_label = lv_label_create(chip);
+    lv_obj_set_style_text_font(tomato.sound_label, UI_FONT_CAPTION, 0);
+    lv_obj_set_style_text_color(tomato.sound_label, lv_color_hex(UI_COLOR_TEXT), 0);
+    tomato.sound_shown = -1;
+}
+
 static void tomato_changed(countdown_t *cd) {
     const char *text = k_phases[tomato.phase].name;
     char buf[32];
@@ -86,6 +163,7 @@ static void tomato_changed(countdown_t *cd) {
     ui_label_set_text(tomato.phase_label, text);
     ui_label_set_text(tomato.start_icon, countdown_play_symbol(cd));
     ui_label_set_text(tomato.side_icon, cd->state == COUNTDOWN_IDLE ? "Skip" : "Reset");
+    sound_sync(false);
 }
 
 // Only a phase that ran out counts toward the long break; skipped ones don't.
@@ -102,7 +180,9 @@ static void tomato_dismissed(countdown_t *cd) {
     advance();
 }
 
-// Whole minutes for the current phase, remembered per phase.
+// Whole minutes for the current phase, remembered per phase. Past idle the
+// page has no use for the knob: it falls through to what's playing, a
+// focus sound included.
 static bool tomato_rotate(int steps) {
     if (tomato.cd.state != COUNTDOWN_IDLE) {
         return false;
@@ -156,7 +236,8 @@ void tomato_page_build(lv_obj_t *screen) {
                                                    .tint = UI_TINT_TOMATO,
                                                    .cd = &tomato.cd,
                                                    .rotate = tomato_rotate,
-                                                   .press = tomato_press});
+                                                   .press = tomato_press,
+                                                   .tick = sound_chip_refresh});
     for (int i = 0; i < PHASE_COUNT; i++) {
         tomato.minutes[i] = k_phases[i].default_min;
     }
@@ -164,6 +245,7 @@ void tomato_page_build(lv_obj_t *screen) {
     tomato.cd.ring = tool_dial_create(screen, tint, COUNTDOWN_RING_RANGE);
     tool_ring_jog_create(screen, tomato_rotate);
     dots_create(screen);
+    sound_chip_create(screen);
     tomato.cd.time_label = tool_time_label_create(screen);
     lv_obj_align(tomato.cd.time_label, LV_ALIGN_CENTER, 0, 0);
     tomato.phase_label = tool_hint_label_create(screen);

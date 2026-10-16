@@ -37,6 +37,7 @@
 #define UI_TINT_TOMATO_BREAK 0x5ad17a
 #define UI_TINT_STOPWATCH    0x2dd4a0
 #define UI_TINT_WEATHER      0xffc35a // also every weather glyph
+#define UI_TINT_AMBIENCE     0xc49bff
 #define UI_TINT_SETTINGS     UI_COLOR_TEXT_DIM
 
 // White over the wallpaper or a tinted wash reads best as an opacity, which

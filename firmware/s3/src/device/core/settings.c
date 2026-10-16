@@ -20,6 +20,9 @@ static const settings_t k_defaults = {
     .bluetooth = true,
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .air_show = UI_AIR_SHOW_HIGH,
+    .ambience_sound = UI_AMBIENCE_RAIN,
+    .ambience_volume = 30,
+    .focus_sound = 0,
     .tz = "",
 };
 
@@ -57,6 +60,15 @@ void settings_load(settings_t *out) {
     out->bluetooth = get_u8(nvs, "bluetooth", k_defaults.bluetooth);
     out->airplay = get_u8(nvs, "airplay", k_defaults.airplay);
     out->air_show = get_u8(nvs, "air_show", k_defaults.air_show);
+    out->ambience_sound = get_u8(nvs, "amb_sound", k_defaults.ambience_sound);
+    out->ambience_volume = get_u8(nvs, "amb_volume", k_defaults.ambience_volume);
+    out->focus_sound = get_u8(nvs, "focus_sound", k_defaults.focus_sound);
+    if (out->ambience_sound >= UI_AMBIENCE_COUNT) {
+        out->ambience_sound = k_defaults.ambience_sound;
+    }
+    if (out->focus_sound > UI_AMBIENCE_COUNT) {
+        out->focus_sound = k_defaults.focus_sound;
+    }
     size_t len = sizeof(out->tz);
     if (nvs_get_str(nvs, "tz", out->tz, &len) != ESP_OK) {
         out->tz[0] = '\0';
@@ -79,6 +91,9 @@ void settings_save(const settings_t *s) {
     nvs_set_u8(nvs, "bluetooth", s->bluetooth);
     nvs_set_u8(nvs, "airplay", s->airplay);
     nvs_set_u8(nvs, "air_show", s->air_show);
+    nvs_set_u8(nvs, "amb_sound", s->ambience_sound);
+    nvs_set_u8(nvs, "amb_volume", s->ambience_volume);
+    nvs_set_u8(nvs, "focus_sound", s->focus_sound);
     nvs_set_str(nvs, "tz", s->tz);
     nvs_commit(nvs);
     nvs_close(nvs);

@@ -11,6 +11,7 @@
 #include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "focus_sound.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "now_playing.h"
@@ -145,12 +146,20 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddNumberToObject(json, "airplay", s.airplay);
     cJSON_AddNumberToObject(json, "airShow", s.air_show);
     cJSON_AddBoolToObject(json, "airplay2", s.airplay2_available);
+    cJSON_AddNumberToObject(json, "ambienceSound", s.ambience_sound);
+    cJSON_AddNumberToObject(json, "ambienceVolume", s.ambience_volume);
+    cJSON_AddNumberToObject(json, "focusSound", s.focus_sound);
     cJSON_AddBoolToObject(json, "tzAuto", s.tz_auto);
     cJSON_AddStringToObject(json, "tz", s.tz_name);
     cJSON_AddBoolToObject(json, "locationAuto", s.location_auto);
     cJSON_AddStringToObject(json, "location", s.location);
     cJSON_AddItemToObject(json, "np", now_playing_json());
     cJSON_AddItemToObject(json, "weather", weather_json());
+    ambience_kind_t kind;
+    cJSON *amb = cJSON_AddObjectToObject(json, "ambience");
+    cJSON_AddBoolToObject(amb, "playing", focus_sound_playing(&kind));
+    cJSON_AddNumberToObject(amb, "sound", kind);
+    cJSON_AddNumberToObject(amb, "cpu", focus_sound_cpu_pct());
     cJSON_AddItemToObject(json, "update", update_json());
     // null while Bluetooth is off or the ESP32 isn't answering.
     pairing_status_t pairing;
@@ -276,6 +285,9 @@ static esp_err_t set_handler(httpd_req_t *req) {
         {"bluetooth", UI_SETTING_BLUETOOTH, 0, 1},
         {"airplay", UI_SETTING_AIRPLAY, 0, UI_AIRPLAY_1 | UI_AIRPLAY_2},
         {"airShow", UI_SETTING_AIR_SHOW, UI_AIR_SHOW_OFF, UI_AIR_SHOW_ALWAYS},
+        {"ambienceSound", UI_SETTING_AMBIENCE_SOUND, 0, UI_AMBIENCE_COUNT - 1},
+        {"ambienceVolume", UI_SETTING_AMBIENCE_VOLUME, 0, 100},
+        {"focusSound", UI_SETTING_FOCUS_SOUND, 0, UI_AMBIENCE_COUNT},
     };
     char form[FORM_MAX + 1], key[16], value[48];
     if (!read_post(req, form, sizeof(form))) {
@@ -406,6 +418,34 @@ static esp_err_t transport_handler(httpd_req_t *req) {
     return send_ok(req);
 }
 
+// Starts the default sound (or `sound`), or stops. The device screen
+// follows on its next poll.
+static esp_err_t ambience_handler(httpd_req_t *req) {
+    char form[FORM_MAX + 1], action[8], sound[4];
+    if (!read_post(req, form, sizeof(form))) {
+        return ESP_OK;
+    }
+    web_form_value(form, "action", action, sizeof(action));
+    if (!strcmp(action, "stop")) {
+        focus_sound_stop();
+        return send_ok(req);
+    }
+    if (strcmp(action, "play")) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown action");
+    }
+    int v;
+    web_form_value(form, "sound", sound, sizeof(sound));
+    if (!sound[0]) {
+        ui_settings_t s;
+        settings_ui_snapshot(&s);
+        v = s.ambience_sound;
+    } else if (!parse_int(sound, 0, AMBIENCE_COUNT - 1, &v)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown sound");
+    }
+    focus_sound_play((ambience_kind_t)v);
+    return send_ok(req);
+}
+
 // Opens the pairing window, or forgets every paired device. The code
 // check itself stays on the device's screen.
 static esp_err_t pairing_handler(httpd_req_t *req) {
@@ -482,6 +522,7 @@ bool web_settings_start(void) {
         {.uri = "/api/location", .method = HTTP_POST, .handler = location_handler},
         {.uri = "/api/volume", .method = HTTP_POST, .handler = volume_handler},
         {.uri = "/api/transport", .method = HTTP_POST, .handler = transport_handler},
+        {.uri = "/api/ambience", .method = HTTP_POST, .handler = ambience_handler},
         {.uri = "/api/pairing", .method = HTTP_POST, .handler = pairing_handler},
         {.uri = "/api/forget", .method = HTTP_POST, .handler = forget_handler},
         {.uri = "/api/update", .method = HTTP_POST, .handler = update_handler},

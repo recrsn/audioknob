@@ -2,7 +2,7 @@
 
 // Private to the app pages: ui_tools.c (shared widgets, the countdown
 // engine, page registry) and one file per page (ui_weather.c, ui_lights.c,
-// ui_timer.c, ui_tomato.c, ui_stopwatch.c, ui_settings.c). ui.c only sees
+// ui_timer.c, ui_tomato.c, ui_ambience.c, ui_stopwatch.c, ui_settings.c). ui.c only sees
 // ui_tools_*() in ui_internal.h.
 
 #include <stddef.h>
@@ -100,5 +100,6 @@ void weather_page_build(lv_obj_t *screen);
 void lights_page_build(lv_obj_t *screen);
 void timer_page_build(lv_obj_t *screen);
 void tomato_page_build(lv_obj_t *screen);
+void ambience_page_build(lv_obj_t *screen);
 void stopwatch_page_build(lv_obj_t *screen);
 void settings_page_build(lv_obj_t *screen);

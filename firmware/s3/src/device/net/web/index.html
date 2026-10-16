@@ -145,6 +145,14 @@ progress::-moz-progress-bar{background:var(--accent)}
   </div>
 </section>
 
+<h2>Ambience</h2>
+<section class="card">
+  <div class="row"><span>Sound</span><select id="ambienceSound"><option value="0">Brown noise</option><option value="1">Pink noise</option><option value="2">Rain</option><option value="3">Ocean</option><option value="4">Forest</option></select></div>
+  <div class="row"><span>Volume</span><div class="slider"><input type="range" id="ambienceVolume" min="0" max="100" step="5"><output id="ambval"></output></div></div>
+  <div class="row"><span>Playing</span><button class="btn" id="ambplay">Play</button></div>
+  <div class="row"><span>During focus</span><select id="focusSound"><option value="0">No sound</option><option value="1">Brown noise</option><option value="2">Pink noise</option><option value="3">Rain</option><option value="4">Ocean</option><option value="5">Forest</option></select></div>
+</section>
+
 <h2>Device</h2>
 <section class="card">
   <div class="row col">
@@ -292,6 +300,12 @@ function render(s) {
   setText("brightval", s.brightness + "%");
   $("sleep").value = s.sleep;
   $("artColors").checked = s.artColors;
+  if (document.activeElement !== $("ambienceSound")) $("ambienceSound").value = s.ambienceSound;
+  if (document.activeElement !== $("focusSound")) $("focusSound").value = s.focusSound;
+  if (!busy.has($("ambienceVolume"))) $("ambienceVolume").value = s.ambienceVolume;
+  setText("ambval", s.ambienceVolume + "%");
+  $("ambplay").textContent = s.ambience.playing ? "Stop" : "Play";
+  ambPlaying = s.ambience.playing;
   $("haptics").checked = s.haptics;
   setSeg("clock24", s.clock24);
   setSeg("fahrenheit", s.fahrenheit);
@@ -401,6 +415,12 @@ holdable($("brightness"), v => set("brightness", v), 80);
 $("brightness").addEventListener("input", e => setText("brightval", e.target.value + "%"));
 $("sleep").onchange = e => set("sleep", e.target.value);
 $("artColors").onchange = e => set("artColors", +e.target.checked);
+let ambPlaying = false;
+$("ambplay").onclick = () => post("/api/ambience", {action: ambPlaying ? "stop" : "play"});
+$("ambienceSound").onchange = e => set("ambienceSound", e.target.value);
+$("focusSound").onchange = e => set("focusSound", e.target.value);
+holdable($("ambienceVolume"), v => set("ambienceVolume", v), 80);
+$("ambienceVolume").addEventListener("input", e => setText("ambval", e.target.value + "%"));
 $("haptics").onchange = e => set("haptics", +e.target.checked);
 for (const id of ["clock24", "fahrenheit", "airShow"]) {
   $(id).onclick = e => {

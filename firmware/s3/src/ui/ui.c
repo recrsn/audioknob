@@ -157,6 +157,7 @@ typedef struct {
         lv_obj_t *thumb;
         lv_obj_t *icon;
         lv_obj_t *idle_icon;
+        lv_obj_t *amb_icon;
         lv_obj_t *art;
         lv_obj_t *text;
         lv_obj_t *title;
@@ -189,6 +190,7 @@ typedef struct {
 typedef struct {
     lv_obj_t *chip;
     lv_obj_t *icon;     // AirPlay/Bluetooth
+    lv_obj_t *amb_icon; // an icons_20 glyph, not an image
 #ifdef AK_USB_AUDIO
     lv_obj_t *usb_icon; // LV_SYMBOL_USB has no image asset
 #endif
@@ -630,6 +632,21 @@ static void np_card_cb(lv_event_t *e) {
     open_audio();
 }
 
+// Ambience has its page, the Pomodoro's or its own, for a screen.
+static bool ambience_target(lv_obj_t *target) {
+    return target && ui_tools_app_of(target) >= 0;
+}
+
+// Ambience only stops; a stream pauses.
+static void np_play_cb(lv_event_t *e) {
+    (void)e;
+    if (ambience_target(audio_chip.target)) {
+        ui_ambience_stop();
+    } else if (s_transport_handler) {
+        s_transport_handler(UI_TRANSPORT_PLAY_PAUSE);
+    }
+}
+
 // The clock face's top complication, heading its column: what's playing,
 // or with nothing connected, that the device is ready to. Its button
 // plays/pauses without leaving the clock.
@@ -668,6 +685,12 @@ static void np_card_build(lv_obj_t *col) {
     lv_obj_set_style_text_font(idle_screen.np.idle_icon, UI_FONT_SYMBOL, 0);
     lv_obj_set_style_text_color(idle_screen.np.idle_icon, lv_color_hex(NP_IDLE_GLYPH), 0);
     lv_obj_center(idle_screen.np.idle_icon);
+    idle_screen.np.amb_icon = lv_label_create(thumb);
+    lv_label_set_text(idle_screen.np.amb_icon, ICON_RAIN);
+    lv_obj_set_style_text_font(idle_screen.np.amb_icon, UI_FONT_ICON_SM, 0);
+    lv_obj_set_style_text_color(idle_screen.np.amb_icon, lv_color_white(), 0);
+    lv_obj_center(idle_screen.np.amb_icon);
+    lv_obj_add_flag(idle_screen.np.amb_icon, LV_OBJ_FLAG_HIDDEN);
     idle_screen.np.art = lv_image_create(thumb);
     lv_image_set_inner_align(idle_screen.np.art, LV_IMAGE_ALIGN_STRETCH);
     lv_obj_set_size(idle_screen.np.art, NP_THUMB, NP_THUMB);
@@ -704,7 +727,7 @@ static void np_card_build(lv_obj_t *col) {
     // Out to the card's edge, which is as far as LVGL looks for it; the
     // rest of the card opens the source.
     lv_obj_set_ext_click_area(btn, NP_CARD_PAD);
-    lv_obj_add_event_cb(btn, transport_click_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)UI_TRANSPORT_PLAY_PAUSE);
+    lv_obj_add_event_cb(btn, np_play_cb, LV_EVENT_CLICKED, NULL);
 }
 
 // The clock face's bottom complication, two quiet lines -- conditions
@@ -1162,6 +1185,10 @@ static lv_obj_t *audio_screen(void) {
     if (s_audio.wireless_playing) {
         return wireless_screen.screen;
     }
+    bool focus;
+    if (ui_ambience_playing(NULL, &focus)) {
+        return s_apps[focus ? UI_APP_TOMATO : UI_APP_AMBIENCE];
+    }
 #ifdef AK_USB_AUDIO
     if (s_audio.usb_playing) {
         return usb_screen.screen;
@@ -1174,7 +1201,7 @@ static lv_obj_t *audio_screen(void) {
 // themselves or the setup QR.
 static bool audio_chip_wanted(void) {
     lv_obj_t *active = lv_screen_active();
-    return audio_chip.target && !launcher_visible() && ui_tools_app_of(active) >= 0;
+    return audio_chip.target && !launcher_visible() && ui_tools_app_of(active) >= 0 && active != audio_chip.target;
 }
 
 // A content-sized label wraps rather than dots, so the label is one line
@@ -1213,9 +1240,17 @@ static void np_card_set_quiet(bool quiet) {
     ui_set_visible(lv_obj_get_parent(idle_screen.np.play), !quiet);
 }
 
+static void np_card_tint(lv_color_t tint) {
+    if (!lv_color_eq(tint, idle_screen.np.tint)) {
+        idle_screen.np.tint = tint;
+        lv_obj_set_style_bg_color(idle_screen.np.thumb, tint, 0);
+    }
+}
+
 // With nothing connected the row still says what the device is for.
 static void np_card_idle(void) {
     np_card_set_quiet(true);
+    ui_set_visible(idle_screen.np.amb_icon, false);
     ui_set_visible(idle_screen.np.art, false);
     ui_set_visible(idle_screen.np.icon, false);
     ui_set_visible(idle_screen.np.idle_icon, true);
@@ -1236,11 +1271,32 @@ static void np_card_source_icon(lv_color_t tint, bool on_tile) {
     }
 }
 
+// Like a stream playing, with a stop button.
+static void np_card_ambience(void) {
+    ui_ambience_t kind;
+    bool focus;
+    ui_ambience_playing(&kind, &focus);
+    np_card_set_quiet(false);
+    np_card_tint(lv_color_hex(UI_TINT_AMBIENCE));
+    ui_set_visible(idle_screen.np.idle_icon, false);
+    ui_set_visible(idle_screen.np.icon, false);
+    ui_set_visible(idle_screen.np.art, false);
+    ui_set_visible(idle_screen.np.amb_icon, true);
+    ui_label_set_text(idle_screen.np.title, ui_ambience_name(kind));
+    ui_label_set_text(idle_screen.np.subtitle, focus ? "Focus sound" : "Ambience");
+    ui_label_set_text(idle_screen.np.play, LV_SYMBOL_STOP);
+}
+
 static void np_card_refresh(lv_obj_t *target) {
     if (!target) {
         np_card_idle();
         return;
     }
+    if (ambience_target(target)) {
+        np_card_ambience();
+        return;
+    }
+    ui_set_visible(idle_screen.np.amb_icon, false);
 #ifdef AK_USB_AUDIO
     bool usb = target == usb_screen.screen;
     bool playing = usb ? s_audio.usb_playing : s_audio.wireless_playing;
@@ -1249,10 +1305,7 @@ static void np_card_refresh(lv_obj_t *target) {
     bool playing = s_audio.wireless_playing;
 #endif
     lv_color_t tint = lv_color_hex(usb ? UI_TINT_USB : s_audio.wireless_airplay ? UI_TINT_AIRPLAY : UI_TINT_BLUETOOTH);
-    if (!lv_color_eq(tint, idle_screen.np.tint)) {
-        idle_screen.np.tint = tint;
-        lv_obj_set_style_bg_color(idle_screen.np.thumb, tint, 0);
-    }
+    np_card_tint(tint);
     ui_set_visible(idle_screen.np.idle_icon, false);
 
     // Connected but not playing: which device, quietly.
@@ -1307,7 +1360,19 @@ static void audio_chip_refresh(void) {
 #else
     bool usb = false;
 #endif
-    ui_set_visible(audio_chip.icon, !usb);
+    bool amb = ambience_target(target);
+    ui_set_visible(audio_chip.amb_icon, amb);
+    ui_set_visible(audio_chip.icon, !usb && !amb);
+    if (amb) {
+        ui_ambience_t kind;
+        ui_ambience_playing(&kind, NULL);
+        audio_chip_set_text(ui_ambience_name(kind));
+        if (audio_chip.dim) {
+            audio_chip.dim = false;
+            lv_obj_set_style_text_opa(audio_chip.label, LV_OPA_COVER, 0);
+        }
+        return;
+    }
     if (!usb) {
         const lv_image_dsc_t *src = s_audio.wireless_airplay ? &icon_airplay : &icon_bluetooth;
         if (lv_image_get_src(audio_chip.icon) != src) {
@@ -1342,6 +1407,11 @@ static void audio_chip_build(void) {
     audio_chip.chip = chip;
 
     audio_chip.icon = icon_create(chip, &icon_airplay, STATUS_ICON_SIZE, lv_color_hex(UI_TINT_AIRPLAY));
+    audio_chip.amb_icon = lv_label_create(chip);
+    lv_label_set_text(audio_chip.amb_icon, ICON_RAIN);
+    lv_obj_set_style_text_font(audio_chip.amb_icon, UI_FONT_ICON_SM, 0);
+    lv_obj_set_style_text_color(audio_chip.amb_icon, lv_color_hex(UI_TINT_AMBIENCE), 0);
+    lv_obj_add_flag(audio_chip.amb_icon, LV_OBJ_FLAG_HIDDEN);
 #ifdef AK_USB_AUDIO
     audio_chip.usb_icon = lv_label_create(chip);
     lv_label_set_text(audio_chip.usb_icon, LV_SYMBOL_USB);
@@ -1366,8 +1436,27 @@ static bool launcher_audio_status(char *buf, size_t len) {
         return true;
     }
 #endif
+    if (ambience_target(target)) {
+        ui_ambience_t kind;
+        ui_ambience_playing(&kind, NULL);
+        snprintf(buf, len, "%s", ui_ambience_name(kind));
+        return true;
+    }
     snprintf(buf, len, "%s", s_audio.wireless_text);
     return true;
+}
+
+void ui_audio_changed(void) {
+    audio_chip_refresh();
+}
+
+bool ui_stream_playing(void) {
+#ifdef AK_USB_AUDIO
+    if (s_audio.usb_playing) {
+        return true;
+    }
+#endif
+    return s_audio.wireless_playing;
 }
 
 static void launcher_visibility_cb(void) {
@@ -1475,7 +1564,9 @@ bool ui_knob_rotate(int steps) {
         launcher_rotate(steps);
         return true;
     }
-    return ui_tools_knob_rotate(lv_screen_active(), steps);
+    // Ambience playing is what the knob's volume reaches for: no stream
+    // plays alongside it.
+    return ui_tools_knob_rotate(lv_screen_active(), steps) || ui_ambience_knob(steps);
 }
 
 bool ui_knob_press(void) {
