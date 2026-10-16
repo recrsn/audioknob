@@ -4,20 +4,27 @@
 
 #include "airplay.h"
 #include "audio_source.h"
+#include "freertos/FreeRTOS.h"
 #include "uart_link.h"
 
 typedef enum { PICK_NONE, PICK_AIRPLAY, PICK_BLUETOOTH } source_pick_t;
-static volatile source_pick_t s_pick = PICK_NONE;
+// Read from the LVGL, knob and web server tasks; the pair changes together.
+static portMUX_TYPE s_pick_lock = portMUX_INITIALIZER_UNLOCKED;
+static source_pick_t s_pick = PICK_NONE;
 static audio_source_t s_pick_dac;
 
 bool now_playing_airplay_in_front(void) {
-    if (s_pick != PICK_NONE) {
-        if (audio_source_active() == s_pick_dac) {
-            return s_pick == PICK_AIRPLAY;
-        }
+    audio_source_t active = audio_source_active();
+    taskENTER_CRITICAL(&s_pick_lock);
+    if (s_pick != PICK_NONE && active != s_pick_dac) {
         s_pick = PICK_NONE;
     }
-    if (audio_source_active() == AUDIO_SOURCE_AIRPLAY) {
+    source_pick_t pick = s_pick;
+    taskEXIT_CRITICAL(&s_pick_lock);
+    if (pick != PICK_NONE) {
+        return pick == PICK_AIRPLAY;
+    }
+    if (active == AUDIO_SOURCE_AIRPLAY) {
         return true;
     }
     wireless_state_t esp32;
@@ -69,13 +76,19 @@ bool now_playing_adjust_volume(int steps) {
 }
 
 bool now_playing_set_volume(uint8_t pct) {
+    pct = pct > 100 ? 100 : pct;
     wireless_state_t state;
     track_info_t track;
-    if (!now_playing_get(&state, &track)) {
+    if (now_playing_airplay_in_front()) {
+        airplay_get_state(&state, &track);
+        int steps = (int)pct - state.volume;
+        return steps == 0 || now_playing_adjust_volume(steps);
+    }
+    if (!uart_link_get_latest(&state) || !state.connected) {
         return false;
     }
-    int steps = (int)(pct > 100 ? 100 : pct) - state.volume;
-    return steps == 0 || now_playing_adjust_volume(steps);
+    uart_link_send_command_value(CMD_VOLUME_SET, pct);
+    return true;
 }
 
 void now_playing_transport(ui_transport_t button) {
@@ -102,11 +115,13 @@ void now_playing_transport(ui_transport_t button) {
 void now_playing_pick(ui_source_t source) {
     if (source == UI_SOURCE_AIRPLAY) {
         audio_source_claim_airplay();
-        s_pick = PICK_AIRPLAY;
     } else {
         airplay_preempt();
         audio_source_release_airplay();
-        s_pick = PICK_BLUETOOTH;
     }
-    s_pick_dac = audio_source_active();
+    audio_source_t active = audio_source_active();
+    taskENTER_CRITICAL(&s_pick_lock);
+    s_pick = source == UI_SOURCE_AIRPLAY ? PICK_AIRPLAY : PICK_BLUETOOTH;
+    s_pick_dac = active;
+    taskEXIT_CRITICAL(&s_pick_lock);
 }

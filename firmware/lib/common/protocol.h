@@ -146,11 +146,21 @@ typedef enum {
     // Asks for a MSG_HELLO, e.g. after the S3 restarts and so doesn't know
     // which firmware the ESP32 runs.
     CMD_IDENTIFY = 0x0E,
+    // Sets Bluetooth volume to command_value_t.value (0-100): the web page's
+    // slider, which would overshoot as a run of steps computed from a state
+    // update that hasn't caught up yet.
+    CMD_VOLUME_SET = 0x0F,
 } protocol_cmd_t;
 
 typedef struct __attribute__((packed)) {
     uint8_t cmd;  // protocol_cmd_t
 } command_t;
+
+// MSG_COMMAND for the commands that carry a value.
+typedef struct __attribute__((packed)) {
+    uint8_t cmd;  // protocol_cmd_t
+    uint8_t value;
+} command_value_t;
 
 typedef enum {
     PAIRING_IDLE = 0,    // not discoverable; only bonded devices connect
@@ -213,5 +223,13 @@ typedef struct {
     uint8_t payload[UINT8_MAX];
 } protocol_parser_t;
 
+// A frame is ~3 ms of line time at most, and senders write each one whole,
+// so a longer silence mid-frame means a corrupted LEN has the parser
+// waiting for bytes that belong to later frames.
+#define PROTOCOL_FRAME_GAP_MS 20
+
 void protocol_parser_init(protocol_parser_t *parser);
 protocol_feed_result_t protocol_parser_feed(protocol_parser_t *parser, uint8_t byte);
+// True between SYNC and CRC; reset with protocol_parser_init() after
+// PROTOCOL_FRAME_GAP_MS of silence.
+bool protocol_parser_in_frame(const protocol_parser_t *parser);

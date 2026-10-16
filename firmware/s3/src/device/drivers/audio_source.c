@@ -4,8 +4,8 @@
 
 #include "driver/gpio.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "uart_link.h"
 
 #define PIN_I2S_SWITCH GPIO_NUM_0
@@ -16,7 +16,8 @@
 #define SWITCH_LEVEL_ESP32 0
 #define SWITCH_LEVEL_S3 1
 
-#define WATCH_PERIOD_US (50 * 1000)
+#define WATCH_PERIOD_MS 50
+#define WATCH_TASK_STACK 3072
 
 static const char *TAG = "audio_source";
 
@@ -34,8 +35,7 @@ static void select_locked(audio_source_t source) {
 // Only a rising edge of A2DP playback counts as "started": when AirPlay
 // takes the DAC, A2DP keeps reporting playing until our pause lands, and
 // must not grab the DAC straight back in that window.
-static void esp32_watch_cb(void *arg) {
-    (void)arg;
+static void esp32_watch(void) {
     wireless_state_t state;
     bool playing = uart_link_get_latest(&state) && state.connected && state.playing;
     bool started = playing && !s_esp32_was_playing;
@@ -55,6 +55,17 @@ static void esp32_watch_cb(void *arg) {
     }
 }
 
+// A task rather than an esp_timer: the check blocks on uart_link's mutex
+// and the preempt flushes the player, neither of which belongs on the
+// shared timer task.
+static void esp32_watch_task(void *arg) {
+    (void)arg;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(WATCH_PERIOD_MS));
+        esp32_watch();
+    }
+}
+
 void audio_source_init(void (*on_airplay_preempted)(void)) {
     s_on_airplay_preempted = on_airplay_preempted;
 
@@ -67,13 +78,8 @@ void audio_source_init(void (*on_airplay_preempted)(void)) {
     select_locked(AUDIO_SOURCE_ESP32);
     taskEXIT_CRITICAL(&s_lock);
 
-    const esp_timer_create_args_t timer_args = {
-        .callback = esp32_watch_cb,
-        .name = "src_watch",
-    };
-    esp_timer_handle_t timer;
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(timer, WATCH_PERIOD_US));
+    BaseType_t ok = xTaskCreate(esp32_watch_task, "src_watch", WATCH_TASK_STACK, NULL, 5, NULL);
+    ESP_ERROR_CHECK(ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }
 
 void audio_source_claim_airplay(void) {

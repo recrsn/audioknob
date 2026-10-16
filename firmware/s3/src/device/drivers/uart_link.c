@@ -199,11 +199,11 @@ static void handle_frame(uint8_t type, const uint8_t *payload, uint8_t len) {
     ESP_LOGW(TAG, "unhandled frame: type=0x%02x len=%d", type, len);
 }
 
-// Blocks for the first byte, then takes whatever else is already buffered:
-// at 921600 baud a byte-per-call read spends more time in the driver than
-// in the parser.
-static int read_available(uint8_t buf[RX_CHUNK]) {
-    if (uart_read_bytes(UART_PORT, buf, 1, portMAX_DELAY) <= 0) {
+// Waits up to `wait` for the first byte, then takes whatever else is
+// already buffered: at 921600 baud a byte-per-call read spends more time in
+// the driver than in the parser.
+static int read_available(uint8_t buf[RX_CHUNK], TickType_t wait) {
+    if (uart_read_bytes(UART_PORT, buf, 1, wait) <= 0) {
         return 0;
     }
     size_t buffered = 0;
@@ -222,7 +222,12 @@ static void uart_rx_task(void *arg) {
 
     uint8_t buf[RX_CHUNK];
     for (;;) {
-        int n = read_available(buf);
+        bool in_frame = protocol_parser_in_frame(&parser);
+        int n = read_available(buf, in_frame ? pdMS_TO_TICKS(PROTOCOL_FRAME_GAP_MS) : portMAX_DELAY);
+        if (!n && in_frame) {
+            ESP_LOGW(TAG, "frame type 0x%02x cut short, resyncing", parser.type);
+            protocol_parser_init(&parser);
+        }
         for (int i = 0; i < n; i++) {
             switch (protocol_parser_feed(&parser, buf[i])) {
             case PROTOCOL_FEED_FRAME:
@@ -267,6 +272,11 @@ bool uart_link_get_latest(wireless_state_t *out) {
     has_state = s_has_state;
     if (has_state) {
         memcpy(out, &s_latest_state, sizeof(*out));
+        // A hung or reset ESP32 must not keep Bluetooth in front.
+        if (xTaskGetTickCount() - s_last_state_tick > pdMS_TO_TICKS(PEER_LOST_MS)) {
+            out->connected = 0;
+            out->playing = 0;
+        }
     }
     xSemaphoreGive(s_state_mutex);
     return has_state;
@@ -306,6 +316,11 @@ const uint16_t *uart_link_get_artwork(uint32_t *version) {
 
 void uart_link_send_command(protocol_cmd_t cmd) {
     command_t command = {.cmd = cmd};
+    send_frame(MSG_COMMAND, &command, sizeof(command));
+}
+
+void uart_link_send_command_value(protocol_cmd_t cmd, uint8_t value) {
+    command_value_t command = {.cmd = cmd, .value = value};
     send_frame(MSG_COMMAND, &command, sizeof(command));
 }
 

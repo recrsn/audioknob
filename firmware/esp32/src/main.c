@@ -20,7 +20,7 @@ static const char *TAG = "esp32";
 // high; the factory firmware drove it.
 #define DAC_XSMT_GPIO GPIO_NUM_32
 
-static void on_command(protocol_cmd_t cmd) {
+static void on_command(protocol_cmd_t cmd, uint8_t value) {
     if (cmd == CMD_IDENTIFY) {
         state_sync_send_hello();
         return;
@@ -56,6 +56,9 @@ static void on_command(protocol_cmd_t cmd) {
         break;
     case CMD_VOLUME_DOWN:
         avrcp_target_step_volume(-1);
+        break;
+    case CMD_VOLUME_SET:
+        avrcp_target_set_local_volume(value > 100 ? 100 : value);
         break;
     case CMD_PAIRING_OPEN:
     case CMD_PAIRING_CLOSE:

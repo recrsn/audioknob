@@ -434,7 +434,8 @@ static esp_err_t update_handler(httpd_req_t *req) {
     }
     ota_status_t ota;
     ota_get_status(&ota);
-    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota.error);
+    // No error of its own when an install is running: that one's status stays.
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota.error[0] ? ota.error : "Another update is installing");
     // Closes the socket instead of draining what's left of a refused
     // image; the browser may see that as a network error, so the page
     // reads the reason from /api/state.

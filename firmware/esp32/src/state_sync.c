@@ -115,11 +115,11 @@ static void state_sync_task(void *arg) {
     }
 }
 
-// Blocks for the first byte, then takes whatever else is already buffered:
-// at 921600 baud a byte-per-call read spends more time in the driver than
-// in the parser.
-static int read_available(uint8_t buf[RX_CHUNK]) {
-    if (uart_read_bytes(UART_PORT, buf, 1, portMAX_DELAY) <= 0) {
+// Waits up to `wait` for the first byte, then takes whatever else is
+// already buffered: at 921600 baud a byte-per-call read spends more time in
+// the driver than in the parser.
+static int read_available(uint8_t buf[RX_CHUNK], TickType_t wait) {
+    if (uart_read_bytes(UART_PORT, buf, 1, wait) <= 0) {
         return 0;
     }
     size_t buffered = 0;
@@ -158,7 +158,11 @@ static void handle_frame(const protocol_parser_t *frame) {
     switch (frame->type) {
     case MSG_COMMAND:
         if (frame->len == sizeof(command_t)) {
-            s_on_command((protocol_cmd_t)frame->payload[0]);
+            s_on_command((protocol_cmd_t)frame->payload[0], 0);
+            return;
+        }
+        if (frame->len == sizeof(command_value_t)) {
+            s_on_command((protocol_cmd_t)frame->payload[0], frame->payload[1]);
             return;
         }
         break;
@@ -187,7 +191,12 @@ static void command_rx_task(void *arg) {
 
     uint8_t buf[RX_CHUNK];
     for (;;) {
-        int n = read_available(buf);
+        bool in_frame = protocol_parser_in_frame(&parser);
+        int n = read_available(buf, in_frame ? pdMS_TO_TICKS(PROTOCOL_FRAME_GAP_MS) : portMAX_DELAY);
+        if (!n && in_frame) {
+            ESP_LOGW(TAG, "frame type 0x%02x cut short, resyncing", parser.type);
+            protocol_parser_init(&parser);
+        }
         for (int i = 0; i < n; i++) {
             protocol_feed_result_t result = protocol_parser_feed(&parser, buf[i]);
             if (result == PROTOCOL_FEED_BAD_CRC) {

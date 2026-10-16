@@ -11,7 +11,8 @@
 // frames (NUL-terminated) to on_device_name; both run on the RX task.
 // Starts both tasks and owns the UART port — call before
 // state_sync_send_track().
-typedef void (*state_sync_command_cb_t)(protocol_cmd_t cmd);
+// value is command_value_t's, or 0 for a command sent without one.
+typedef void (*state_sync_command_cb_t)(protocol_cmd_t cmd, uint8_t value);
 typedef void (*state_sync_name_cb_t)(const char *name);
 
 void state_sync_start(state_sync_command_cb_t on_command, state_sync_name_cb_t on_device_name);

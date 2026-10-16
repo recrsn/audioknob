@@ -121,16 +121,24 @@ static const char *check_header(const char *buf, ota_target_t *target, char vers
     return NULL;
 }
 
-static bool installing(void) {
-    ota_status_t status;
-    ota_get_status(&status);
-    return status.state == OTA_INSTALLING;
+// One step under the lock, so an install accepted on the device and an
+// upload arriving on the web server can't both proceed.
+static bool start_receiving(void) {
+    taskENTER_CRITICAL(&s_lock);
+    bool ok = s_status.state != OTA_INSTALLING;
+    if (ok) {
+        s_status.state = OTA_RECEIVING;
+        s_status.error[0] = '\0';
+    }
+    taskEXIT_CRITICAL(&s_lock);
+    return ok;
 }
 
 bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
-    // The ESP32's image is read from staging while it's sent.
-    if (installing()) {
-        return fail("Another update is installing");
+    // The ESP32's image is read from staging while it's sent. Not fail():
+    // the install's own status stays up.
+    if (!start_receiving()) {
+        return false;
     }
     if (size < HEADER_LEN) {
         return fail("Not a firmware image");
@@ -139,7 +147,6 @@ bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
     if (!buf) {
         return fail("Out of memory");
     }
-    set_status(OTA_RECEIVING, NULL);
 
     ota_target_t target = OTA_TARGET_S3;
     char version[32];
@@ -204,14 +211,17 @@ static void esp32_install_task(void *arg) {
 }
 
 void ota_install(void) {
-    ota_status_t status;
-    ota_get_status(&status);
+    taskENTER_CRITICAL(&s_lock);
+    ota_status_t status = s_status;
+    if (status.state == OTA_READY) {
+        s_status.state = OTA_INSTALLING;
+        s_status.progress = 0;
+    }
+    taskEXIT_CRITICAL(&s_lock);
     if (status.state != OTA_READY) {
         return;
     }
     if (status.target == OTA_TARGET_ESP32) {
-        set_progress(0);
-        set_status(OTA_INSTALLING, NULL);
         if (xTaskCreate(esp32_install_task, "esp32_fw", INSTALL_TASK_STACK, NULL, 3, NULL) != pdPASS) {
             fail("Out of memory");
         }

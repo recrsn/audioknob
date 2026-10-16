@@ -13,8 +13,9 @@
 // Neither task blocks on the other.
 void uart_link_start(void);
 
-// Copies the most recently received state into *out. Returns false (and
-// leaves *out untouched) if no frame has been received yet.
+// Copies the most recently received state into *out, reading as
+// disconnected once the ESP32 has been silent for a few seconds. Returns
+// false (and leaves *out untouched) if no frame has been received yet.
 bool uart_link_get_latest(wireless_state_t *out);
 
 // Copies the most recently received MSG_TRACK_INFO frame into *out. Returns
@@ -38,6 +39,9 @@ const uint16_t *uart_link_get_artwork(uint32_t *version);
 // Sends a MSG_COMMAND frame to the ESP32. Fire-and-forget: there is no
 // ACK; the effect shows up in the next STATE_UPDATE. Safe from any task.
 void uart_link_send_command(protocol_cmd_t cmd);
+
+// The same for a command that carries a value (command_value_t).
+void uart_link_send_command_value(protocol_cmd_t cmd, uint8_t value);
 
 // Sends the Bluetooth device name now, and again whenever the ESP32
 // reappears on the link after a reset. Safe from any task.

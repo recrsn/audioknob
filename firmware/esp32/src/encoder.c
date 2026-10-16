@@ -25,8 +25,12 @@ static const char *TAG = "encoder";
 static pcnt_unit_handle_t s_pcnt_unit;
 
 static void pcnt_init(void) {
-    pcnt_unit_config_t unit_cfg = {.low_limit = -1000, .high_limit = 1000};
+    // Never cleared: clearing after a read drops the edges in between. The
+    // limits are watch points so the driver carries the count past them.
+    pcnt_unit_config_t unit_cfg = {.low_limit = -1000, .high_limit = 1000, .flags.accum_count = 1};
     ESP_ERROR_CHECK(pcnt_new_unit(&unit_cfg, &s_pcnt_unit));
+    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(s_pcnt_unit, unit_cfg.low_limit));
+    ESP_ERROR_CHECK(pcnt_unit_add_watch_point(s_pcnt_unit, unit_cfg.high_limit));
 
     pcnt_glitch_filter_config_t filter_cfg = {.max_glitch_ns = 1000};
     ESP_ERROR_CHECK(pcnt_unit_set_glitch_filter(s_pcnt_unit, &filter_cfg));
@@ -56,16 +60,19 @@ static void pcnt_init(void) {
 static void encoder_task(void *arg) {
     (void)arg;
     int accum = 0;
+    int last_count = 0;
     int button_low_polls = 0;
     bool button_down = false;
+    bool was_at_rest = true;
+    bool press_from_rest = false;
 
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(ENC_POLL_MS));
 
         int count = 0;
         pcnt_unit_get_count(s_pcnt_unit, &count);
-        pcnt_unit_clear_count(s_pcnt_unit);
-        accum += count;
+        accum += count - last_count;
+        last_count = count;
 
         int steps = accum / ENC_COUNTS_PER_STEP;
         if (steps != 0) {
@@ -73,16 +80,25 @@ static void encoder_task(void *arg) {
             avrcp_target_step_volume(steps);
         }
 
-        bool pressed_now = gpio_get_level(ENC_A_GPIO) == 0 && gpio_get_level(ENC_B_GPIO) == 0;
+        int a = gpio_get_level(ENC_A_GPIO);
+        int b = gpio_get_level(ENC_B_GPIO);
+        bool pressed_now = !a && !b;
         if (pressed_now) {
+            // The press shorts both lines at once, straight from the detent
+            // (both high). A slow turn passes through one line low first
+            // and can then sit in the both-low phase just as long.
+            if (button_low_polls == 0) {
+                press_from_rest = was_at_rest;
+            }
             if (button_low_polls < BUTTON_DEBOUNCE_POLLS) {
                 button_low_polls++;
             }
         } else {
             button_low_polls = 0;
         }
+        was_at_rest = a && b;
 
-        bool debounced_down = button_low_polls >= BUTTON_DEBOUNCE_POLLS;
+        bool debounced_down = press_from_rest && button_low_polls >= BUTTON_DEBOUNCE_POLLS;
         if (debounced_down && !button_down) {
             ESP_LOGI(TAG, "SW1 pressed");
             avrcp_controller_toggle_play_pause();

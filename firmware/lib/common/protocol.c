@@ -36,6 +36,10 @@ void protocol_parser_init(protocol_parser_t *parser) {
     parser->state = RX_WAIT_SYNC;
 }
 
+bool protocol_parser_in_frame(const protocol_parser_t *parser) {
+    return parser->state != RX_WAIT_SYNC;
+}
+
 protocol_feed_result_t protocol_parser_feed(protocol_parser_t *parser, uint8_t byte) {
     switch (parser->state) {
     case RX_WAIT_SYNC:
