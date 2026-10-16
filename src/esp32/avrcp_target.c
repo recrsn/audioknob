@@ -5,6 +5,7 @@
 #include "app_state.h"
 #include "bt_app_core.h"
 #include "esp_log.h"
+#include "i2s_out.h"
 
 #define AVRC_VOLUME_MAX 0x7f
 
@@ -32,6 +33,7 @@ static void handle_event(uint16_t event, void *param) {
         uint8_t pct = avrc_to_pct(rc->set_abs_vol.volume);
         ESP_LOGI(TAG, "controller set volume: %d%%", pct);
         app_state_set_volume(pct);
+        i2s_out_set_volume(pct);
         break;
     }
 
@@ -49,6 +51,7 @@ static void handle_event(uint16_t event, void *param) {
 }
 
 void avrcp_target_init(void) {
+    i2s_out_set_volume(app_state_get().volume);
     esp_avrc_rn_evt_cap_mask_t evt_set = {0};
     esp_avrc_rn_evt_bit_mask_operation(ESP_AVRC_BIT_MASK_OP_SET, &evt_set, ESP_AVRC_RN_VOLUME_CHANGE);
     ESP_ERROR_CHECK(esp_avrc_tg_set_rn_evt_cap(&evt_set));
@@ -66,6 +69,7 @@ void avrcp_target_step_volume(int steps) {
 
 void avrcp_target_set_local_volume(uint8_t volume_pct) {
     app_state_set_volume(volume_pct);
+    i2s_out_set_volume(volume_pct);
 
     if (!s_notify_pending) {
         return;

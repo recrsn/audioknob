@@ -33,6 +33,12 @@
 #define I2S_TASK_PRIO (configMAX_PRIORITIES - 3)
 #define I2S_TASK_CORE 1 // Bluedroid is pinned to core 0
 
+// Q15, as in the S3's airplay_player. Phones using AVRCP absolute volume
+// send full-scale PCM and leave the volume to us.
+#define GAIN_UNITY 32768
+// Each sample closes 1/GAIN_RAMP_DIV of the gap, so steps don't click.
+#define GAIN_RAMP_DIV 256
+
 typedef enum {
     MODE_STOPPED,
     MODE_PREFETCHING,
@@ -45,6 +51,8 @@ static i2s_chan_handle_t s_tx_chan;
 static RingbufHandle_t s_rb;
 static SemaphoreHandle_t s_wake;
 static volatile rb_mode_t s_mode = MODE_STOPPED;
+static volatile int32_t s_gain_target = GAIN_UNITY;
+static int32_t s_gain = GAIN_UNITY;
 
 static size_t rb_filled(void) {
     return RB_SIZE - xRingbufferGetCurFreeSize(s_rb);
@@ -55,6 +63,20 @@ static void drain(void) {
     void *item;
     while ((item = xRingbufferReceiveUpTo(s_rb, &n, 0, RB_SIZE)) != NULL) {
         vRingbufferReturnItem(s_rb, item);
+    }
+}
+
+static void apply_gain(int16_t *samples, size_t count) {
+    int32_t target = s_gain_target;
+    if (s_gain == GAIN_UNITY && target == GAIN_UNITY) {
+        return;
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (s_gain != target) {
+            int32_t step = (target - s_gain) / GAIN_RAMP_DIV;
+            s_gain += step ? step : (target > s_gain ? 1 : -1);
+        }
+        samples[i] = (int16_t)((samples[i] * s_gain) >> 15);
     }
 }
 
@@ -69,6 +91,7 @@ static void play_until_starved(void) {
             }
             return;
         }
+        apply_gain((int16_t *)item, n / sizeof(int16_t));
         size_t written = 0;
         while (written < n) {
             size_t chunk = 0;
@@ -144,6 +167,12 @@ void i2s_out_stop(void) {
     // Wake the task to discard the backlog, so the next stream doesn't open
     // with the tail of this one.
     xSemaphoreGive(s_wake);
+}
+
+void i2s_out_set_volume(uint8_t volume_pct) {
+    // Cubic, like AirPlay: roughly even loudness steps across the range.
+    float v = (volume_pct > 100 ? 100 : volume_pct) / 100.0f;
+    s_gain_target = (int32_t)(v * v * v * GAIN_UNITY);
 }
 
 void i2s_out_write(const uint8_t *data, size_t len) {

@@ -13,6 +13,9 @@ void i2s_out_init(void);
 void i2s_out_configure(uint32_t sample_rate_hz, uint8_t channels);
 
 void i2s_out_start(void);
+
+// Software volume, 0-100, ramped in over a few ms. Safe from any task.
+void i2s_out_set_volume(uint8_t volume_pct);
 void i2s_out_stop(void);
 
 // Never blocks: queues PCM into a ring buffer that a dedicated task feeds to
