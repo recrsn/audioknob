@@ -359,7 +359,7 @@ static void on_title(void *ctx, const char *title) {
 }
 
 // Waits for `ms`, or until play/stop changes what's wanted.
-static void wait_for_change(const net_t *net, uint32_t ms) {
+static void wait_for_change(net_t *net, uint32_t ms) {
     int64_t until = esp_timer_get_time() + (int64_t)ms * 1000;
     while (!should_stop(net)) {
         int64_t left = until - esp_timer_get_time();
