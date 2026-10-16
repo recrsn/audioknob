@@ -4,22 +4,34 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// S3 firmware updates. An image is written to the spare OTA slot and
-// checked, then waits for the user to confirm on the device before it's
-// made the boot slot. A new image boots on probation: unless
+// Firmware updates for both chips, told apart by the image's chip id. An
+// S3 image is written to the spare OTA slot, an ESP32 one to the esp32_fw
+// staging partition; either is checked, then waits for the user to confirm
+// on the device. Installing an S3 image makes it the boot slot and
+// restarts; an ESP32 one is sent over the inter-MCU UART (esp32_fw.c). A
+// new image boots on probation on either chip: on the S3, unless
 // ota_confirm_running() runs, the next reset goes back to the old one.
 
 typedef enum {
     OTA_IDLE,
     OTA_RECEIVING,
-    OTA_READY,    // written and checked, waiting for ota_install()
-    OTA_DECLINED, // the user said no on the device
+    OTA_READY,      // written and checked, waiting for ota_install()
+    OTA_DECLINED,   // the user said no on the device
+    OTA_INSTALLING, // ESP32 only: sending it, then waiting for it to restart
+    OTA_INSTALLED,  // ESP32 only: it runs the new image
     OTA_FAILED,
 } ota_state_t;
 
+typedef enum {
+    OTA_TARGET_S3,
+    OTA_TARGET_ESP32,
+} ota_target_t;
+
 typedef struct {
     ota_state_t state;
-    char version[32]; // of the image received (READY, DECLINED)
+    ota_target_t target;
+    uint8_t progress; // percent sent, while INSTALLING
+    char version[32]; // of the image received
     char error[48];   // FAILED
 } ota_status_t;
 
@@ -33,7 +45,8 @@ bool ota_receive(size_t size, ota_read_fn read, void *ctx);
 
 void ota_get_status(ota_status_t *out);
 
-// Boots the image waiting in OTA_READY: restarts, so it doesn't return then.
+// Installs the image waiting in OTA_READY. For the S3 it restarts, so it
+// doesn't return; for the ESP32 a background task takes over.
 void ota_install(void);
 void ota_decline(void);
 

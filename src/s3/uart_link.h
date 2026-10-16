@@ -46,3 +46,12 @@ void uart_link_set_device_name(const char *name);
 // Turns Bluetooth on or off on the ESP32, now and whenever it reappears
 // (it sleeps while off and asks on waking). Safe from any task.
 void uart_link_set_bluetooth(bool enabled);
+
+// The firmware the ESP32 reported in its latest MSG_HELLO. Returns a count
+// that goes up with every hello, or 0 (and a zeroed *out) when none with a
+// version has arrived. Safe from any task.
+uint32_t uart_link_get_esp32_firmware(hello_t *out);
+
+// Sends one MSG_FW_* frame and waits up to timeout_ms for its MSG_FW_ACK.
+// For one task at a time.
+bool uart_link_fw_request(uint8_t type, const void *payload, uint8_t len, uint32_t timeout_ms, fw_ack_t *ack);

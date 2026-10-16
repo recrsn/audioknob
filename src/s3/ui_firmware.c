@@ -37,7 +37,7 @@ static void install(void) {
     answer(true);
 }
 
-void ui_update_firmware(const char *pending_version) {
+void ui_update_firmware(const char *pending_version, bool bluetooth) {
     if (!pending_version) {
         if (fw.prompt.scrim) {
             ui_prompt_show(&fw.prompt, false);
@@ -50,11 +50,12 @@ void ui_update_firmware(const char *pending_version) {
     if (!fw.prompt.scrim) {
         ui_prompt_build(&fw.prompt, decline, install, NULL);
     }
-    char body[80];
-    snprintf(body, sizeof(body), "Version %s, sent from the web page. The device restarts.", pending_version);
+    char body[96];
+    snprintf(body, sizeof(body), "Version %s, sent from the web page. %s", pending_version,
+             bluetooth ? "Bluetooth restarts when it's in." : "The device restarts.");
     ui_prompt_render(&fw.prompt, &(ui_prompt_content_t){.symbol = LV_SYMBOL_DOWNLOAD,
                                                          .tint = UI_COLOR_ACCENT,
-                                                         .title = "Install update?",
+                                                         .title = bluetooth ? "Update Bluetooth?" : "Install update?",
                                                          .body = body,
                                                          .cancel = true,
                                                          .accept = true});

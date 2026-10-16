@@ -64,9 +64,10 @@ typedef enum {
 void ui_set_pairing_handler(void (*handler)(ui_pairing_action_t action));
 
 // Pushes the version of a firmware update that's been received and checked
-// and waits for the user, or NULL while there is none. Cheap to call every
-// poll; a pending update asks once, over whatever screen is up.
-void ui_update_firmware(const char *pending_version);
+// and waits for the user, or NULL while there is none; bluetooth says it's
+// for the ESP32. Cheap to call every poll; a pending update asks once, over
+// whatever screen is up.
+void ui_update_firmware(const char *pending_version, bool bluetooth);
 
 // Called on the LVGL task with the user's answer to that prompt; install
 // may restart the device.

@@ -10,6 +10,7 @@
 #include "encoder.h"
 #include "esp_avrc_api.h"
 #include "esp_log.h"
+#include "fw_update.h"
 #include "state_sync.h"
 
 static const char *TAG = "esp32";
@@ -20,6 +21,10 @@ static const char *TAG = "esp32";
 #define DAC_XSMT_GPIO GPIO_NUM_32
 
 static void on_command(protocol_cmd_t cmd) {
+    if (cmd == CMD_IDENTIFY) {
+        state_sync_send_hello();
+        return;
+    }
     if (cmd == CMD_BT_ENABLE || cmd == CMD_BT_DISABLE) {
         bt_power_set_enabled(cmd == CMD_BT_ENABLE);
         return;
@@ -84,6 +89,7 @@ static void ignore_name(const char *name) {
 
 void app_main(void) {
     dac_unmute();
+    fw_update_init();
     app_state_init();
     if (!bt_power_enabled()) {
         state_sync_start(on_command, ignore_name);

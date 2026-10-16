@@ -7,10 +7,12 @@
 #include "bt_pairing.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
+#include "esp_app_desc.h"
 #include "esp_sleep.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "fw_update.h"
 #include "protocol.h"
 
 // Pin directions are the reverse of the schematic net names; see uart_link.c.
@@ -19,6 +21,10 @@
 #define UART_RX_GPIO 23
 
 #define RX_CHUNK 32
+// Room for a few whole frames: a firmware chunk is a full-length one.
+#define RX_BUF_SIZE 1024
+// esp_ota_end()'s image check runs on the RX task.
+#define RX_TASK_STACK 6144
 // Holds a whole cover-art thumbnail, so streaming one never blocks the
 // bt_app task for longer than a frame.
 #define TX_BUF_SIZE (16 * 1024)
@@ -37,7 +43,11 @@ static void send_frame(uint8_t type, const void *payload, uint8_t len) {
 }
 
 void state_sync_send_hello(void) {
-    send_frame(MSG_HELLO, "", 0);
+    const esp_app_desc_t *app = esp_app_get_description();
+    hello_t hello = {0};
+    memcpy(hello.app_sha, app->app_elf_sha256, sizeof(hello.app_sha));
+    strncpy(hello.version, app->version, FW_VERSION_MAX);
+    send_frame(MSG_HELLO, &hello, sizeof(hello));
 }
 
 void state_sync_light_sleep(void) {
@@ -121,6 +131,55 @@ static int read_available(uint8_t buf[RX_CHUNK]) {
     return 1 + (more > 0 ? more : 0);
 }
 
+// Only the S3's answers to this MCU's hello: they show the link works both
+// ways.
+static bool is_hello_answer(const protocol_parser_t *frame) {
+    if (frame->type == MSG_DEVICE_NAME) {
+        return true;
+    }
+    return frame->type == MSG_COMMAND && frame->len == sizeof(command_t) &&
+           (frame->payload[0] == CMD_BT_ENABLE || frame->payload[0] == CMD_BT_DISABLE);
+}
+
+static void handle_fw_frame(const protocol_parser_t *frame) {
+    fw_ack_t ack;
+    bool installed = fw_update_handle(frame->type, frame->payload, frame->len, &ack);
+    send_frame(MSG_FW_ACK, &ack, sizeof(ack));
+    if (installed) {
+        uart_wait_tx_done(UART_PORT, portMAX_DELAY);
+        fw_update_restart();
+    }
+}
+
+static void handle_frame(const protocol_parser_t *frame) {
+    if (is_hello_answer(frame)) {
+        fw_update_confirm();
+    }
+    switch (frame->type) {
+    case MSG_COMMAND:
+        if (frame->len == sizeof(command_t)) {
+            s_on_command((protocol_cmd_t)frame->payload[0]);
+            return;
+        }
+        break;
+    case MSG_DEVICE_NAME:
+        if (frame->len && frame->len <= DEVICE_NAME_MAX) {
+            char name[DEVICE_NAME_MAX + 1];
+            memcpy(name, frame->payload, frame->len);
+            name[frame->len] = '\0';
+            s_on_device_name(name);
+            return;
+        }
+        break;
+    case MSG_FW_BEGIN:
+    case MSG_FW_CHUNK:
+    case MSG_FW_END:
+        handle_fw_frame(frame);
+        return;
+    }
+    ESP_LOGW(TAG, "unhandled frame: type=0x%02x len=%d", frame->type, frame->len);
+}
+
 static void command_rx_task(void *arg) {
     (void)arg;
     protocol_parser_t parser;
@@ -134,16 +193,7 @@ static void command_rx_task(void *arg) {
             if (result == PROTOCOL_FEED_BAD_CRC) {
                 ESP_LOGW(TAG, "CRC mismatch, frame type 0x%02x dropped", parser.type);
             } else if (result == PROTOCOL_FEED_FRAME) {
-                if (parser.type == MSG_COMMAND && parser.len == sizeof(command_t)) {
-                    s_on_command((protocol_cmd_t)parser.payload[0]);
-                } else if (parser.type == MSG_DEVICE_NAME && parser.len && parser.len <= DEVICE_NAME_MAX) {
-                    char name[DEVICE_NAME_MAX + 1];
-                    memcpy(name, parser.payload, parser.len);
-                    name[parser.len] = '\0';
-                    s_on_device_name(name);
-                } else {
-                    ESP_LOGW(TAG, "unhandled frame: type=0x%02x len=%d", parser.type, parser.len);
-                }
+                handle_frame(&parser);
             }
         }
     }
@@ -161,12 +211,12 @@ void state_sync_start(state_sync_command_cb_t on_command, state_sync_name_cb_t o
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    ESP_ERROR_CHECK(uart_driver_install(UART_PORT, 256, TX_BUF_SIZE, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_driver_install(UART_PORT, RX_BUF_SIZE, TX_BUF_SIZE, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(UART_PORT, &cfg));
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT, UART_TX_GPIO, UART_RX_GPIO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
     ESP_LOGI(TAG, "inter-MCU UART ready (TX=%d RX=%d)", UART_TX_GPIO, UART_RX_GPIO);
     xTaskCreate(state_sync_task, "state_sync", 3072, NULL, 4, NULL);
-    xTaskCreate(command_rx_task, "cmd_rx", 3072, NULL, 5, NULL);
+    xTaskCreate(command_rx_task, "cmd_rx", RX_TASK_STACK, NULL, 5, NULL);
     state_sync_send_hello();
 }

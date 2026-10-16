@@ -6,6 +6,7 @@
 #include "driver/uart.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "artwork.h"
@@ -44,6 +45,12 @@ static pairing_status_t s_pairing;
 static TickType_t s_last_pairing_tick;
 static bool s_has_pairing;
 static char s_peer_name[PEER_NAME_MAX + 1];
+static hello_t s_hello;
+static uint32_t s_hello_count;
+static bool s_has_hello; // with a version: firmware older than that sends none
+
+// MSG_FW_ACKs, for the one task running an ESP32 update.
+static QueueHandle_t s_fw_acks;
 
 // Bluetooth cover art being received, in PSRAM. Only the RX task touches it.
 static artwork_slot_t *s_art;
@@ -127,12 +134,29 @@ static void handle_frame(uint8_t type, const uint8_t *payload, uint8_t len) {
         xSemaphoreGive(s_state_mutex);
         if (peer_back) {
             send_peer_config();
+            if (!uart_link_get_esp32_firmware(&(hello_t){0})) {
+                uart_link_send_command(CMD_IDENTIFY);
+            }
         }
         return;
     }
 
     if (type == MSG_HELLO) {
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_has_hello = len == sizeof(hello_t);
+        if (s_has_hello) {
+            memcpy(&s_hello, payload, sizeof(s_hello));
+            s_hello.version[FW_VERSION_MAX] = '\0';
+        }
+        s_hello_count++;
+        xSemaphoreGive(s_state_mutex);
+        ESP_LOGI(TAG, "ESP32 says hello: %s", s_has_hello ? s_hello.version : "(no version)");
         send_peer_config();
+        return;
+    }
+
+    if (type == MSG_FW_ACK && len == sizeof(fw_ack_t)) {
+        xQueueSend(s_fw_acks, payload, 0);
         return;
     }
 
@@ -216,6 +240,7 @@ static void uart_rx_task(void *arg) {
 
 void uart_link_start(void) {
     s_state_mutex = xSemaphoreCreateMutex();
+    s_fw_acks = xQueueCreate(4, sizeof(fw_ack_t));
     s_art = artwork_slot_create();
     s_art_buf = heap_caps_malloc(ART_BUF_SIZE, MALLOC_CAP_SPIRAM);
     ESP_ERROR_CHECK(s_art && s_art_buf ? ESP_OK : ESP_ERR_NO_MEM);
@@ -296,4 +321,28 @@ void uart_link_set_bluetooth(bool enabled) {
     s_bluetooth = enabled;
     xSemaphoreGive(s_state_mutex);
     send_bluetooth();
+}
+
+uint32_t uart_link_get_esp32_firmware(hello_t *out) {
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    uint32_t count = s_has_hello ? s_hello_count : 0;
+    *out = s_has_hello ? s_hello : (hello_t){0};
+    xSemaphoreGive(s_state_mutex);
+    return count;
+}
+
+bool uart_link_fw_request(uint8_t type, const void *payload, uint8_t len, uint32_t timeout_ms, fw_ack_t *ack) {
+    // Late acks for an earlier resend would answer the wrong frame.
+    xQueueReset(s_fw_acks);
+    send_frame(type, payload, len);
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+    for (;;) {
+        TickType_t now = xTaskGetTickCount();
+        if ((int32_t)(deadline - now) <= 0 || !xQueueReceive(s_fw_acks, ack, deadline - now)) {
+            return false;
+        }
+        if (ack->type == type) {
+            return true;
+        }
+    }
 }

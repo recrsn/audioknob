@@ -19,8 +19,9 @@ typedef enum {
     MSG_ART_CHUNK = 0x05,
     MSG_ART_END = 0x06,
     MSG_DEVICE_NAME = 0x07,  // S3 -> ESP32; every other type flows ESP32 -> S3
-    // No payload. The ESP32 just booted or woke; the S3 answers with the
-    // device name and CMD_BT_ENABLE/CMD_BT_DISABLE.
+    // hello_t (empty from firmware older than it). The ESP32 just booted or
+    // woke, or the S3 sent CMD_IDENTIFY; the S3 answers with the device
+    // name and CMD_BT_ENABLE/CMD_BT_DISABLE.
     MSG_HELLO = 0x08,
     // pairing_status_t, sent like MSG_STATE_UPDATE: on change and resent
     // every ~1 s.
@@ -29,7 +30,60 @@ typedef enum {
     // (0 to PEER_NAME_MAX bytes; none while nothing is connected or before
     // the name has been read). Sent on change and resent every ~1 s.
     MSG_PEER_NAME = 0x0A,
+    // ESP32 firmware update, S3 -> ESP32, each answered with MSG_FW_ACK
+    // (see fw_begin_t).
+    MSG_FW_BEGIN = 0x0B,
+    MSG_FW_CHUNK = 0x0C,
+    MSG_FW_END = 0x0D,
+    MSG_FW_ACK = 0x0E, // ESP32 -> S3, fw_ack_t
 } protocol_msg_type_t;
+
+#define FW_VERSION_MAX 31
+
+typedef struct __attribute__((packed)) {
+    // The first bytes of esp_app_desc_t's app_elf_sha256: tells builds
+    // apart where the version string may not (an uncommitted tree).
+    uint8_t app_sha[8];
+    char version[FW_VERSION_MAX + 1]; // NUL-terminated
+} hello_t;
+
+// ESP32 firmware update. The link has no retries of its own, so every
+// frame is acked and the S3 sends the next one only after the ack
+// (resending on a timeout). Each ack carries the offset the ESP32 expects
+// next, so a lost ack or a resent chunk puts both ends back in step: the
+// S3 always continues from there. MSG_FW_BEGIN starts over, abandoning any
+// update in progress. MSG_FW_END checks the size, the SHA-256 and the image
+// itself, and on FW_OK the ESP32 restarts into the new image a moment
+// later. That image keeps itself only once the S3 answers its MSG_HELLO;
+// otherwise it resets and the bootloader rolls back.
+typedef struct __attribute__((packed)) {
+    uint32_t size;
+    uint8_t sha256[32]; // of the whole image as sent
+} fw_begin_t;
+
+#define FW_CHUNK_HEADER 4
+#define FW_CHUNK_MAX_DATA (UINT8_MAX - FW_CHUNK_HEADER)
+
+typedef struct __attribute__((packed)) {
+    uint32_t offset;
+    uint8_t data[FW_CHUNK_MAX_DATA]; // only LEN - FW_CHUNK_HEADER bytes are sent
+} fw_chunk_t;
+
+typedef enum {
+    FW_OK = 0,
+    FW_OUT_OF_ORDER = 1, // chunk ignored; resume from fw_ack_t.next
+    FW_NOT_STARTED = 2,  // no MSG_FW_BEGIN (or the ESP32 restarted)
+    FW_TOO_LARGE = 3,
+    FW_FLASH_ERROR = 4,
+    FW_BAD_CHECKSUM = 5,
+    FW_BAD_IMAGE = 6,    // esp_ota_end() refused it
+} fw_result_t;
+
+typedef struct __attribute__((packed)) {
+    uint8_t type;   // the MSG_FW_* frame answered
+    uint8_t result; // fw_result_t
+    uint32_t next;  // offset of the next chunk expected
+} fw_ack_t;
 
 // The longest sender name either source passes to the UI, in bytes; longer
 // ones are cut at a UTF-8 boundary.
@@ -89,6 +143,9 @@ typedef enum {
     CMD_PAIRING_REJECT = 0x0C,
     // Removes every bonded device and drops the current link.
     CMD_FORGET_DEVICES = 0x0D,
+    // Asks for a MSG_HELLO, e.g. after the S3 restarts and so doesn't know
+    // which firmware the ESP32 runs.
+    CMD_IDENTIFY = 0x0E,
 } protocol_cmd_t;
 
 typedef struct __attribute__((packed)) {

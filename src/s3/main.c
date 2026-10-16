@@ -41,7 +41,7 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
 
     ota_status_t ota;
     ota_get_status(&ota);
-    ui_update_firmware(ota.state == OTA_READY ? ota.version : NULL);
+    ui_update_firmware(ota.state == OTA_READY ? ota.version : NULL, ota.target == OTA_TARGET_ESP32);
 
     wifi_setup_info_t setup;
     if (wifi_get_setup_info(&setup)) {

@@ -147,6 +147,7 @@ select,input[type=text]{width:100%;padding:11px 12px;font-size:16px;border-radiu
 <h2>About</h2>
 <section class="card">
   <div class="row"><span>Version</span><span class="val" id="version"></span></div>
+  <div class="row"><span>Bluetooth firmware</span><span class="val" id="btversion"></span></div>
   <div class="row"><span>Free memory</span><span class="val" id="mem"></span></div>
   <div class="row col">
     <div class="inline split"><span>Firmware update</span><button class="btn" id="updbtn">Choose file…</button></div>
@@ -163,7 +164,7 @@ const PLAY = "M8 5v14l11-7z", PAUSE = "M6 5h4v14H6zm8 0h4v14h-4z";
 let state = null, artVersion = -1, zonesLoaded = false;
 // An upload holds the device's one HTTP task, so polls wait it out.
 let uploading = false, installing = null, wentOffline = false;
-const UPDATE_HINT = "The S3's firmware.bin. The device asks before installing it.";
+const UPDATE_HINT = "A firmware.bin for either chip, the main one or Bluetooth. The device asks before installing it.";
 // Inputs the user is holding keep their own value until released, so a poll
 // doesn't yank a slider out from under a finger.
 const busy = new Set();
@@ -262,6 +263,7 @@ function render(s) {
   setText("wifi", s.ssid || "Not connected");
   setText("addr", s.ip ? `${s.hostname}.local · ${s.ip}` : "—");
   setText("version", s.version);
+  setText("btversion", s.btVersion || "—");
   setText("mem", `${s.freeInternalKb} KB · ${(s.freePsramKb / 1024).toFixed(1)} MB PSRAM`);
   renderUpdate(s);
 }
@@ -275,16 +277,21 @@ function renderUpdate(s) {
     installing = null;
   }
   if (uploading) return;
-  if (u.state === "ready") installing = u.version;
+  // Only the main chip's update restarts the device under this page.
+  if (u.state === "ready" && u.target === "s3") installing = u.version;
   else if (u.state !== "idle") installing = null;
+  const what = (u.target === "bluetooth" ? "Bluetooth firmware " : "Version ") + u.version;
   const hints = {
     receiving: "Receiving an update…",
-    ready: `Version ${u.version} is ready: confirm on the device to install it.`,
-    declined: `Version ${u.version} was declined on the device.`,
+    ready: `${what} is ready: confirm on the device to install it.`,
+    declined: `${what} was declined on the device.`,
+    installing: u.progress < 100 ? `Sending it to the Bluetooth chip… ${u.progress}%`
+                                 : "Waiting for the Bluetooth chip to restart…",
+    installed: `Bluetooth firmware updated to ${u.version}.`,
     failed: "Update failed: " + u.error,
   };
   setText("updhint", hints[u.state] || UPDATE_HINT);
-  $("updbtn").disabled = u.state === "receiving";
+  $("updbtn").disabled = u.state === "receiving" || u.state === "installing";
 }
 
 async function poll() {

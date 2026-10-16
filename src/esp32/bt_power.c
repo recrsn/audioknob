@@ -5,6 +5,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "fw_update.h"
 #include "nvs_flash.h"
 #include "state_sync.h"
 
@@ -65,6 +66,8 @@ void bt_power_sleep_forever(void) {
     ESP_LOGI(TAG, "Bluetooth off, sleeping until the S3 calls");
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(AWAKE_MS));
-        state_sync_light_sleep();
+        if (!fw_update_busy()) {
+            state_sync_light_sleep();
+        }
     }
 }

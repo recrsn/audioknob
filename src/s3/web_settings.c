@@ -85,13 +85,16 @@ static cJSON *now_playing_json(void) {
 
 static cJSON *update_json(void) {
     static const char *const k_states[] = {
-        [OTA_IDLE] = "idle",         [OTA_RECEIVING] = "receiving", [OTA_READY] = "ready",
-        [OTA_DECLINED] = "declined", [OTA_FAILED] = "failed",
+        [OTA_IDLE] = "idle",         [OTA_RECEIVING] = "receiving",   [OTA_READY] = "ready",
+        [OTA_DECLINED] = "declined", [OTA_INSTALLING] = "installing", [OTA_INSTALLED] = "installed",
+        [OTA_FAILED] = "failed",
     };
     ota_status_t ota;
     ota_get_status(&ota);
     cJSON *update = cJSON_CreateObject();
     cJSON_AddStringToObject(update, "state", k_states[ota.state]);
+    cJSON_AddStringToObject(update, "target", ota.target == OTA_TARGET_ESP32 ? "bluetooth" : "s3");
+    cJSON_AddNumberToObject(update, "progress", ota.progress);
     cJSON_AddStringToObject(update, "version", ota.version);
     cJSON_AddStringToObject(update, "error", ota.error);
     return update;
@@ -106,6 +109,9 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddStringToObject(json, "ssid", s.wifi_ssid);
     cJSON_AddStringToObject(json, "ip", s.ip);
     cJSON_AddStringToObject(json, "version", s.version);
+    hello_t esp32;
+    uart_link_get_esp32_firmware(&esp32);
+    cJSON_AddStringToObject(json, "btVersion", esp32.version);
     cJSON_AddNumberToObject(json, "freeInternalKb", s.free_internal_kb);
     cJSON_AddNumberToObject(json, "freePsramKb", s.free_psram_kb);
     cJSON_AddNumberToObject(json, "brightness", s.brightness);

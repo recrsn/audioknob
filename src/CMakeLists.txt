@@ -26,7 +26,7 @@ set(AK_REQUIRES
     esp_http_client
     json
     esp_app_format
-    # S3 firmware updates (ota.c).
+    # Firmware updates (s3/ota.c, esp32/fw_update.c).
     app_update
     lwip
     mbedtls
