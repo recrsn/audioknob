@@ -60,14 +60,14 @@ static void apply_slot(bool right) {
 }
 
 bool mic_start(const mic_config_t *config) {
-    static const mic_config_t defaults = {.gain_db = MIC_DEFAULT_GAIN_DB, .suppress_noise = true};
+    static const mic_config_t defaults = {.gain_db = MIC_DEFAULT_GAIN_DB, .noise_level = MIC_DEFAULT_NOISE_LEVEL};
     const mic_config_t *cfg = config ? config : &defaults;
-    if (cfg->gain_db > MIC_MAX_GAIN_DB || xSemaphoreTake(s_owner, 0) != pdTRUE) {
+    if (cfg->gain_db > MIC_MAX_GAIN_DB || cfg->noise_level > MIC_MAX_NOISE_LEVEL || xSemaphoreTake(s_owner, 0) != pdTRUE) {
         return false;
     }
     s_raw = cfg->raw;
     if (!s_raw) {
-        s_process = mic_process_create(cfg->gain_db, cfg->suppress_noise);
+        s_process = mic_process_create(cfg->gain_db, cfg->noise_level);
         if (!s_process) {
             ESP_LOGW(TAG, "no memory for microphone processing");
             xSemaphoreGive(s_owner);
@@ -89,7 +89,7 @@ bool mic_start(const mic_config_t *config) {
         }
     }
     ESP_LOGI(TAG, "capture: gain %u dB, NS %s, raw %d", cfg->gain_db,
-             cfg->suppress_noise && !s_raw ? "ESP-SR" : "off", s_raw);
+             cfg->noise_level && !s_raw ? "ESP-SR" : "off", s_raw);
     return true;
 }
 

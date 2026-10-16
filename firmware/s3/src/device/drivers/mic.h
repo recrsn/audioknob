@@ -16,10 +16,12 @@
 
 #define MIC_DEFAULT_GAIN_DB 30
 #define MIC_MAX_GAIN_DB 36
+#define MIC_DEFAULT_NOISE_LEVEL 1
+#define MIC_MAX_NOISE_LEVEL 3
 
 typedef struct {
     uint8_t gain_db;
-    bool suppress_noise;
+    uint8_t noise_level; // 0 off, 1 mild, 2 medium, 3 aggressive
     bool raw;
     bool right_slot;
 } mic_config_t;
@@ -27,7 +29,7 @@ typedef struct {
 void mic_init(void);
 
 // Claims the mic and starts its clock; NULL config uses +30 dB and ESP-SR
-// noise suppression. Raw capture bypasses all processing. False if busy
+// mild noise suppression. Raw capture bypasses all processing. False if busy
 // or the capture/processing buffers cannot be allocated.
 bool mic_start(const mic_config_t *config);
 void mic_stop(void);

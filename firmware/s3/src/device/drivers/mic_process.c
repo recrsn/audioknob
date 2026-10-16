@@ -16,14 +16,14 @@ struct mic_process {
     int16_t gained[MIC_PROCESS_FRAMES];
 };
 
-mic_process_t *mic_process_create(uint8_t gain_db, bool suppress_noise) {
+mic_process_t *mic_process_create(uint8_t gain_db, uint8_t noise_level) {
     mic_process_t *p = calloc(1, sizeof(*p));
     if (!p) {
         return NULL;
     }
     p->gain = powf(10.0f, gain_db / 20.0f);
-    if (suppress_noise) {
-        p->ns = ns_pro_create(10, 1, 16000);
+    if (noise_level) {
+        p->ns = ns_pro_create(10, noise_level - 1, 16000);
         if (!p->ns) {
             free(p);
             return NULL;

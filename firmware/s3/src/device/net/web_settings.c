@@ -318,13 +318,11 @@ static esp_err_t mic_wav_handler(httpd_req_t *req) {
         !parse_int(value, 0, MIC_MAX_GAIN_DB, &gain)) {
         return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "gain must be 0-36 dB");
     }
-    bool suppress_noise = true;
+    int noise_level = MIC_DEFAULT_NOISE_LEVEL;
     if (httpd_query_key_value(query, "ns", value, sizeof(value)) == ESP_OK) {
-        int enabled;
-        if (!parse_int(value, 0, 1, &enabled)) {
-            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "ns must be 0 or 1");
+        if (!parse_int(value, 0, MIC_MAX_NOISE_LEVEL, &noise_level)) {
+            return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "ns must be 0-3");
         }
-        suppress_noise = enabled;
     }
     size_t frames = (size_t)seconds * MIC_SAMPLE_RATE;
     uint32_t data_bytes = frames * sizeof(int16_t);
@@ -332,7 +330,7 @@ static esp_err_t mic_wav_handler(httpd_req_t *req) {
     if (!wav) {
         return httpd_resp_send_500(req);
     }
-    const mic_config_t config = {.gain_db = (uint8_t)gain, .suppress_noise = suppress_noise,
+    const mic_config_t config = {.gain_db = (uint8_t)gain, .noise_level = (uint8_t)noise_level,
                                  .raw = raw, .right_slot = right};
     if (!mic_start(&config)) {
         free(wav);
