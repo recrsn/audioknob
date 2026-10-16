@@ -29,7 +29,7 @@ typedef enum {
 typedef struct {
     raop_event_type_t type;
     union {
-        // SESSION_START: the sender's name ("Amitosh's iPhone"), from its
+        // SESSION_START: the sender's name ("Alex's iPhone"), from its
         // X-Apple-Client-Name header or SETUP; NULL or empty if it sent none.
         // Only valid during the callback.
         struct {

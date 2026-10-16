@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 52 px
  * Bpp: 4
- * Opts: --font inter-700-tnum.ttf -r 0x20,0x25,0x2D,0x2E,0x30-0x3A,0xB0 --size 52 --bpp 4 --format lvgl --no-compress --lv-font-name inter_tnum_52 --lv-fallback lv_font_montserrat_14 --lv-include lvgl.h -o /Users/amitosh/Code/audioknob/src/s3/font_inter_tnum_52.c
+ * Opts: --font inter-700-tnum.ttf -r 0x20,0x25,0x2D,0x2E,0x30-0x3A,0xB0 --size 52 --bpp 4 --format lvgl --no-compress --lv-font-name inter_tnum_52 --lv-fallback lv_font_montserrat_14 --lv-include lvgl.h -o src/s3/font_inter_tnum_52.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 20 px
  * Bpp: 4
- * Opts: --font ms-rounded-20.ttf -r 0xf157,0xe1f9,0xf172,0xea46,0xe2bd,0xe818,0xf61e,0xf176,0xe2cd,0xebdb,0xe0f0,0xea5b,0xe110,0xe425,0xe8b8 --size 20 --bpp 4 --format lvgl --no-compress --lv-font-name icons_20 --lv-include lvgl.h -o /Users/amitosh/Code/audioknob/src/s3/font_icons_20.c
+ * Opts: --font ms-rounded-20.ttf -r 0xf157,0xe1f9,0xf172,0xea46,0xe2bd,0xe818,0xf61e,0xf176,0xe2cd,0xebdb,0xe0f0,0xea5b,0xe110,0xe425,0xe8b8 --size 20 --bpp 4 --format lvgl --no-compress --lv-font-name icons_20 --lv-include lvgl.h -o src/s3/font_icons_20.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

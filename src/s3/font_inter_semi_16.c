@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 16 px
  * Bpp: 4
- * Opts: --font node_modules/@fontsource/inter/files/inter-latin-600-normal.woff -r 0x20-0x7E,0xA0-0xFF,0x2013-0x2014,0x2018-0x201D,0x2026 --size 16 --bpp 4 --format lvgl --no-compress --lv-font-name inter_semi_16 --lv-fallback lv_font_montserrat_14 --lv-include lvgl.h -o /Users/amitosh/Code/audioknob/src/s3/font_inter_semi_16.c
+ * Opts: --font node_modules/@fontsource/inter/files/inter-latin-600-normal.woff -r 0x20-0x7E,0xA0-0xFF,0x2013-0x2014,0x2018-0x201D,0x2026 --size 16 --bpp 4 --format lvgl --no-compress --lv-font-name inter_semi_16 --lv-fallback lv_font_montserrat_14 --lv-include lvgl.h -o src/s3/font_inter_semi_16.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

@@ -16,7 +16,7 @@ typedef struct {
     char title[64];
     char artist[64];
     char album[64];
-    // The connected sender's name ("Amitosh's iPhone"); "" when unknown.
+    // The connected sender's name ("Alex's iPhone"); "" when unknown.
     char peer[64];
     // Optional cover art, UI_ART_SIZE^2 RGB565; must stay valid until the
     // next call with a different art_version. NULL shows the placeholder.

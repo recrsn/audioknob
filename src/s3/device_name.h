@@ -21,7 +21,7 @@ void device_name_init(device_name_cb_t on_change);
 // Thread-safe copy; len >= DEVICE_NAME_MAX + 1 never truncates.
 void device_name_get(char *out, size_t len);
 
-// The name as a DNS label ("Amitosh's Desk" -> "amitoshs-desk"), for mDNS.
+// The name as a DNS label ("Alex's Desk" -> "alexs-desk"), for mDNS.
 void device_name_hostname(char *out, size_t len);
 
 // Trims surrounding whitespace, then rejects empty names, control

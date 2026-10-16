@@ -1,7 +1,7 @@
 /*******************************************************************************
  * Size: 52 px
  * Bpp: 4
- * Opts: --font node_modules/@fontsource/inter/files/inter-latin-700-normal.woff -r 0x20,0x2D,0x30-0x3A --size 52 --bpp 4 --format lvgl --no-compress --lv-font-name inter_bold_52 --lv-fallback lv_font_montserrat_14 --lv-include lvgl.h -o /Users/amitosh/Code/audioknob/src/s3/font_inter_bold_52.c
+ * Opts: --font node_modules/@fontsource/inter/files/inter-latin-700-normal.woff -r 0x20,0x2D,0x30-0x3A --size 52 --bpp 4 --format lvgl --no-compress --lv-font-name inter_bold_52 --lv-fallback lv_font_montserrat_14 --lv-include lvgl.h -o src/s3/font_inter_bold_52.c
  ******************************************************************************/
 
 #ifdef LV_LVGL_H_INCLUDE_SIMPLE

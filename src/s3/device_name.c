@@ -79,7 +79,7 @@ void device_name_hostname(char *out, size_t len) {
     bool dash = false;
     for (const char *c = name; *c && n < max; c++) {
         if (*c == '\'') {
-            continue; // "Amitosh's" -> "amitoshs", not "amitosh-s"
+            continue; // "Alex's" -> "alexs", not "alex-s"
         }
         if (isalnum((unsigned char)*c) && !(*c & 0x80)) {
             if (dash && n && n < max - 1) {

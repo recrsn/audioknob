@@ -29,7 +29,7 @@ firmware on their mass-produced versions of his knob. The evidence:
 - The NVS namespace is `GODVISION`, taken from his open-source
   [genshin_godeye_esp32](https://github.com/planevina/genshin_godeye_esp32)
   ("神之眼").
-- The image was built from `C:/Users/Fei/.platformio`, against his fork of
+- The image was built from `C:/Users/<user>/.platformio`, against his fork of
   `platform-espressif32`.
 - Guition's own knob demo carries a `bidi_switch_knob.h` marked "Modified by
   planevina 2025-01-20".

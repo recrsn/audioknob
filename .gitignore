@@ -5,3 +5,4 @@ mock-react/dist/
 .DS_Store
 logs/
 *.stl
+.claude/
