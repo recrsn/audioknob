@@ -467,9 +467,12 @@ static void tools_tick_cb(lv_timer_t *t) {
 
 void ui_tools_build(lv_obj_t *const screens[UI_APP_COUNT], void (*on_alert)(lv_obj_t *screen, bool ringing)) {
     static void (*const builders[UI_APP_COUNT])(lv_obj_t *) = {
-        [UI_APP_WEATHER] = weather_page_build,     [UI_APP_LIGHTS] = lights_page_build,
-        [UI_APP_TIMER] = timer_page_build,         [UI_APP_TOMATO] = tomato_page_build,
-        [UI_APP_STOPWATCH] = stopwatch_page_build, [UI_APP_SETTINGS] = settings_page_build,
+#ifdef AK_LIGHTS
+        [UI_APP_LIGHTS] = lights_page_build,
+#endif
+        [UI_APP_WEATHER] = weather_page_build,     [UI_APP_TIMER] = timer_page_build,
+        [UI_APP_TOMATO] = tomato_page_build,       [UI_APP_STOPWATCH] = stopwatch_page_build,
+        [UI_APP_SETTINGS] = settings_page_build,
     };
     s_on_alert = on_alert;
     for (int i = 0; i < UI_APP_COUNT; i++) {

@@ -259,7 +259,9 @@ int main(void) {
     host_zone(s_settings.tz_name, sizeof(s_settings.tz_name));
     ui_update_settings(&s_settings);
     ui_set_settings_handler(on_setting);
+#ifdef AK_LIGHTS
     lights_ui_start();
+#endif
     show_sample_weather();
     knob_emulation_create();
     panel_mask_create();

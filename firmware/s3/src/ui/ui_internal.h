@@ -43,9 +43,13 @@ void ui_now_playing_bg_set(ui_now_playing_bg_t *bg, ui_bg_source_t source);
 
 #include "ui.h"
 
-// The app pages, in launcher order (clockwise from the top).
+// The app pages, in launcher order (clockwise from the top). Lights stays
+// out until a real backend replaces lights_mock.c; build with AK_LIGHTS to
+// lay it out.
 typedef enum {
+#ifdef AK_LIGHTS
     UI_APP_LIGHTS,
+#endif
     UI_APP_TIMER,
     UI_APP_TOMATO,
     UI_APP_STOPWATCH,

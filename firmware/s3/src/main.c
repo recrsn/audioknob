@@ -187,7 +187,9 @@ void app_main(void) {
     ui_set_display_handler(lcd_driver_set_backlight_on);
     lv_indev_add_event_cb(lcd_driver_touch_indev(), on_touch_clicked, LV_EVENT_CLICKED, NULL);
     settings_ui_start();
+#ifdef AK_LIGHTS
     lights_ui_start();
+#endif
     lv_timer_create(state_poll_timer_cb, 33, NULL);
     lcd_driver_lvgl_unlock();
 
