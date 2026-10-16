@@ -61,6 +61,7 @@ static void restyle(void) {
 
 static void set_phase(phase_t phase) {
     tomato.phase = phase;
+    tomato.cd.alert = phase == PHASE_FOCUS ? UI_ALERT_FOCUS_END : UI_ALERT_BREAK_END;
     restyle();
     countdown_set_total(&tomato.cd, tomato.minutes[phase] * 60 * 1000);
 }

@@ -3,6 +3,7 @@
 
 #include "airplay.h"
 #include "art_color.h"
+#include "alarm_sound.h"
 #include "audio_out.h"
 #include "audio_source.h"
 #include "device_name.h"
@@ -188,11 +189,19 @@ static void on_firmware(bool install) {
     }
 }
 
-static void on_alert(bool ringing) {
-    if (ringing && settings_ui_haptics()) {
-        haptic_alarm_start();
-    } else {
+static void on_alert(ui_alert_t alert) {
+    if (alert == UI_ALERT_NONE) {
         haptic_alarm_stop();
+        alarm_sound_stop();
+        return;
+    }
+    if (settings_ui_haptics()) {
+        haptic_alarm_start();
+    }
+    if (settings_ui_timer_sound()) {
+        alarm_sound_start(alert == UI_ALERT_FOCUS_END   ? ALARM_SOUND_FOCUS_END
+                          : alert == UI_ALERT_BREAK_END ? ALARM_SOUND_BREAK_END
+                                                        : ALARM_SOUND_TIMER);
     }
 }
 
@@ -239,6 +248,7 @@ void app_main(void) {
     // Past boot strapping, so GPIO0 (CH445P select) is safe to drive now.
     audio_source_init(on_preempted);
     focus_sound_init();
+    alarm_sound_init();
 
     lcd_driver_init();
     haptic_init(lcd_driver_i2c_bus());

@@ -37,3 +37,9 @@ void audio_source_release_local(void);
 // Hold all sources silent during firmware uploads and installation.
 void audio_source_suspend(bool suspended);
 bool audio_source_suspended(void);
+
+
+// While held, the switch stays on the S3 side whatever the arbitration
+// above decides (it carries on underneath); releasing puts the owner's side
+// back. For the alarm chime, which mutes A2DP rather than pausing it.
+void audio_source_hold_s3(bool hold);

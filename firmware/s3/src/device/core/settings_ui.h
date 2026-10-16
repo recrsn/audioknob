@@ -6,7 +6,7 @@
 #include "ui.h"
 
 // Applies the user's settings (backlight, timezone, Bluetooth, AirPlay
-// versions, ambience volume) and connects them to the Settings page: loads them from NVS,
+// versions, ambience volume, the timer chime) and connects them to the Settings page: loads them from NVS,
 // handles changes from the UI, persists them, follows the
 // location's timezone while that's on "automatic", and pushes values (including
 // WiFi/memory info) back to the page.
@@ -28,3 +28,6 @@ void settings_ui_change(ui_setting_t setting, int value, const char *zone);
 void settings_ui_set_location(const geo_t *geo);
 
 bool settings_ui_haptics(void);
+// Whether a ringing countdown chimes; alarm_sound already has the voice
+// and volume.
+bool settings_ui_timer_sound(void);

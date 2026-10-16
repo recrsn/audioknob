@@ -29,7 +29,7 @@ typedef struct {
 
 // Indexed by ui_app_t.
 static tool_page_t s_pages[UI_APP_COUNT];
-static void (*s_on_alert)(lv_obj_t *screen, bool ringing);
+static void (*s_on_alert)(lv_obj_t *screen, ui_alert_t alert);
 
 // -- shared widgets --
 
@@ -363,7 +363,7 @@ void countdown_reset(countdown_t *cd) {
         pulse_stop(cd->ring);
         pulse_stop(cd->time_label);
         if (s_on_alert) {
-            s_on_alert(cd->screen, false);
+            s_on_alert(cd->screen, UI_ALERT_NONE);
         }
         if (cd->dismissed) {
             cd->dismissed(cd);
@@ -406,7 +406,7 @@ static void countdown_expire(countdown_t *cd) {
     pulse_start(cd->ring);
     pulse_start(cd->time_label);
     if (s_on_alert) {
-        s_on_alert(cd->screen, true);
+        s_on_alert(cd->screen, cd->alert);
     }
 }
 
@@ -465,7 +465,7 @@ static void tools_tick_cb(lv_timer_t *t) {
     }
 }
 
-void ui_tools_build(lv_obj_t *const screens[UI_APP_COUNT], void (*on_alert)(lv_obj_t *screen, bool ringing)) {
+void ui_tools_build(lv_obj_t *const screens[UI_APP_COUNT], void (*on_alert)(lv_obj_t *screen, ui_alert_t alert)) {
     static void (*const builders[UI_APP_COUNT])(lv_obj_t *) = {
         [UI_APP_RADIO] = radio_page_build,
 #ifdef AK_LIGHTS

@@ -167,6 +167,8 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddBoolToObject(json, "fahrenheit", s.fahrenheit);
     cJSON_AddBoolToObject(json, "haptics", s.haptics);
     cJSON_AddBoolToObject(json, "artColors", s.art_colors);
+    cJSON_AddNumberToObject(json, "timerSound", s.timer_sound);
+    cJSON_AddNumberToObject(json, "timerVolume", s.timer_volume);
     cJSON_AddBoolToObject(json, "bluetooth", s.bluetooth);
     cJSON_AddNumberToObject(json, "airplay", s.airplay);
     cJSON_AddNumberToObject(json, "airShow", s.air_show);
@@ -308,6 +310,8 @@ static esp_err_t set_handler(httpd_req_t *req) {
         {"fahrenheit", UI_SETTING_FAHRENHEIT, 0, 1},
         {"haptics", UI_SETTING_HAPTICS, 0, 1},
         {"artColors", UI_SETTING_ART_COLORS, 0, 1},
+        {"timerSound", UI_SETTING_TIMER_SOUND, 0, UI_TIMER_SOUND_COUNT - 1},
+        {"timerVolume", UI_SETTING_TIMER_VOLUME, UI_TIMER_VOLUME_MIN, 100},
         {"bluetooth", UI_SETTING_BLUETOOTH, 0, 1},
         {"airplay", UI_SETTING_AIRPLAY, 0, UI_AIRPLAY_1 | UI_AIRPLAY_2},
         {"airShow", UI_SETTING_AIR_SHOW, UI_AIR_SHOW_OFF, UI_AIR_SHOW_ALWAYS},

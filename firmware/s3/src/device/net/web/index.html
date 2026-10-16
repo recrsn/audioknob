@@ -153,6 +153,12 @@ details[open] summary{margin-bottom:8px}
   <div class="row"><span>Haptics</span><label class="sw"><input type="checkbox" id="haptics"><i></i></label></div>
 </section>
 
+<h2>Timers</h2>
+<section class="card">
+  <div class="row"><span>Timer sound</span><div class="seg" id="timerSound"><button data-v="0">Off</button><button data-v="1">Chime</button><button data-v="2">Bell</button></div></div>
+  <div class="row"><span>Timer volume</span><div class="slider"><input type="range" id="timerVolume" min="5" max="100" step="5"><output id="timervolval"></output></div></div>
+</section>
+
 <h2>Time and weather</h2>
 <section class="card">
   <div class="row"><span>Clock</span><div class="seg" id="clock24"><button data-v="0">12-hour</button><button data-v="1">24-hour</button></div></div>
@@ -421,6 +427,9 @@ function render(s) {
   $("ambplay").textContent = s.ambience.playing ? "Stop" : "Play";
   ambPlaying = s.ambience.playing;
   $("haptics").checked = s.haptics;
+  setSeg("timerSound", s.timerSound);
+  if (!busy.has($("timerVolume"))) $("timerVolume").value = s.timerVolume;
+  setText("timervolval", s.timerVolume + "%");
   setSeg("clock24", s.clock24);
   setSeg("fahrenheit", s.fahrenheit);
   setSeg("airShow", s.airShow);
@@ -536,7 +545,10 @@ $("focusSound").onchange = e => set("focusSound", e.target.value);
 holdable($("ambienceVolume"), v => set("ambienceVolume", v), 80);
 $("ambienceVolume").addEventListener("input", e => setText("ambval", e.target.value + "%"));
 $("haptics").onchange = e => set("haptics", +e.target.checked);
-for (const id of ["clock24", "fahrenheit", "airShow"]) {
+// Each value sent plays a sample on the device, so the slider waits longer.
+holdable($("timerVolume"), v => set("timerVolume", v), 300);
+$("timerVolume").addEventListener("input", e => setText("timervolval", e.target.value + "%"));
+for (const id of ["clock24", "fahrenheit", "airShow", "timerSound"]) {
   $(id).onclick = e => {
     const v = e.target.dataset.v;
     if (v === undefined) return;

@@ -7,6 +7,8 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include <string.h>
 
 // S3_I2S_DAC_BCK/LRCK-WS/DIN -- see spec.md's pin reference table.
 #define I2S_BCK_GPIO 39
@@ -30,6 +32,11 @@ static uint64_t s_sent;
 static uint64_t s_lost;
 static uint32_t s_underruns;
 static bool s_had_queue;
+static portMUX_TYPE s_cursor_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static SemaphoreHandle_t s_write_lock;
+static audio_out_mix_t s_mix;
+static int16_t s_mix_buf[AUDIO_OUT_MIX_FRAMES * 2];
 
 static bool IRAM_ATTR on_sent(i2s_chan_handle_t handle, i2s_event_data_t *event, void *ctx) {
     (void)handle;
@@ -44,6 +51,8 @@ void audio_out_init(void) {
     chan_cfg.dma_frame_num = DMA_FRAME_NUM;
     chan_cfg.auto_clear = true;
     ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &s_tx_chan, NULL));
+    s_write_lock = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(s_write_lock ? ESP_OK : ESP_ERR_NO_MEM);
 
     i2s_std_config_t std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO_OUT_SAMPLE_RATE),
@@ -63,7 +72,7 @@ void audio_out_init(void) {
     ESP_LOGI(TAG, "I2S TX ready (BCK=%d WS=%d DOUT=%d)", I2S_BCK_GPIO, I2S_WS_GPIO, I2S_DOUT_GPIO);
 }
 
-void audio_out_write(const int16_t *pcm, size_t frames) {
+static void write_raw(const int16_t *pcm, size_t frames) {
     const uint8_t *data = (const uint8_t *)pcm;
     size_t len = frames * FRAME_BYTES;
     size_t written = 0;
@@ -80,11 +89,34 @@ void audio_out_write(const int16_t *pcm, size_t frames) {
     }
 }
 
+void audio_out_write(const int16_t *pcm, size_t frames) {
+    xSemaphoreTake(s_write_lock, portMAX_DELAY);
+    if (!s_mix) {
+        write_raw(pcm, frames);
+    }
+    while (s_mix && frames > 0) {
+        size_t n = frames < AUDIO_OUT_MIX_FRAMES ? frames : AUDIO_OUT_MIX_FRAMES;
+        memcpy(s_mix_buf, pcm, n * FRAME_BYTES);
+        s_mix(s_mix_buf, n);
+        write_raw(s_mix_buf, n);
+        pcm += n * 2;
+        frames -= n;
+    }
+    xSemaphoreGive(s_write_lock);
+}
+
+void audio_out_set_mix(audio_out_mix_t mix) {
+    xSemaphoreTake(s_write_lock, portMAX_DELAY);
+    s_mix = mix;
+    xSemaphoreGive(s_write_lock);
+}
+
 uint32_t audio_out_queued_us(int64_t *now_us) {
+    // Two writers may ask at once; s_lost must only ever grow.
+    taskENTER_CRITICAL(&s_cursor_lock);
     uint64_t submitted = __atomic_load_n(&s_submitted, __ATOMIC_RELAXED);
     uint64_t sent = __atomic_load_n(&s_sent, __ATOMIC_RELAXED);
     *now_us = esp_timer_get_time();
-
     uint64_t queued = 0;
     if (sent > submitted + s_lost) {
         s_lost = sent - submitted;
@@ -97,6 +129,7 @@ uint32_t audio_out_queued_us(int64_t *now_us) {
         queued = submitted + s_lost - sent;
     }
     s_had_queue = queued > 0;
+    taskEXIT_CRITICAL(&s_cursor_lock);
 
     // sent only advances a whole descriptor at a time, so on average half of
     // the one playing has already been heard.

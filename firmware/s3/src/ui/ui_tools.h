@@ -61,6 +61,7 @@ struct countdown {
     uint32_t remaining_ms; // authoritative unless running
     uint32_t end_tick;     // authoritative while running
     uint32_t alert_tick;
+    ui_alert_t alert; // what its ringing reports
     // Page hooks. changed() runs after every refresh (every tick while
     // running), so it must be cheap and idempotent. expired()/dismissed()
     // are optional and bracket the alert.

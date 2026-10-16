@@ -17,6 +17,8 @@ static const settings_t k_defaults = {
     .fahrenheit = false,
     .haptics = true,
     .art_colors = true,
+    .timer_sound = UI_TIMER_SOUND_CHIME,
+    .timer_volume = 60,
     .bluetooth = true,
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .air_show = UI_AIR_SHOW_HIGH,
@@ -57,6 +59,14 @@ void settings_load(settings_t *out) {
     out->fahrenheit = get_u8(nvs, "fahrenheit", k_defaults.fahrenheit);
     out->haptics = get_u8(nvs, "haptics", k_defaults.haptics);
     out->art_colors = get_u8(nvs, "art_colors", k_defaults.art_colors);
+    out->timer_sound = get_u8(nvs, "timer_sound", k_defaults.timer_sound);
+    if (out->timer_sound >= UI_TIMER_SOUND_COUNT) {
+        out->timer_sound = k_defaults.timer_sound;
+    }
+    out->timer_volume = get_u8(nvs, "timer_volume", k_defaults.timer_volume);
+    if (out->timer_volume < UI_TIMER_VOLUME_MIN || out->timer_volume > 100) {
+        out->timer_volume = k_defaults.timer_volume;
+    }
     out->bluetooth = get_u8(nvs, "bluetooth", k_defaults.bluetooth);
     out->airplay = get_u8(nvs, "airplay", k_defaults.airplay);
     out->air_show = get_u8(nvs, "air_show", k_defaults.air_show);
@@ -88,6 +98,8 @@ void settings_save(const settings_t *s) {
     nvs_set_u8(nvs, "fahrenheit", s->fahrenheit);
     nvs_set_u8(nvs, "haptics", s->haptics);
     nvs_set_u8(nvs, "art_colors", s->art_colors);
+    nvs_set_u8(nvs, "timer_sound", s->timer_sound);
+    nvs_set_u8(nvs, "timer_volume", s->timer_volume);
     nvs_set_u8(nvs, "bluetooth", s->bluetooth);
     nvs_set_u8(nvs, "airplay", s->airplay);
     nvs_set_u8(nvs, "air_show", s->air_show);

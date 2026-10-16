@@ -1168,26 +1168,27 @@ static void switch_screen_build(void) {
     home_zone_create(switch_screen.screen, switch_back_cb);
 }
 
-static void (*s_alert_handler)(bool ringing);
+static void (*s_alert_handler)(ui_alert_t alert);
 static bool s_ringing;
 
-void ui_set_alert_handler(void (*handler)(bool ringing)) {
+void ui_set_alert_handler(void (*handler)(ui_alert_t alert)) {
     s_alert_handler = handler;
 }
 
-// Timer and tomato can ring at once; the handler hears only the edges of
-// "anything ringing".
-static void tool_alert_cb(lv_obj_t *screen, bool ringing) {
+// Timer and tomato can ring at once: the handler hears each one start, so
+// the latest one's chime plays, but only the last dismissal.
+static void tool_alert_cb(lv_obj_t *screen, ui_alert_t alert) {
+    bool ringing = alert != UI_ALERT_NONE;
     if (ringing) {
         ui_wake();
         launcher_hide();
         show_screen(screen);
     }
     bool any = ui_tools_alerting();
-    if (any != s_ringing) {
+    if (ringing || any != s_ringing) {
         s_ringing = any;
         if (s_alert_handler) {
-            s_alert_handler(any);
+            s_alert_handler(any ? alert : UI_ALERT_NONE);
         }
     }
 }

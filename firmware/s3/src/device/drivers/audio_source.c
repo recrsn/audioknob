@@ -23,6 +23,7 @@ static const char *TAG = "audio_source";
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static audio_source_t s_active = AUDIO_SOURCE_ESP32;
+static bool s_s3_held;
 static bool s_esp32_was_playing;
 static bool s_suspended;
 static void pause_a2dp(void);
@@ -32,7 +33,8 @@ static void (*s_on_local_preempted)(void);
 // Caller holds s_lock, so the GPIO level can never disagree with s_active.
 static void select_locked(audio_source_t source) {
     s_active = source;
-    gpio_set_level(PIN_I2S_SWITCH, source == AUDIO_SOURCE_ESP32 ? SWITCH_LEVEL_ESP32 : SWITCH_LEVEL_S3);
+    bool s3 = source != AUDIO_SOURCE_ESP32 || s_s3_held;
+    gpio_set_level(PIN_I2S_SWITCH, s3 ? SWITCH_LEVEL_S3 : SWITCH_LEVEL_ESP32);
 }
 
 // Takes the DAC for `source` and tells whichever of this MCU's sources had
@@ -129,6 +131,13 @@ void audio_source_release(audio_source_t source) {
     if (!s_suspended && s_active == source) {
         select_locked(AUDIO_SOURCE_ESP32);
     }
+    taskEXIT_CRITICAL(&s_lock);
+}
+
+void audio_source_hold_s3(bool hold) {
+    taskENTER_CRITICAL(&s_lock);
+    s_s3_held = hold;
+    select_locked(s_active);
     taskEXIT_CRITICAL(&s_lock);
 }
 

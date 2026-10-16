@@ -7,7 +7,8 @@
 
 // A list under the title: the knob moves the selection (the list scrolls to
 // keep it near the middle) and a press, or a tap on a row, acts on it.
-// Switches flip at once; brightness, sleep and timezone are edited in place:
+// Switches flip at once, and so does the timer sound, which plays the pick;
+// brightness, sleep, timer volume and timezone are edited in place:
 // the knob changes the value and a cancel/apply strip covers the rows below
 // until one is tapped (a press applies too). The name and web page rows (and turning Auto location off) open a
 // QR code for the device's web page, which has every setting too (a name or
@@ -30,6 +31,7 @@
 #define SET_FADE_MIN    40
 #define SET_BRIGHT_STEP 5
 #define SET_BRIGHT_MIN  5
+#define SET_VOLUME_STEP 5
 // The edit mode's cancel/apply strip, from under the edited row to the
 // list's end.
 #define SET_EDIT_GAP_TOP UI_SPACE_XS
@@ -51,6 +53,8 @@ typedef enum {
     ROW_SLEEP,
     ROW_ART_COLORS,
     ROW_HAPTICS,
+    ROW_TIMER_SOUND,
+    ROW_TIMER_VOLUME,
     ROW_CLOCK,
     ROW_LOCATION,
     ROW_TIMEZONE,
@@ -84,6 +88,8 @@ static const struct {
     [ROW_SLEEP] = {"Sleep after", KIND_VALUE},
     [ROW_ART_COLORS] = {"Art colours", KIND_SWITCH},
     [ROW_HAPTICS] = {"Haptics", KIND_SWITCH},
+    [ROW_TIMER_SOUND] = {"Timer sound", KIND_VALUE},
+    [ROW_TIMER_VOLUME] = {"Timer volume", KIND_VALUE},
     [ROW_CLOCK] = {"Clock", KIND_VALUE},
     [ROW_LOCATION] = {"Auto location", KIND_SWITCH},
     [ROW_TIMEZONE] = {"Timezone", KIND_VALUE},
@@ -113,6 +119,9 @@ static const struct {
     {NULL, ROW_SLEEP},
     {NULL, ROW_ART_COLORS},
     {NULL, ROW_HAPTICS},
+    HEADER("TIMERS"),
+    {NULL, ROW_TIMER_SOUND},
+    {NULL, ROW_TIMER_VOLUME},
     HEADER("TIME AND WEATHER"),
     {NULL, ROW_CLOCK},
     {NULL, ROW_LOCATION},
@@ -142,6 +151,8 @@ static ui_settings_t s_settings = {
     .clock_24h = true,
     .haptics = true,
     .art_colors = true,
+    .timer_sound = UI_TIMER_SOUND_CHIME,
+    .timer_volume = 60,
     .bluetooth = true,
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .air_show = UI_AIR_SHOW_HIGH,
@@ -160,7 +171,7 @@ static struct {
     lv_obj_t *edit_bar;            // cancel/apply, while editing
     int selected;
     bool editing;
-    uint16_t edit_from;            // brightness or sleep_s when editing began
+    uint16_t edit_from;            // the edited value when editing began
     int tz_pick;                   // TZ_AUTO or a tz_db index, while editing the timezone
     lv_obj_t *qr_overlay; // while open
     lv_obj_t *qr;
@@ -301,6 +312,14 @@ static void value_text(int row, char *buf, size_t len) {
         snprintf(buf, len, editing ? LV_SYMBOL_LEFT " %s " LV_SYMBOL_RIGHT : "%s", text);
         break;
     }
+    case ROW_TIMER_SOUND: {
+        static const char *const names[UI_TIMER_SOUND_COUNT] = {"Off", "Chime", "Bell"};
+        snprintf(buf, len, "%s", names[s->timer_sound < UI_TIMER_SOUND_COUNT ? s->timer_sound : 0]);
+        break;
+    }
+    case ROW_TIMER_VOLUME:
+        snprintf(buf, len, editing ? LV_SYMBOL_LEFT " %u%% " LV_SYMBOL_RIGHT : "%u%%", s->timer_volume);
+        break;
     case ROW_CLOCK:
         snprintf(buf, len, "%s", s->clock_24h ? "24-hour" : "12-hour");
         break;
@@ -555,13 +574,15 @@ static void edit_bar_place(void) {
 static void edit_begin(void) {
     edit_bar_place();
     st.editing = true;
-    st.edit_from = st.selected == ROW_BRIGHTNESS ? s_settings.brightness : s_settings.sleep_s;
+    st.edit_from = st.selected == ROW_BRIGHTNESS     ? s_settings.brightness
+                   : st.selected == ROW_TIMER_VOLUME ? s_settings.timer_volume
+                                                     : s_settings.sleep_s;
     if (st.selected == ROW_TIMEZONE) {
         st.tz_pick = s_settings.tz_auto ? TZ_AUTO : tz_db_find(s_settings.tz_name);
     }
 }
 
-// Brightness and sleep change as the knob turns, so cancelling puts them
+// Brightness, sleep and timer volume change as the knob turns, so cancelling puts them
 // back; the timezone only takes effect once applied.
 static void edit_end(bool apply) {
     if (!st.editing) {
@@ -574,6 +595,8 @@ static void edit_end(bool apply) {
         emit(UI_SETTING_BRIGHTNESS, st.edit_from, NULL);
     } else if (st.selected == ROW_SLEEP && !apply) {
         emit(UI_SETTING_SLEEP, st.edit_from, NULL);
+    } else if (st.selected == ROW_TIMER_VOLUME && !apply) {
+        emit(UI_SETTING_TIMER_VOLUME, st.edit_from, NULL);
     }
     render();
 }
@@ -600,8 +623,12 @@ static void activate(void) {
     switch (st.selected) {
     case ROW_BRIGHTNESS:
     case ROW_SLEEP:
+    case ROW_TIMER_VOLUME:
     case ROW_TIMEZONE:
         edit_begin();
+        break;
+    case ROW_TIMER_SOUND:
+        emit(UI_SETTING_TIMER_SOUND, (s->timer_sound + 1) % UI_TIMER_SOUND_COUNT, NULL);
         break;
     case ROW_CLOCK:
         emit(UI_SETTING_CLOCK_24H, !s->clock_24h, NULL);
@@ -678,6 +705,10 @@ static bool settings_rotate(int steps) {
         int pct = s_settings.brightness + steps * SET_BRIGHT_STEP;
         pct = pct < SET_BRIGHT_MIN ? SET_BRIGHT_MIN : pct > 100 ? 100 : pct;
         emit(UI_SETTING_BRIGHTNESS, pct, NULL);
+    } else if (st.selected == ROW_TIMER_VOLUME) {
+        int pct = s_settings.timer_volume + steps * SET_VOLUME_STEP;
+        pct = pct < UI_TIMER_VOLUME_MIN ? UI_TIMER_VOLUME_MIN : pct > 100 ? 100 : pct;
+        emit(UI_SETTING_TIMER_VOLUME, pct, NULL);
     } else if (st.selected == ROW_SLEEP) {
         int i = sleep_option(s_settings.sleep_s) + steps;
         i = i < 0 ? 0 : i >= SLEEP_OPTION_COUNT ? SLEEP_OPTION_COUNT - 1 : i;

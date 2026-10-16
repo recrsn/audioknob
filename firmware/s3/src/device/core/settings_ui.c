@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "airplay.h"
+#include "alarm_sound.h"
 #include "device_name.h"
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
@@ -67,6 +68,19 @@ static void apply_timezone(void) {
     }
 }
 
+static void apply_timer_sound(void) {
+    alarm_sound_configure(s_settings.timer_sound == UI_TIMER_SOUND_BELL ? ALARM_SOUND_BELL : ALARM_SOUND_CHIME,
+                          s_settings.timer_volume);
+}
+
+// A change plays what the timer will sound like now.
+static void preview_timer_sound(void) {
+    apply_timer_sound();
+    if (s_settings.timer_sound != UI_TIMER_SOUND_OFF) {
+        alarm_sound_preview(ALARM_SOUND_TIMER);
+    }
+}
+
 static void apply_airplay(void) {
     airplay_set_protocols(s_settings.airplay & UI_AIRPLAY_1, s_settings.airplay & UI_AIRPLAY_2);
 }
@@ -79,6 +93,8 @@ static void fill(ui_settings_t *out) {
         .fahrenheit = s_settings.fahrenheit,
         .haptics = s_settings.haptics,
         .art_colors = s_settings.art_colors,
+        .timer_sound = s_settings.timer_sound,
+        .timer_volume = s_settings.timer_volume,
         .bluetooth = s_settings.bluetooth,
         .airplay = s_settings.airplay,
         .airplay2_available = airplay_supports_airplay2(),
@@ -129,6 +145,14 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         break;
     case UI_SETTING_ART_COLORS:
         s_settings.art_colors = value;
+        break;
+    case UI_SETTING_TIMER_SOUND:
+        s_settings.timer_sound = (uint8_t)value;
+        preview_timer_sound();
+        break;
+    case UI_SETTING_TIMER_VOLUME:
+        s_settings.timer_volume = (uint8_t)value;
+        preview_timer_sound();
         break;
     case UI_SETTING_TIMEZONE:
         snprintf(s_settings.tz, sizeof(s_settings.tz), "%s", zone ? zone : "");
@@ -187,6 +211,7 @@ void settings_ui_init(void) {
     uart_link_set_bluetooth(s_settings.bluetooth);
     apply_airplay();
     focus_sound_set_volume(s_settings.ambience_volume);
+    apply_timer_sound();
     const esp_timer_create_args_t args = {.callback = save_cb, .name = "settings_save"};
     ESP_ERROR_CHECK(esp_timer_create(&args, &s_save_timer));
 }
@@ -219,4 +244,8 @@ void settings_ui_set_location(const geo_t *geo) {
 
 bool settings_ui_haptics(void) {
     return s_settings.haptics;
+}
+
+bool settings_ui_timer_sound(void) {
+    return s_settings.timer_sound != UI_TIMER_SOUND_OFF;
 }

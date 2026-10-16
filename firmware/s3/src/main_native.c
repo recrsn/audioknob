@@ -34,6 +34,8 @@ static ui_settings_t s_settings = {
     .clock_24h = true,
     .haptics = true,
     .art_colors = true,
+    .timer_sound = UI_TIMER_SOUND_CHIME,
+    .timer_volume = 60,
     .bluetooth = true,
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .airplay2_available = true,
@@ -120,6 +122,12 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
     case UI_SETTING_FOCUS_SOUND:
         s_settings.focus_sound = (uint8_t)value;
         break;
+    case UI_SETTING_TIMER_SOUND:
+        s_settings.timer_sound = (uint8_t)value;
+        break;
+    case UI_SETTING_TIMER_VOLUME:
+        s_settings.timer_volume = (uint8_t)value;
+        break;
     }
     ui_update_settings(&s_settings);
 }
@@ -162,6 +170,12 @@ static void pairing_tick_cb(lv_timer_t *timer) {
         s_pairing_hold = 3;
     }
     ui_update_pairing(s_settings.bluetooth ? &s_pairing : NULL);
+}
+
+// No audio here; the log shows which chime the device would play.
+static void on_alert(ui_alert_t alert) {
+    static const char *const names[] = {"stop", "timer", "focus end", "break end"};
+    printf("alert: %s (sound %u, volume %u%%)\n", names[alert], s_settings.timer_sound, s_settings.timer_volume);
 }
 
 static void on_pairing(ui_pairing_action_t action) {
@@ -501,6 +515,7 @@ int main(void) {
     ui_update_settings(&s_settings);
     ui_set_settings_handler(on_setting);
     ui_set_ambience_handler(&(ui_ambience_handler_t){.play = on_ambience_play, .stop = on_ambience_stop});
+    ui_set_alert_handler(on_alert);
 #ifdef AK_LIGHTS
     lights_ui_start();
 #endif

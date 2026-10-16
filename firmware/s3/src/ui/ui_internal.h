@@ -81,7 +81,7 @@ typedef struct {
 // on_alert(screen, true) runs when a countdown on `screen` (timer, tomato)
 // reaches zero, so ui.c can bring it forward from wherever the user is;
 // on_alert(screen, false) when that alert is dismissed.
-void ui_tools_build(lv_obj_t *const screens[UI_APP_COUNT], void (*on_alert)(lv_obj_t *screen, bool ringing));
+void ui_tools_build(lv_obj_t *const screens[UI_APP_COUNT], void (*on_alert)(lv_obj_t *screen, ui_alert_t alert));
 
 // The last settings pushed by ui_update_settings() (clock format, units).
 const ui_settings_t *ui_settings_current(void);

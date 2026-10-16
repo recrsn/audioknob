@@ -137,10 +137,17 @@ bool ui_knob_press(void);
 // Opens the app launcher, or closes it to the clock; never falls through.
 void ui_knob_long_press(void);
 
-// Called on the LVGL task when a countdown (timer, tomato) starts ringing
-// (true) and once nothing rings any more (false), so hardware can add a
-// buzz; must not block.
-void ui_set_alert_handler(void (*handler)(bool ringing));
+typedef enum {
+    UI_ALERT_NONE,
+    UI_ALERT_TIMER,
+    UI_ALERT_FOCUS_END, // tomato: a focus session ran out
+    UI_ALERT_BREAK_END, // tomato: a short or long break ran out
+} ui_alert_t;
+
+// Called on the LVGL task when a countdown (timer, tomato) starts ringing,
+// with what rang, and with UI_ALERT_NONE once nothing rings any more, so
+// hardware can add a buzz and a chime; must not block.
+void ui_set_alert_handler(void (*handler)(ui_alert_t alert));
 
 // Called on the LVGL task when the display goes to sleep (false) after the
 // Settings page's idle timeout, and when input, a ringing countdown, a
@@ -261,6 +268,8 @@ typedef struct {
     bool fahrenheit;
     bool haptics;
     bool art_colors;   // now-playing screens take the cover art's colour
+    uint8_t timer_sound;  // UI_TIMER_SOUND_*
+    uint8_t timer_volume; // UI_TIMER_VOLUME_MIN-100 %
     bool bluetooth;
     uint8_t airplay;   // UI_AIRPLAY_* mask; 0 = off
     bool airplay2_available; // else only UI_AIRPLAY_1 means anything
@@ -306,7 +315,18 @@ typedef enum {
     UI_SETTING_AMBIENCE_SOUND,  // value: ui_ambience_t
     UI_SETTING_AMBIENCE_VOLUME, // value: 0-100
     UI_SETTING_FOCUS_SOUND,     // value: ui_ambience_t + 1, or 0 for none
+    UI_SETTING_TIMER_SOUND,  // value: UI_TIMER_SOUND_*
+    UI_SETTING_TIMER_VOLUME, // value: UI_TIMER_VOLUME_MIN-100
 } ui_setting_t;
+
+typedef enum {
+    UI_TIMER_SOUND_OFF,
+    UI_TIMER_SOUND_CHIME,
+    UI_TIMER_SOUND_BELL,
+    UI_TIMER_SOUND_COUNT,
+} ui_timer_sound_t;
+
+#define UI_TIMER_VOLUME_MIN 5
 
 #define UI_AIRPLAY_1 (1u << 0)
 #define UI_AIRPLAY_2 (1u << 1)

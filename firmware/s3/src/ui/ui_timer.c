@@ -69,6 +69,7 @@ void timer_page_build(lv_obj_t *screen) {
                                                    .rotate = timer_rotate,
                                                    .press = timer_press});
 
+    timer.cd.alert = UI_ALERT_TIMER;
     timer.cd.ring = tool_dial_create(screen, tint, COUNTDOWN_RING_RANGE);
     tool_ring_jog_create(screen, timer_rotate);
     tool_title_create(screen, "TIMER", tint);
