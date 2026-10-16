@@ -117,7 +117,6 @@ bool audio_source_claim(audio_source_t source) {
 }
 
 static void pause_a2dp(void) {
-
     wireless_state_t esp32;
     if (uart_link_get_latest(&esp32) && esp32.connected && esp32.playing) {
         ESP_LOGI(TAG, "pausing A2DP");

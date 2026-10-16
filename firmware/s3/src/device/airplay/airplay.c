@@ -161,11 +161,6 @@ static bool on_raop_event(const raop_event_t *event) {
         break;
 
     case RAOP_EVENT_PLAY:
-        if (!audio_source_claim_airplay()) {
-            airplay_preempt();
-            break;
-        }
-        set_playing(true);
         if (!audio_source_claim(AUDIO_SOURCE_AIRPLAY)) {
             airplay_preempt();
             break;
