@@ -14,6 +14,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "now_playing.h"
+#include "ota.h"
 #include "settings_ui.h"
 #include "tz.h"
 #include "uart_link.h"
@@ -25,6 +26,9 @@
 #define ZONES_CHUNK  1024
 // Lets the reply reach the browser before the device restarts.
 #define FORGET_DELAY_MS 300
+// httpd_req_recv() gives up after the server's 5 s receive timeout; a
+// phone that pauses mid-upload gets a few of those.
+#define UPLOAD_RETRIES 3
 
 static const char *TAG = "web_settings";
 
@@ -79,6 +83,20 @@ static cJSON *now_playing_json(void) {
     return np;
 }
 
+static cJSON *update_json(void) {
+    static const char *const k_states[] = {
+        [OTA_IDLE] = "idle",         [OTA_RECEIVING] = "receiving", [OTA_READY] = "ready",
+        [OTA_DECLINED] = "declined", [OTA_FAILED] = "failed",
+    };
+    ota_status_t ota;
+    ota_get_status(&ota);
+    cJSON *update = cJSON_CreateObject();
+    cJSON_AddStringToObject(update, "state", k_states[ota.state]);
+    cJSON_AddStringToObject(update, "version", ota.version);
+    cJSON_AddStringToObject(update, "error", ota.error);
+    return update;
+}
+
 static esp_err_t state_handler(httpd_req_t *req) {
     ui_settings_t s;
     settings_ui_snapshot(&s);
@@ -103,6 +121,7 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddBoolToObject(json, "locationAuto", s.location_auto);
     cJSON_AddStringToObject(json, "location", s.location);
     cJSON_AddItemToObject(json, "np", now_playing_json());
+    cJSON_AddItemToObject(json, "update", update_json());
     // null while Bluetooth is off or the ESP32 isn't answering.
     pairing_status_t pairing;
     if (s.bluetooth && uart_link_get_pairing(&pairing)) {
@@ -388,9 +407,37 @@ static esp_err_t forget_handler(httpd_req_t *req) {
     return ESP_OK;
 }
 
-void web_settings_start(void) {
+static int read_upload(void *ctx, char *buf, size_t len) {
+    for (int tries = 0; tries < UPLOAD_RETRIES; tries++) {
+        int n = httpd_req_recv(ctx, buf, len);
+        if (n != HTTPD_SOCK_ERR_TIMEOUT) {
+            return n;
+        }
+    }
+    return -1;
+}
+
+// The raw image as the request body. It only lands in the spare slot: the
+// device asks before booting it.
+static esp_err_t update_handler(httpd_req_t *req) {
+    if (!same_origin(req)) {
+        return httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Cross-site request refused");
+    }
+    if (ota_receive(req->content_len, read_upload, req)) {
+        return send_ok(req);
+    }
+    ota_status_t ota;
+    ota_get_status(&ota);
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota.error);
+    // Closes the socket instead of draining what's left of a refused
+    // image; the browser may see that as a network error, so the page
+    // reads the reason from /api/state.
+    return ESP_FAIL;
+}
+
+bool web_settings_start(void) {
     if (s_server) {
-        return;
+        return true;
     }
     static const httpd_uri_t uris[] = {
         {.uri = "/", .method = HTTP_GET, .handler = root_handler},
@@ -404,18 +451,21 @@ void web_settings_start(void) {
         {.uri = "/api/transport", .method = HTTP_POST, .handler = transport_handler},
         {.uri = "/api/pairing", .method = HTTP_POST, .handler = pairing_handler},
         {.uri = "/api/forget", .method = HTTP_POST, .handler = forget_handler},
+        {.uri = "/api/update", .method = HTTP_POST, .handler = update_handler},
     };
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.lru_purge_enable = true;
-    cfg.stack_size = 5120;
+    // esp_ota_end()'s image check runs on this stack too.
+    cfg.stack_size = 6144;
     cfg.max_uri_handlers = sizeof(uris) / sizeof(uris[0]);
     if (httpd_start(&s_server, &cfg) != ESP_OK) {
         ESP_LOGE(TAG, "HTTP server failed to start");
         s_server = NULL;
-        return;
+        return false;
     }
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         httpd_register_uri_handler(s_server, &uris[i]);
     }
     ESP_LOGI(TAG, "device page up");
+    return true;
 }

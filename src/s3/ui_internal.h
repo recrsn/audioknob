@@ -108,6 +108,13 @@ bool ui_confirm_visible(void);
 bool ui_confirm_knob_press(void);
 bool ui_confirm_knob_long_press(void);
 
+// The firmware update prompt (ui_firmware.c), over every screen.
+bool ui_firmware_visible(void);
+// Knob input while it's up (press installs, long press declines); false
+// when it isn't.
+bool ui_firmware_knob_press(void);
+bool ui_firmware_knob_long_press(void);
+
 // The Bluetooth pairing prompt (ui_pairing.c), over every screen.
 bool ui_pairing_visible(void);
 // Knob input while the prompt is up; false when it isn't.

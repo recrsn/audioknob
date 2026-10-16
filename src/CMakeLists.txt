@@ -26,6 +26,8 @@ set(AK_REQUIRES
     esp_http_client
     json
     esp_app_format
+    # S3 firmware updates (ota.c).
+    app_update
     lwip
     mbedtls
     mdns

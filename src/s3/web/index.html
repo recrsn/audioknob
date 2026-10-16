@@ -148,6 +148,11 @@ select,input[type=text]{width:100%;padding:11px 12px;font-size:16px;border-radiu
 <section class="card">
   <div class="row"><span>Version</span><span class="val" id="version"></span></div>
   <div class="row"><span>Free memory</span><span class="val" id="mem"></span></div>
+  <div class="row col">
+    <div class="inline split"><span>Firmware update</span><button class="btn" id="updbtn">Choose file…</button></div>
+    <input type="file" id="updfile" accept=".bin" hidden>
+    <p class="hint" id="updhint"></p>
+  </div>
 </section>
 </main>
 <div id="toast"></div>
@@ -156,6 +161,9 @@ select,input[type=text]{width:100%;padding:11px 12px;font-size:16px;border-radiu
 const $ = id => document.getElementById(id);
 const PLAY = "M8 5v14l11-7z", PAUSE = "M6 5h4v14H6zm8 0h4v14h-4z";
 let state = null, artVersion = -1, zonesLoaded = false;
+// An upload holds the device's one HTTP task, so polls wait it out.
+let uploading = false, installing = null, wentOffline = false;
+const UPDATE_HINT = "The S3's firmware.bin. The device asks before installing it.";
 // Inputs the user is holding keep their own value until released, so a poll
 // doesn't yank a slider out from under a finger.
 const busy = new Set();
@@ -255,10 +263,36 @@ function render(s) {
   setText("addr", s.ip ? `${s.hostname}.local · ${s.ip}` : "—");
   setText("version", s.version);
   setText("mem", `${s.freeInternalKb} KB · ${(s.freePsramKb / 1024).toFixed(1)} MB PSRAM`);
+  renderUpdate(s);
+}
+
+function renderUpdate(s) {
+  const u = s.update;
+  // Back from the restart: the bootloader rolls back an image that never
+  // got this page up.
+  if (installing && wentOffline && u.state === "idle") {
+    toast(s.version === installing ? "Updated to " + installing : "Update didn't take: still on " + s.version);
+    installing = null;
+  }
+  if (uploading) return;
+  if (u.state === "ready") installing = u.version;
+  else if (u.state !== "idle") installing = null;
+  const hints = {
+    receiving: "Receiving an update…",
+    ready: `Version ${u.version} is ready: confirm on the device to install it.`,
+    declined: `Version ${u.version} was declined on the device.`,
+    failed: "Update failed: " + u.error,
+  };
+  setText("updhint", hints[u.state] || UPDATE_HINT);
+  $("updbtn").disabled = u.state === "receiving";
 }
 
 async function poll() {
   clearTimeout(poll.timer);
+  if (uploading) {
+    poll.timer = setTimeout(poll, 1000);
+    return;
+  }
   try {
     const r = await fetch("/api/state", {cache: "no-store"});
     state = await r.json();
@@ -269,6 +303,7 @@ async function poll() {
   } catch (e) {
     $("conn").textContent = "Offline";
     $("conn").className = "off";
+    wentOffline = true;
   }
   poll.timer = setTimeout(poll, document.hidden ? 5000 : 1000);
 }
@@ -371,6 +406,28 @@ $("nameform").onsubmit = async e => {
 $("forget").onclick = async () => {
   if (!confirm("Forget this WiFi network? The device restarts into setup mode, and this page stops working until it's set up again.")) return;
   if (await post("/api/forget", {})) toast("Restarting into setup…");
+};
+
+$("updbtn").onclick = () => $("updfile").click();
+$("updfile").onchange = () => {
+  const file = $("updfile").files[0];
+  $("updfile").value = "";
+  if (!file) return;
+  uploading = true;
+  wentOffline = false;
+  $("updbtn").disabled = true;
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/update");
+  xhr.setRequestHeader("Content-Type", "application/octet-stream");
+  xhr.upload.onprogress = e => {
+    if (e.lengthComputable) setText("updhint", `Sending… ${Math.floor(e.loaded * 100 / e.total)}%`);
+  };
+  // A refused image's reason comes back in /api/state either way.
+  xhr.onloadend = () => {
+    uploading = false;
+    poll();
+  };
+  xhr.send(file);
 };
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });

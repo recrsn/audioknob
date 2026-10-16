@@ -1369,11 +1369,12 @@ static void sleep_build(void) {
     lv_obj_add_event_cb(s_sleep.catcher, sleep_catcher_cb, LV_EVENT_PRESSED, NULL);
 }
 
-// Something that must be seen (a ringing countdown, the pairing prompt)
-// keeps the display on.
+// Something that must be seen (a ringing countdown, the pairing or update
+// prompt) keeps the display on.
 static void sleep_tick(void) {
     uint32_t sleep_s = ui_settings_current()->sleep_s;
-    if (s_sleep.asleep || !sleep_s || ui_tools_alerting() || ui_pairing_visible()) {
+    if (s_sleep.asleep || !sleep_s || ui_tools_alerting() || ui_pairing_visible() ||
+        ui_firmware_visible()) {
         return;
     }
     if (lv_display_get_inactive_time(NULL) >= sleep_s * 1000) {
@@ -1406,7 +1407,7 @@ bool ui_knob_rotate(int steps) {
         return true;
     }
     // A prompt answers to press and long press only.
-    if (ui_pairing_visible() || ui_confirm_visible()) {
+    if (ui_pairing_visible() || ui_confirm_visible() || ui_firmware_visible()) {
         return true;
     }
     if (launcher_visible()) {
@@ -1420,7 +1421,7 @@ bool ui_knob_press(void) {
     if (ui_wake()) {
         return true;
     }
-    if (ui_pairing_knob_press() || ui_confirm_knob_press()) {
+    if (ui_pairing_knob_press() || ui_confirm_knob_press() || ui_firmware_knob_press()) {
         return true;
     }
     if (launcher_visible()) {
@@ -1434,7 +1435,7 @@ void ui_knob_long_press(void) {
     if (ui_wake()) {
         return;
     }
-    if (ui_pairing_knob_long_press() || ui_confirm_knob_long_press()) {
+    if (ui_pairing_knob_long_press() || ui_confirm_knob_long_press() || ui_firmware_knob_long_press()) {
         return;
     }
     if (launcher_visible()) {

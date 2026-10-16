@@ -63,6 +63,15 @@ typedef enum {
 // ui_update_pairing().
 void ui_set_pairing_handler(void (*handler)(ui_pairing_action_t action));
 
+// Pushes the version of a firmware update that's been received and checked
+// and waits for the user, or NULL while there is none. Cheap to call every
+// poll; a pending update asks once, over whatever screen is up.
+void ui_update_firmware(const char *pending_version);
+
+// Called on the LVGL task with the user's answer to that prompt; install
+// may restart the device.
+void ui_set_firmware_handler(void (*handler)(bool install));
+
 // Called on the LVGL task when the user picks a source on the switch screen
 // (tap the status row of the wireless screen); must not block. The UI then
 // shows that source's screen -- its waiting state if nothing is connected --

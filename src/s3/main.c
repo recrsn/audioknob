@@ -14,6 +14,7 @@
 #include "now_playing.h"
 #include "ntp.h"
 #include "online.h"
+#include "ota.h"
 #include "settings_ui.h"
 #include "uart_link.h"
 #include "web_settings.h"
@@ -37,6 +38,10 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
 
     pairing_status_t pairing;
     ui_update_pairing(uart_link_get_pairing(&pairing) ? &pairing : NULL);
+
+    ota_status_t ota;
+    ota_get_status(&ota);
+    ui_update_firmware(ota.state == OTA_READY ? ota.version : NULL);
 
     wifi_setup_info_t setup;
     if (wifi_get_setup_info(&setup)) {
@@ -124,6 +129,14 @@ static void on_pairing(ui_pairing_action_t action) {
     uart_link_send_command(cmds[action]);
 }
 
+static void on_firmware(bool install) {
+    if (install) {
+        ota_install();
+    } else {
+        ota_decline();
+    }
+}
+
 static void on_alert(bool ringing) {
     if (ringing && settings_ui_haptics()) {
         haptic_alarm_start();
@@ -135,7 +148,11 @@ static void on_alert(bool ringing) {
 static void on_network_up(const uint8_t mac[6]) {
     airplay_network_up(mac);
     online_network_up();
-    web_settings_start();
+    // The web page is how the next update arrives, so a new image that
+    // gets this far is kept.
+    if (web_settings_start()) {
+        ota_confirm_running();
+    }
 }
 
 // Runs at init and on the web server's task after a rename.
@@ -165,6 +182,7 @@ void app_main(void) {
     ui_set_transport_handler(now_playing_transport);
     ui_set_source_handler(now_playing_pick);
     ui_set_pairing_handler(on_pairing);
+    ui_set_firmware_handler(on_firmware);
     ui_set_alert_handler(on_alert);
     ui_set_display_handler(lcd_driver_set_backlight_on);
     lv_indev_add_event_cb(lcd_driver_touch_indev(), on_touch_clicked, LV_EVENT_CLICKED, NULL);

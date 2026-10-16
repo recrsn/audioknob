@@ -9,10 +9,14 @@ CONFIG_BT_CLASSIC_ENABLED=y
 CONFIG_BT_A2DP_ENABLE=y
 
 # ESP32-U4WDH: 4MB embedded flash, no PSRAM. Bluedroid alone nearly fills
-# the default 1MB single-app slot, so give the app 3MB.
+# the default 1MB single-app slot, so the two OTA slots take ~1.9MB each.
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_esp32.csv"
+# Updates will come from the S3 over the inter-MCU UART. The bootloader
+# can't be updated that way, so rollback is built in now. A USB-flashed
+# image is never pending verification, so nothing changes until then.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # The controller runs BR/EDR-only; Bluedroid's BLE host (GATT, BLE SMP) would
 # still be built and initialised, costing DRAM on a chip with no PSRAM.

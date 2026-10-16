@@ -1,4 +1,12 @@
-# Name,   Type, SubType, Offset,  Size
-nvs,      data, nvs,     0x9000,  0x6000
-phy_init, data, phy,     0xf000,  0x1000
-factory,  app,  factory, 0x10000, 4M
+# Name,   Type, SubType,   Offset,   Size
+# nvs stays where it was, so a USB flash onto the old layout keeps settings,
+# WiFi credentials and the device name.
+nvs,      data, nvs,       0x9000,   0x6000
+otadata,  data, ota,       0xf000,   0x2000
+phy_init, data, phy,       0x11000,  0x1000
+ota_0,    app,  ota_0,     0x20000,  6M
+ota_1,    app,  ota_1,     0x620000, 6M
+# The ESP32's firmware, staged here and checked before it's sent over the
+# inter-MCU UART.
+esp32_fw, data, undefined, 0xc20000, 2M
+coredump, data, coredump,  0xe20000, 64K
