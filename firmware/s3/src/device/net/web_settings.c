@@ -12,6 +12,7 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "focus_sound.h"
+#include "mic.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "now_playing.h"
@@ -296,6 +297,58 @@ static bool parse_int(const char *text, int min, int max, int *out) {
     }
     *out = (int)v;
     return true;
+}
+
+// Debug: records ?s= seconds (1-30) from the mic as a 16 kHz mono WAV.
+// ?raw=1 skips the DC blocker, ?slot=r reads the other clock edge.
+static esp_err_t mic_wav_handler(httpd_req_t *req) {
+    enum { HEADER = 44, MAX_SECONDS = 30 };
+    char query[64] = "", value[8];
+    httpd_req_get_url_query_str(req, query, sizeof(query));
+    int seconds = 5;
+    if (httpd_query_key_value(query, "s", value, sizeof(value)) == ESP_OK && !parse_int(value, 1, MAX_SECONDS, &seconds)) {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "s must be 1-30");
+    }
+    bool raw = httpd_query_key_value(query, "raw", value, sizeof(value)) == ESP_OK && !strcmp(value, "1");
+    bool right = httpd_query_key_value(query, "slot", value, sizeof(value)) == ESP_OK && !strcmp(value, "r");
+
+    size_t frames = (size_t)seconds * MIC_SAMPLE_RATE;
+    uint32_t data_bytes = frames * sizeof(int16_t);
+    uint8_t *wav = heap_caps_malloc(HEADER + data_bytes, MALLOC_CAP_SPIRAM);
+    if (!wav) {
+        return httpd_resp_send_500(req);
+    }
+    mic_set_raw(raw);
+    mic_set_right_slot(right);
+    if (!mic_start()) {
+        free(wav);
+        return httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Mic busy");
+    }
+    int16_t *pcm = (int16_t *)(wav + HEADER);
+    size_t got = 0;
+    while (got < frames) {
+        size_t n = mic_read(pcm + got, frames - got, 1000);
+        if (!n) {
+            break;
+        }
+        got += n;
+    }
+    mic_stop();
+    mic_set_raw(false);
+    data_bytes = got * sizeof(int16_t);
+
+    const uint32_t byte_rate = MIC_SAMPLE_RATE * sizeof(int16_t);
+    const uint32_t fields[] = {
+        36 + data_bytes, 0x45564157 /* WAVE */, 0x20746d66 /* fmt  */, 16,
+        1 | 1 << 16 /* PCM, mono */, MIC_SAMPLE_RATE, byte_rate, 2 | 16 << 16 /* align, bits */,
+        0x61746164 /* data */, data_bytes,
+    };
+    memcpy(wav, "RIFF", 4);
+    memcpy(wav + 4, fields, sizeof(fields));
+    httpd_resp_set_type(req, "audio/wav");
+    esp_err_t err = httpd_resp_send(req, (const char *)wav, HEADER + data_bytes);
+    free(wav);
+    return err;
 }
 
 static esp_err_t set_handler(httpd_req_t *req) {
@@ -618,6 +671,7 @@ bool web_settings_start(void) {
         {.uri = "/api/state", .method = HTTP_GET, .handler = state_handler},
         {.uri = "/api/zones", .method = HTTP_GET, .handler = zones_handler},
         {.uri = "/api/art.bmp", .method = HTTP_GET, .handler = art_handler},
+        {.uri = "/api/mic.wav", .method = HTTP_GET, .handler = mic_wav_handler},
         {.uri = "/api/set", .method = HTTP_POST, .handler = set_handler},
         {.uri = "/api/name", .method = HTTP_POST, .handler = name_handler},
         {.uri = "/api/location", .method = HTTP_POST, .handler = location_handler},

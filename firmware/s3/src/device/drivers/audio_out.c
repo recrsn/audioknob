@@ -46,7 +46,8 @@ static bool IRAM_ATTR on_sent(i2s_chan_handle_t handle, i2s_event_data_t *event,
 }
 
 void audio_out_init(void) {
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    // I2S1: PDM RX for the mic (mic.c) exists only on I2S0.
+    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
     chan_cfg.dma_desc_num = DMA_DESC_NUM;
     chan_cfg.dma_frame_num = DMA_FRAME_NUM;
     chan_cfg.auto_clear = true;

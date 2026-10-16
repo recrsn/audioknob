@@ -13,6 +13,7 @@
 #include "focus_sound.h"
 #include "haptic.h"
 #include "knob.h"
+#include "mic.h"
 #include "lcd_driver.h"
 #include "lights.h"
 #include "lvgl.h"
@@ -244,6 +245,7 @@ void app_main(void) {
     uart_link_start();
 
     audio_out_init();
+    mic_init();
     airplay_init();
     // Past boot strapping, so GPIO0 (CH445P select) is safe to drive now.
     audio_source_init(on_preempted);
