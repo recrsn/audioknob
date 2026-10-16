@@ -22,6 +22,9 @@ typedef struct {
     // next call with a different art_version. NULL shows the placeholder.
     const uint16_t *art;
     uint32_t art_version;
+    // The art's colour (art_color_dominant(), 0xRRGGBB) for the now-playing
+    // wash and accents; 0 keeps the source's tint.
+    uint32_t art_tint;
 } ui_track_info_t;
 
 // Pushes a fresh wireless_state_t (A2DP state from the ESP32 over UART, or
@@ -186,6 +189,7 @@ typedef struct {
     bool clock_24h;
     bool fahrenheit;
     bool haptics;
+    bool art_colors;   // now-playing screens take the cover art's colour
     bool bluetooth;
     uint8_t airplay;   // UI_AIRPLAY_* mask; 0 = off
     bool airplay2_available; // else only UI_AIRPLAY_1 means anything
@@ -216,6 +220,7 @@ typedef enum {
     UI_SETTING_AIRPLAY,    // value: UI_AIRPLAY_* mask
     UI_SETTING_SLEEP,      // value: seconds, 0-UI_SLEEP_MAX_S; 0 = never
     UI_SETTING_LOCATION,   // back to the IP-detected one; picking one is the web page's
+    UI_SETTING_ART_COLORS, // value: 0/1
 } ui_setting_t;
 
 #define UI_AIRPLAY_1 (1u << 0)

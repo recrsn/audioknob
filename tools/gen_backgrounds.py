@@ -1,10 +1,15 @@
 # Renders the UI's static backgrounds into firmware/s3/src/ui/assets/ui_bg_data.{c,h}: the clock
-# wallpaper and, per source tint, a now-playing background (a radial wash with
-# the rounded, gradient art tile baked in) plus ARGB8888 corner overlays that
-# round the cover art drawn over that tile. Everything is composited in float
-# and 4x4 Bayer-dithered to RGB565, since LVGL's own gradients quantize
-# straight to RGB565 and band. Pixels are native-endian RGB565; ui.c swaps
-# them for the panel at load.
+# wallpaper, and per now-playing layout the tint-independent part of its
+# background (a radial wash with the rounded, gradient art tile baked in) plus
+# what the ARGB8888 corner overlays that round the cover art over that tile
+# need. The wallpaper is composited in float and 4x4 Bayer-dithered to
+# RGB565, since LVGL's own gradients quantize straight to RGB565 and band;
+# native-endian, ui_backgrounds.c swaps it for the panel at load.
+#
+# Every now-playing pixel is UI_COLOR_BG mixed towards the tint by an amount
+# that depends only on where it is, so the layouts are baked as that amount
+# (8-bit) and ui_backgrounds.c mixes and dithers them to any tint (the
+# cover art's colour) at runtime, the same way dither565() does here.
 # Usage: python3 tools/gen_backgrounds.py
 import math
 import os
@@ -19,9 +24,8 @@ WIRELESS_TILE_Y = -41
 USB_TILE_Y = -33
 
 NOW_PLAYING = [
-    ("airplay", 0x4EA1FF, WIRELESS_TILE_Y),
-    ("bluetooth", 0x7C6CFF, WIRELESS_TILE_Y),
-    ("usb", 0x2DD4BF, USB_TILE_Y),
+    ("wireless", WIRELESS_TILE_Y),
+    ("usb", USB_TILE_Y),
 ]
 
 # Stand-in for the mock's blurred album-art wash: the tint, strongest behind
@@ -67,11 +71,6 @@ def dither565(c, x, y):
     return quantize(c[0], 32, th) << 11 | quantize(c[1], 64, th) << 5 | quantize(c[2], 32, th)
 
 
-def expand565(v):
-    r, g, b = v >> 11, (v >> 5) & 0x3F, v & 0x1F
-    return (r << 3 | r >> 2, g << 2 | g >> 4, b << 3 | b >> 2)
-
-
 def wallpaper_pixel(x, y):
     c = rgb(BG)
     for cx, cy, radius, col, peak in WALLPAPER_BLOBS:
@@ -85,10 +84,10 @@ def tile_origin(tile_y):
     return ((W - TILE_SIZE) // 2, (H - TILE_SIZE) // 2 + tile_y)
 
 
-def wash_pixel(tint, x, y, tile_y):
+def wash_alpha(x, y, tile_y):
     ox, oy = tile_origin(tile_y)
     d = math.hypot(x - (ox + TILE_SIZE / 2), y - (oy + TILE_SIZE / 2))
-    return mix(rgb(BG), rgb(tint), WASH_FLOOR + (WASH_PEAK - WASH_FLOOR) * falloff(d, WASH_RADIUS))
+    return WASH_FLOOR + (WASH_PEAK - WASH_FLOOR) * falloff(d, WASH_RADIUS)
 
 
 # Fraction of the pixel centred at (x, y) inside the tile, from its signed
@@ -103,45 +102,45 @@ def tile_coverage(x, y, tile_y):
 
 
 # The tile's own vertical gradient, tint at the top to the screen colour.
-def tile_pixel(tint, y, tile_y):
+def tile_alpha(y, tile_y):
     _, oy = tile_origin(tile_y)
-    t = min(max((y + 0.5 - oy) / TILE_SIZE, 0.0), 1.0)
-    return mix(rgb(tint), rgb(BG), t)
+    return 1.0 - min(max((y + 0.5 - oy) / TILE_SIZE, 0.0), 1.0)
+
+
+def byte(a):
+    return min(max(round(a * 255), 0), 255)
 
 
 def render(pixel):
     return [dither565(pixel(x + 0.5, y + 0.5), x, y) for y in range(H) for x in range(W)]
 
 
-def now_playing(tint, tile_y):
-    def pixel(x, y):
+def now_playing(tile_y):
+    def alpha(x, y):
         cov = tile_coverage(x, y, tile_y)
-        wash = wash_pixel(tint, x, y, tile_y)
-        return mix(wash, tile_pixel(tint, y, tile_y), cov) if cov else wash
+        return wash_alpha(x, y, tile_y) * (1.0 - cov) + tile_alpha(y, tile_y) * cov
 
-    return render(pixel)
+    return [byte(alpha(x + 0.5, y + 0.5)) for y in range(H) for x in range(W)]
 
 
 # Each corner restores what the background shows outside the tile's rounding,
-# so square art drawn over the tile ends up rounded and antialiased. Fully
-# covered pixels repeat the background's dithered value exactly.
-def corners(bg, tint, tile_y):
+# so square art drawn over the tile ends up rounded and antialiased: per
+# pixel, the overlay's opacity (255: wholly outside the tile, where it repeats
+# the background's dithered pixel exactly) and the wash under it.
+def corners(tile_y):
     ox, oy = tile_origin(tile_y)
-    out = []
+    opacity, wash = [], []
     for cy, cx in ((0, 0), (0, 1), (1, 0), (1, 1)):
-        px = []
+        op, wa = [], []
         for ly in range(TILE_RADIUS):
             for lx in range(TILE_RADIUS):
-                x = ox + cx * (TILE_SIZE - TILE_RADIUS) + lx
-                y = oy + cy * (TILE_SIZE - TILE_RADIUS) + ly
-                alpha = 1.0 - tile_coverage(x + 0.5, y + 0.5, tile_y)
-                if alpha >= 1.0:
-                    r, g, b = expand565(bg[y * W + x])
-                else:
-                    r, g, b = (round(v) for v in wash_pixel(tint, x + 0.5, y + 0.5, tile_y))
-                px += [b, g, r, round(alpha * 255)]
-        out.append(px)
-    return out
+                x = ox + cx * (TILE_SIZE - TILE_RADIUS) + lx + 0.5
+                y = oy + cy * (TILE_SIZE - TILE_RADIUS) + ly + 0.5
+                op.append(byte(1.0 - tile_coverage(x, y, tile_y)))
+                wa.append(byte(wash_alpha(x, y, tile_y)))
+        opacity.append(op)
+        wash.append(wa)
+    return opacity, wash
 
 
 def c_array(ctype, name, values, per_line, fmt):
@@ -153,7 +152,7 @@ def c_array(ctype, name, values, per_line, fmt):
 
 
 def c_corners(name, quads):
-    lines = [f"const uint8_t {name}[4][UI_BG_CORNER_BYTES] = {{"]
+    lines = [f"const uint8_t {name}[4][UI_BG_CORNER_PX] = {{"]
     for px in quads:
         lines.append("    {")
         for i in range(0, len(px), 32):
@@ -181,16 +180,20 @@ def main():
     ]
     body = [banner, '#include "ui_bg_data.h"\n']
     body.append(c_array("uint16_t", "ui_bg_wallpaper", render(wallpaper_pixel), 16, "0x%04x"))
-    for name, tint, tile_y in NOW_PLAYING:
-        bg = now_playing(tint, tile_y)
-        body.append(c_array("uint16_t", f"ui_bg_{name}", bg, 16, "0x%04x"))
-        header.append(f"extern const uint16_t ui_bg_{name}[UI_BG_W * UI_BG_H];")
-        body.append(c_corners(f"ui_bg_{name}_corners", corners(bg, tint, tile_y)))
-    header.append("\n// ARGB8888 (B, G, R, A bytes), UI_BG_TILE_RADIUS square: top-left, top-right,")
-    header.append("// bottom-left, bottom-right.")
-    header.append("#define UI_BG_CORNER_BYTES (UI_BG_TILE_RADIUS * UI_BG_TILE_RADIUS * 4)")
-    for name, _, _ in NOW_PLAYING:
-        header.append(f"extern const uint8_t ui_bg_{name}_corners[4][UI_BG_CORNER_BYTES];")
+    header.append("\n// Per layout: how far each pixel goes from UI_COLOR_BG to the tint, 0-255.")
+    for name, tile_y in NOW_PLAYING:
+        body.append(c_array("uint8_t", f"ui_bg_{name}_alpha", now_playing(tile_y), 32, "%d"))
+        header.append(f"extern const uint8_t ui_bg_{name}_alpha[UI_BG_W * UI_BG_H];")
+    header.append("\n// The corner overlays, UI_BG_TILE_RADIUS square: top-left, top-right,")
+    header.append("// bottom-left, bottom-right. _opacity is the overlay's (255: repeat the")
+    header.append("// background's pixel), _wash the wash's mix towards the tint under it.")
+    header.append("#define UI_BG_CORNER_PX (UI_BG_TILE_RADIUS * UI_BG_TILE_RADIUS)")
+    for name, tile_y in NOW_PLAYING:
+        opacity, wash = corners(tile_y)
+        body.append(c_corners(f"ui_bg_{name}_corner_opacity", opacity))
+        body.append(c_corners(f"ui_bg_{name}_corner_wash", wash))
+        header.append(f"extern const uint8_t ui_bg_{name}_corner_opacity[4][UI_BG_CORNER_PX];")
+        header.append(f"extern const uint8_t ui_bg_{name}_corner_wash[4][UI_BG_CORNER_PX];")
 
     with open(os.path.join(root, "ui_bg_data.h"), "w") as f:
         f.write("\n".join(header) + "\n")

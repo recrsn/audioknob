@@ -108,6 +108,7 @@ progress::-moz-progress-bar{background:var(--accent)}
 <section class="card">
   <div class="row"><span>Brightness</span><div class="slider"><input type="range" id="brightness" min="5" max="100" step="5"><output id="brightval"></output></div></div>
   <div class="row"><span>Sleep after</span><select id="sleep"><option value="0">Never</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option></select></div>
+  <div class="row"><span>Art colours</span><label class="sw"><input type="checkbox" id="artColors"><i></i></label></div>
   <div class="row"><span>Haptics</span><label class="sw"><input type="checkbox" id="haptics"><i></i></label></div>
 </section>
 
@@ -253,6 +254,7 @@ function render(s) {
   if (!busy.has($("brightness"))) $("brightness").value = s.brightness;
   setText("brightval", s.brightness + "%");
   $("sleep").value = s.sleep;
+  $("artColors").checked = s.artColors;
   $("haptics").checked = s.haptics;
   setSeg("clock24", s.clock24);
   setSeg("fahrenheit", s.fahrenheit);
@@ -359,6 +361,7 @@ $("volup").onclick = () => post("/api/volume", {step: 5});
 holdable($("brightness"), v => set("brightness", v), 80);
 $("brightness").addEventListener("input", e => setText("brightval", e.target.value + "%"));
 $("sleep").onchange = e => set("sleep", e.target.value);
+$("artColors").onchange = e => set("artColors", +e.target.checked);
 $("haptics").onchange = e => set("haptics", +e.target.checked);
 for (const id of ["clock24", "fahrenheit"]) {
   $(id).onclick = e => {

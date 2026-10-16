@@ -832,9 +832,17 @@ static void wait_chip_click_cb(lv_event_t *e) {
     }
 }
 
+// The volume ring takes the wash's tint, the art's colour while there's art.
+static void wireless_tint_cb(uint32_t tint) {
+    if (wireless_screen.ring) {
+        lv_obj_set_style_arc_color(wireless_screen.ring, lv_color_hex(tint), LV_PART_INDICATOR);
+    }
+}
+
 static void wireless_screen_build(void) {
     wireless_screen.screen = screen_create();
-    ui_now_playing_bg_create(&wireless_screen.bg, wireless_screen.screen, UI_BG_AIRPLAY);
+    ui_now_playing_bg_create(&wireless_screen.bg, wireless_screen.screen, UI_BG_WIRELESS, UI_TINT_AIRPLAY,
+                             wireless_tint_cb);
     wireless_screen.ring = volume_ring_create(wireless_screen.screen, lv_color_hex(UI_TINT_AIRPLAY));
 
     // Y is set per-update (WIRELESS_STATUS_ROW_Y_CONNECTED vs. _WAITING) --
@@ -914,7 +922,7 @@ static void wireless_screen_build(void) {
 #ifdef AK_USB_AUDIO
 static void usb_screen_build(void) {
     usb_screen.screen = screen_create();
-    ui_now_playing_bg_create(&usb_screen.bg, usb_screen.screen, UI_BG_USB);
+    ui_now_playing_bg_create(&usb_screen.bg, usb_screen.screen, UI_BG_USB, UI_TINT_USB, NULL);
     usb_screen.ring = volume_ring_create(usb_screen.screen, lv_color_hex(UI_TINT_USB));
 
     lv_obj_t *row = status_pill_create(usb_screen.screen, NULL);
@@ -1514,11 +1522,14 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     lv_image_set_src(wireless_screen.source_icon, airplay ? &icon_airplay : &icon_bluetooth);
     lv_obj_set_style_image_recolor(wireless_screen.source_icon, tint, 0);
     ui_label_set_text(wireless_screen.source_label, airplay ? "AirPlay" : "Bluetooth");
-    lv_obj_set_style_arc_color(wireless_screen.ring, tint, LV_PART_INDICATOR);
-    ui_now_playing_bg_set(&wireless_screen.bg, airplay ? UI_BG_AIRPLAY : UI_BG_BLUETOOTH);
 
     // Unconnected, there's no tile/track to show yet, nor a volume.
     bool waiting = !state->connected;
+
+    // Eased only where it shows; elsewhere the next look finds it done.
+    uint32_t art_tint = track && track->art && ui_settings_current()->art_colors ? track->art_tint : 0;
+    ui_now_playing_bg_set_tint(&wireless_screen.bg, art_tint ? art_tint : airplay ? UI_TINT_AIRPLAY : UI_TINT_BLUETOOTH,
+                               !waiting && lv_screen_active() == wireless_screen.screen);
     wireless_screen.bluetooth = !airplay;
     if (airplay) {
         lv_obj_remove_flag(wireless_screen.wait_chip, LV_OBJ_FLAG_CLICKABLE);

@@ -119,6 +119,7 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddBoolToObject(json, "clock24", s.clock_24h);
     cJSON_AddBoolToObject(json, "fahrenheit", s.fahrenheit);
     cJSON_AddBoolToObject(json, "haptics", s.haptics);
+    cJSON_AddBoolToObject(json, "artColors", s.art_colors);
     cJSON_AddBoolToObject(json, "bluetooth", s.bluetooth);
     cJSON_AddNumberToObject(json, "airplay", s.airplay);
     cJSON_AddBoolToObject(json, "airplay2", s.airplay2_available);
@@ -248,6 +249,7 @@ static esp_err_t set_handler(httpd_req_t *req) {
         {"clock24", UI_SETTING_CLOCK_24H, 0, 1},
         {"fahrenheit", UI_SETTING_FAHRENHEIT, 0, 1},
         {"haptics", UI_SETTING_HAPTICS, 0, 1},
+        {"artColors", UI_SETTING_ART_COLORS, 0, 1},
         {"bluetooth", UI_SETTING_BLUETOOTH, 0, 1},
         {"airplay", UI_SETTING_AIRPLAY, 0, UI_AIRPLAY_1 | UI_AIRPLAY_2},
     };

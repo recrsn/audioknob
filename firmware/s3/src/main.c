@@ -2,10 +2,12 @@
 #include <time.h>
 
 #include "airplay.h"
+#include "art_color.h"
 #include "audio_out.h"
 #include "audio_source.h"
 #include "device_name.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "haptic.h"
 #include "knob.h"
 #include "lcd_driver.h"
@@ -22,6 +24,22 @@
 #include "wifi.h"
 
 static const char *TAG = "s3";
+
+// Once per art version (well under a millisecond), not every poll.
+static uint32_t art_tint(const uint16_t *art, uint32_t version) {
+    static uint32_t s_version, s_tint;
+    if (version != s_version) {
+        s_version = version;
+        if (art) {
+            int64_t start = esp_timer_get_time();
+            s_tint = art_color_dominant(art, UI_ART_SIZE, UI_ART_SIZE);
+            ESP_LOGI(TAG, "art colour %06lx (%lld us)", (unsigned long)s_tint, esp_timer_get_time() - start);
+        } else {
+            s_tint = 0;
+        }
+    }
+    return s_tint;
+}
 
 // Polls, rather than being pushed to, per spec.md's State Sync Protocol:
 // producers (UART RX task, AirPlay) only write their own shared state and
@@ -64,6 +82,7 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
         memcpy(track.artist, wire_track.artist, sizeof(track.artist));
         memcpy(track.album, wire_track.album, sizeof(track.album));
         track.art = now_playing_artwork(&track.art_version);
+        track.art_tint = art_tint(track.art, track.art ? track.art_version : 0);
         now_playing_peer_name(track.peer, sizeof(track.peer));
         ui_update_wireless(&state, &track);
     }

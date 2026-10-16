@@ -1,12 +1,14 @@
 // Desktop entry point for the LVGL native emulator target (env:native).
 // Mirrors main.c's role on real hardware, but drives an SDL window instead
 // of the QSPI LCD, so the UI in ui.c can be iterated on without flashing.
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
 
+#include "art_color.h"
 #include "lights.h"
 #include "lvgl.h"
 #include "tz.h"
@@ -31,6 +33,7 @@ static ui_settings_t s_settings = {
     .sleep_s = 300,
     .clock_24h = true,
     .haptics = true,
+    .art_colors = true,
     .bluetooth = true,
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .airplay2_available = true,
@@ -54,6 +57,8 @@ static void host_zone(char *out, size_t len) {
     }
 }
 
+static void show_sample_playback(void);
+
 static void on_setting(ui_setting_t setting, int value, const char *zone) {
     switch (setting) {
     case UI_SETTING_BRIGHTNESS:
@@ -68,6 +73,11 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
     case UI_SETTING_HAPTICS:
         s_settings.haptics = value;
         break;
+    case UI_SETTING_ART_COLORS:
+        s_settings.art_colors = value;
+        ui_update_settings(&s_settings);
+        show_sample_playback();
+        return;
     case UI_SETTING_SLEEP:
         s_settings.sleep_s = (uint16_t)value;
         break;
@@ -215,29 +225,93 @@ static void show_sample_weather(void) {
     ui_update_weather(&w);
 }
 
+// Procedural stand-ins for cover art, so the art colour can be checked: a
+// warm sunset, a blue sea, a forest with a small red accent, and a grey one
+// that has no colour to give (the source's tint stays).
+enum { ART_SUNSET, ART_SEA, ART_FOREST, ART_GREY, ART_COUNT };
+
+static uint16_t rgb565(float r, float g, float b) {
+    return (uint16_t)((int)(r * 31.0f) << 11 | (int)(g * 63.0f) << 5 | (int)(b * 31.0f));
+}
+
+static uint16_t sample_art_pixel(int art, float x, float y) {
+    float dx = x - 0.5f, dy = y - 0.62f;
+    bool disc = dx * dx + dy * dy < 0.04f;
+    switch (art) {
+    case ART_SUNSET:
+        return disc ? rgb565(1.0f, 0.85f, 0.4f) : rgb565(0.95f, 0.35f + 0.2f * y, 0.25f + 0.3f * (1.0f - y));
+    case ART_SEA:
+        return y > 0.55f ? rgb565(0.05f, 0.25f + 0.2f * y, 0.55f + 0.3f * y) : rgb565(0.75f, 0.85f, 0.95f);
+    case ART_FOREST:
+        return disc ? rgb565(0.85f, 0.15f, 0.15f) : rgb565(0.08f, 0.3f + 0.25f * ((int)(x * 9) & 1), 0.12f);
+    default:
+        return rgb565(0.2f + 0.6f * y, 0.2f + 0.6f * y, 0.2f + 0.6f * y);
+    }
+}
+
+static const uint16_t *sample_art(int art, uint32_t *tint) {
+    static uint16_t pixels[ART_COUNT][UI_ART_SIZE * UI_ART_SIZE];
+    static uint32_t tints[ART_COUNT];
+    static bool made[ART_COUNT];
+    if (!made[art]) {
+        for (int y = 0; y < UI_ART_SIZE; y++) {
+            for (int x = 0; x < UI_ART_SIZE; x++) {
+                pixels[art][y * UI_ART_SIZE + x] =
+                    sample_art_pixel(art, (x + 0.5f) / UI_ART_SIZE, (y + 0.5f) / UI_ART_SIZE);
+            }
+        }
+        tints[art] = art_color_dominant(pixels[art], UI_ART_SIZE, UI_ART_SIZE);
+        made[art] = true;
+        printf("sample art %d: colour %06x\n", art, (unsigned)tints[art]);
+    }
+    *tint = tints[art];
+    return pixels[art];
+}
+
 // Stands in for a source so the now-playing screens can be laid out: P steps
-// through nothing, Bluetooth waiting to pair, and AirPlay playing a track,
-// paused, then playing again.
+// through nothing, Bluetooth waiting to pair, and AirPlay playing a track
+// without art, then with each sample art (paused once), then Bluetooth with
+// art.
+static const struct {
+    wireless_state_t state;
+    bool track;
+    int art; // -1: none
+} k_steps[] = {
+    {{.volume = 0, .connected = 0, .playing = 0, .source = SOURCE_AIRPLAY}, false, -1},
+    {{.volume = 0, .connected = 0, .playing = 1, .source = SOURCE_A2DP}, false, -1},
+    {{.volume = 45, .connected = 1, .playing = 1, .source = SOURCE_AIRPLAY}, true, -1},
+    {{.volume = 45, .connected = 1, .playing = 1, .source = SOURCE_AIRPLAY}, true, ART_SUNSET},
+    {{.volume = 45, .connected = 1, .playing = 0, .source = SOURCE_AIRPLAY}, true, ART_SUNSET},
+    {{.volume = 45, .connected = 1, .playing = 1, .source = SOURCE_AIRPLAY}, true, ART_SEA},
+    {{.volume = 45, .connected = 1, .playing = 1, .source = SOURCE_AIRPLAY}, true, ART_FOREST},
+    {{.volume = 45, .connected = 1, .playing = 1, .source = SOURCE_AIRPLAY}, true, ART_GREY},
+    {{.volume = 60, .connected = 1, .playing = 1, .source = SOURCE_A2DP}, true, ART_SEA},
+};
+#define SAMPLE_STEPS (sizeof(k_steps) / sizeof(k_steps[0]))
+static size_t s_sample_step;
+
+// Also re-run on a settings change, which the hardware's 33 ms poll covers.
+static void show_sample_playback(void) {
+    ui_track_info_t track = {0};
+    int art = k_steps[s_sample_step].art;
+    if (k_steps[s_sample_step].track) {
+        track = (ui_track_info_t){
+            .title = "Sample Track Title",
+            .artist = "Sample Artist",
+            .album = "Sample Album",
+            .peer = "Sample iPhone",
+        };
+    }
+    if (art >= 0) {
+        track.art = sample_art(art, &track.art_tint);
+        track.art_version = (uint32_t)art + 1;
+    }
+    ui_update_wireless(&k_steps[s_sample_step].state, &track);
+}
+
 static void cycle_sample_playback(void) {
-    static const struct {
-        wireless_state_t state;
-        bool track;
-    } k_steps[] = {
-        {{.volume = 0, .connected = 0, .playing = 0, .source = SOURCE_AIRPLAY}, false},
-        {{.volume = 0, .connected = 0, .playing = 1, .source = SOURCE_A2DP}, false},
-        {{.volume = 45, .connected = 1, .playing = 1, .source = SOURCE_AIRPLAY}, true},
-        {{.volume = 45, .connected = 1, .playing = 0, .source = SOURCE_AIRPLAY}, true},
-    };
-    static const ui_track_info_t k_track = {
-        .title = "Sample Track Title",
-        .artist = "Sample Artist",
-        .album = "Sample Album",
-        .peer = "Sample iPhone",
-    };
-    static const ui_track_info_t k_none;
-    static size_t step;
-    step = (step + 1) % (sizeof(k_steps) / sizeof(k_steps[0]));
-    ui_update_wireless(&k_steps[step].state, k_steps[step].track ? &k_track : &k_none);
+    s_sample_step = (s_sample_step + 1) % SAMPLE_STEPS;
+    show_sample_playback();
 }
 
 // The panel is round; everything outside its circle is bezel.

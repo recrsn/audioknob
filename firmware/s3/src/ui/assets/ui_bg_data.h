@@ -13,13 +13,16 @@
 
 // RGB565, native-endian, UI_BG_W x UI_BG_H.
 extern const uint16_t ui_bg_wallpaper[UI_BG_W * UI_BG_H];
-extern const uint16_t ui_bg_airplay[UI_BG_W * UI_BG_H];
-extern const uint16_t ui_bg_bluetooth[UI_BG_W * UI_BG_H];
-extern const uint16_t ui_bg_usb[UI_BG_W * UI_BG_H];
 
-// ARGB8888 (B, G, R, A bytes), UI_BG_TILE_RADIUS square: top-left, top-right,
-// bottom-left, bottom-right.
-#define UI_BG_CORNER_BYTES (UI_BG_TILE_RADIUS * UI_BG_TILE_RADIUS * 4)
-extern const uint8_t ui_bg_airplay_corners[4][UI_BG_CORNER_BYTES];
-extern const uint8_t ui_bg_bluetooth_corners[4][UI_BG_CORNER_BYTES];
-extern const uint8_t ui_bg_usb_corners[4][UI_BG_CORNER_BYTES];
+// Per layout: how far each pixel goes from UI_COLOR_BG to the tint, 0-255.
+extern const uint8_t ui_bg_wireless_alpha[UI_BG_W * UI_BG_H];
+extern const uint8_t ui_bg_usb_alpha[UI_BG_W * UI_BG_H];
+
+// The corner overlays, UI_BG_TILE_RADIUS square: top-left, top-right,
+// bottom-left, bottom-right. _opacity is the overlay's (255: repeat the
+// background's pixel), _wash the wash's mix towards the tint under it.
+#define UI_BG_CORNER_PX (UI_BG_TILE_RADIUS * UI_BG_TILE_RADIUS)
+extern const uint8_t ui_bg_wireless_corner_opacity[4][UI_BG_CORNER_PX];
+extern const uint8_t ui_bg_wireless_corner_wash[4][UI_BG_CORNER_PX];
+extern const uint8_t ui_bg_usb_corner_opacity[4][UI_BG_CORNER_PX];
+extern const uint8_t ui_bg_usb_corner_wash[4][UI_BG_CORNER_PX];

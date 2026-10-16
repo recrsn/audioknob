@@ -77,6 +77,7 @@ static void fill(ui_settings_t *out) {
         .clock_24h = s_settings.clock_24h,
         .fahrenheit = s_settings.fahrenheit,
         .haptics = s_settings.haptics,
+        .art_colors = s_settings.art_colors,
         .bluetooth = s_settings.bluetooth,
         .airplay = s_settings.airplay,
         .airplay2_available = airplay_supports_airplay2(),
@@ -120,6 +121,9 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         break;
     case UI_SETTING_HAPTICS:
         s_settings.haptics = value;
+        break;
+    case UI_SETTING_ART_COLORS:
+        s_settings.art_colors = value;
         break;
     case UI_SETTING_TIMEZONE:
         snprintf(s_settings.tz, sizeof(s_settings.tz), "%s", zone ? zone : "");

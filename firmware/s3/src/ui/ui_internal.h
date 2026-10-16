@@ -20,26 +20,37 @@ lv_obj_t *ui_round_button_create(lv_obj_t *parent, const char *symbol, int32_t s
 // The idle screen's pre-dithered ambient glow, covering the whole display.
 lv_obj_t *ui_wallpaper_create(lv_obj_t *parent);
 
+// Where a now-playing layout puts its art tile; see ui_bg_data.h.
 typedef enum {
-    UI_BG_AIRPLAY,
-    UI_BG_BLUETOOTH,
+    UI_BG_WIRELESS,
     UI_BG_USB,
-} ui_bg_source_t;
+} ui_bg_layout_t;
 
-// A now-playing screen's full-screen background: the source-tinted wash with
-// its art tile baked in, and the corners that round cover art over the tile.
+// A now-playing screen's full-screen background: a wash of the tint (the
+// cover art's colour, else the source's) with its art tile baked in, and the
+// corners that round cover art over the tile. Recoloured in place on a tint
+// change, so it costs nothing per frame.
 typedef struct {
     lv_obj_t *img;
     lv_image_dsc_t dsc;
     lv_obj_t *corners[4];
-    ui_bg_source_t source;
+    lv_image_dsc_t corner_dsc[4];
+    uint8_t *corner_px;
+    ui_bg_layout_t layout;
+    uint32_t tint;     // shown now
+    uint32_t from, to; // while easing between two
+    void (*on_tint)(uint32_t tint);
 } ui_now_playing_bg_t;
 
-void ui_now_playing_bg_create(ui_now_playing_bg_t *bg, lv_obj_t *parent, ui_bg_source_t source);
+// on_tint, if any, runs with every tint shown, so accents can follow it.
+void ui_now_playing_bg_create(ui_now_playing_bg_t *bg, lv_obj_t *parent, ui_bg_layout_t layout, uint32_t tint,
+                              void (*on_tint)(uint32_t tint));
 // An empty, hidden image over the tile (tile_y from screen center) for
 // UI_BG_TILE_SIZE square cover art, which the background's corners round.
 lv_obj_t *ui_now_playing_art_create(ui_now_playing_bg_t *bg, lv_obj_t *parent, int32_t tile_y);
-void ui_now_playing_bg_set(ui_now_playing_bg_t *bg, ui_bg_source_t source);
+// Recolours to tint (0xRRGGBB); animate eases there over a moment, for a
+// screen that's showing. A full-screen recolour per step, so only on change.
+void ui_now_playing_bg_set_tint(ui_now_playing_bg_t *bg, uint32_t tint, bool animate);
 
 #include "ui.h"
 

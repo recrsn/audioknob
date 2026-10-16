@@ -49,6 +49,7 @@ static const uint16_t k_sleep_options[] = {0, 30, 60, 120, 300, 600, 1800, UI_SL
 typedef enum {
     ROW_BRIGHTNESS,
     ROW_SLEEP,
+    ROW_ART_COLORS,
     ROW_HAPTICS,
     ROW_CLOCK,
     ROW_LOCATION,
@@ -80,6 +81,7 @@ static const struct {
 } k_rows[ROW_COUNT] = {
     [ROW_BRIGHTNESS] = {"Brightness", KIND_LEVEL},
     [ROW_SLEEP] = {"Sleep after", KIND_VALUE},
+    [ROW_ART_COLORS] = {"Art colours", KIND_SWITCH},
     [ROW_HAPTICS] = {"Haptics", KIND_SWITCH},
     [ROW_CLOCK] = {"Clock", KIND_VALUE},
     [ROW_LOCATION] = {"Auto location", KIND_SWITCH},
@@ -107,6 +109,7 @@ static const struct {
     HEADER("DISPLAY"),
     {NULL, ROW_BRIGHTNESS},
     {NULL, ROW_SLEEP},
+    {NULL, ROW_ART_COLORS},
     {NULL, ROW_HAPTICS},
     HEADER("TIME AND WEATHER"),
     {NULL, ROW_CLOCK},
@@ -135,6 +138,7 @@ static ui_settings_t s_settings = {
     .sleep_s = 300,
     .clock_24h = true,
     .haptics = true,
+    .art_colors = true,
     .bluetooth = true,
     .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .tz_auto = true,
@@ -233,6 +237,8 @@ static bool switch_on(int row) {
     switch (row) {
     case ROW_HAPTICS:
         return s->haptics;
+    case ROW_ART_COLORS:
+        return s->art_colors;
     case ROW_AIRPLAY2:
         return s->airplay & UI_AIRPLAY_2;
     case ROW_AIRPLAY1:
@@ -592,6 +598,9 @@ static void activate(void) {
         break;
     case ROW_HAPTICS:
         emit(UI_SETTING_HAPTICS, !s->haptics, NULL);
+        break;
+    case ROW_ART_COLORS:
+        emit(UI_SETTING_ART_COLORS, !s->art_colors, NULL);
         break;
     case ROW_BLUETOOTH:
         emit(UI_SETTING_BLUETOOTH, !s->bluetooth, NULL);
