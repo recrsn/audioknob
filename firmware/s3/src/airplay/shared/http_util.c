@@ -6,6 +6,8 @@
  * https://opensource.org/licenses/MIT
  */
 
+#ifndef AK_NATIVE
+
 #include "http_util.h"
 
 #include <ctype.h>
@@ -245,3 +247,5 @@ int bind_socket(uint16_t *port, int type) {
     }
     return sock;
 }
+
+#endif  // !AK_NATIVE

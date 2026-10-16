@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include "weather.h"
 
 #include <stdio.h>
@@ -79,3 +81,5 @@ bool weather_fetch(double lat, double lon, ui_weather_t *out, char *buf, int cap
     }
     return ok;
 }
+
+#endif  // !AK_NATIVE

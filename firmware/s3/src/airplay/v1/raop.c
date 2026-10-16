@@ -7,6 +7,8 @@
  * https://opensource.org/licenses/MIT
  */
 
+#ifndef AK_NATIVE
+
 #include "raop.h"
 
 #include <stdio.h>
@@ -403,3 +405,5 @@ void raop_set_name(raop_ctx_t *ctx, const char *name) {
     }
     ESP_LOGI(TAG, "AirPlay receiver renamed \"%s\"", name);
 }
+
+#endif  // !AK_NATIVE

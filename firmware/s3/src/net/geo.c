@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include "geo.h"
 
 #include <stdio.h>
@@ -69,3 +71,5 @@ bool geo_lookup(geo_t *out, char *buf, int cap) {
     }
     return false;
 }
+
+#endif  // !AK_NATIVE

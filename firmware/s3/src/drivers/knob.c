@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include "knob.h"
 
 #include <stdbool.h>
@@ -135,3 +137,5 @@ void knob_start(knob_rotate_cb_t on_rotate, knob_press_cb_t on_press, knob_press
     gpio_init(ENC_B_GPIO);
     xTaskCreate(knob_task, "knob", 3072, NULL, 5, NULL);
 }
+
+#endif  // !AK_NATIVE

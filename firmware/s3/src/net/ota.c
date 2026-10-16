@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include "ota.h"
 
 #include <stdio.h>
@@ -241,3 +243,5 @@ void ota_confirm_running(void) {
         ESP_LOGI(TAG, "update kept: %s", esp_app_get_description()->version);
     }
 }
+
+#endif  // !AK_NATIVE

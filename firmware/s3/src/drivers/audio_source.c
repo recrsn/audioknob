@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include "audio_source.h"
 
 #include <stdbool.h>
@@ -103,3 +105,5 @@ audio_source_t audio_source_active(void) {
     taskEXIT_CRITICAL(&s_lock);
     return active;
 }
+
+#endif  // !AK_NATIVE

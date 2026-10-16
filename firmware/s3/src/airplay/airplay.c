@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include "airplay.h"
 
 #include <stdio.h>
@@ -383,3 +385,5 @@ void airplay_preempt(void) {
     set_playing(false);
     xTaskNotify(s_ctrl_task, CTRL_PAUSE, eSetBits);
 }
+
+#endif  // !AK_NATIVE

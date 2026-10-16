@@ -7,6 +7,8 @@
  * AirPlay 1 sessions (ap1.c) take turns with AirPlay 2 ones here too.
  */
 
+#ifndef AK_NATIVE
+
 #include "session.h"
 
 #include <stdio.h>
@@ -679,3 +681,5 @@ bool session_volume(float volume) {
     }
     return ok;
 }
+
+#endif  // !AK_NATIVE

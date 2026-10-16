@@ -3,6 +3,8 @@
  * (Copyright (c) Mike Brady 2014--2026, MIT License).
  */
 
+#ifndef AK_NATIVE
+
 #include "event.h"
 
 #include <stdio.h>
@@ -207,3 +209,5 @@ void event_close(event_channel_t *ev) {
     vSemaphoreDelete(ev->done);
     free(ev);
 }
+
+#endif  // !AK_NATIVE

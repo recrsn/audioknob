@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include "wifi_portal.h"
 
 #include <stdio.h>
@@ -223,3 +225,5 @@ void wifi_portal_start(uint32_t ap_ip, const wifi_portal_ops_t *ops) {
     http_start();
     ESP_LOGI(TAG, "captive portal up at %s", s_ap_url);
 }
+
+#endif  // !AK_NATIVE

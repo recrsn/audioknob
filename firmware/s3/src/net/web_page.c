@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include "web_page.h"
 
 #include <ctype.h>
@@ -111,3 +113,5 @@ esp_err_t web_redirect(httpd_req_t *req, const char *location) {
     httpd_resp_set_hdr(req, "Location", location);
     return httpd_resp_send(req, NULL, 0);
 }
+
+#endif  // !AK_NATIVE

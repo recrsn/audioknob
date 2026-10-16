@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include <string.h>
 #include <time.h>
 
@@ -196,3 +198,5 @@ void app_main(void) {
     wifi_start(on_network_up);
     ntp_start();
 }
+
+#endif  // !AK_NATIVE

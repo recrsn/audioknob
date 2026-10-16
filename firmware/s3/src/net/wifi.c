@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include "wifi.h"
 
 #include <stdarg.h>
@@ -465,3 +467,5 @@ bool wifi_get_setup_info(wifi_setup_info_t *out) {
     xSemaphoreGive(s_lock);
     return true;
 }
+
+#endif  // !AK_NATIVE

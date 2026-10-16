@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include "ntp.h"
 
 #include "esp_log.h"
@@ -45,3 +47,5 @@ void ntp_start(void) {
 bool ntp_is_synced(void) {
     return s_synced;
 }
+
+#endif  // !AK_NATIVE

@@ -1,3 +1,5 @@
+#ifndef AK_NATIVE
+
 #include "settings_ui.h"
 
 #include <stdio.h>
@@ -197,3 +199,5 @@ void settings_ui_set_location(const geo_t *geo) {
 bool settings_ui_haptics(void) {
     return s_settings.haptics;
 }
+
+#endif  // !AK_NATIVE

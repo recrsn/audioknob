@@ -6,6 +6,8 @@
  * pairing, not by this exchange.
  */
 
+#ifndef AK_NATIVE
+
 #include "fp_setup.h"
 
 #include <stdlib.h>
@@ -89,3 +91,5 @@ uint8_t *fp_setup_reply(const uint8_t *req, size_t req_len, size_t *reply_len) {
     }
     return NULL;
 }
+
+#endif  // !AK_NATIVE

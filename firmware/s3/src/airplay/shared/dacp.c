@@ -4,6 +4,8 @@
  * https://opensource.org/licenses/MIT
  */
 
+#ifndef AK_NATIVE
+
 #include "dacp.h"
 
 #include <stdio.h>
@@ -157,3 +159,5 @@ bool dacp_volume(float volume) {
     snprintf(command, sizeof(command), "setproperty?dmcp.device-volume=%0.4f", db);
     return dacp_command(command);
 }
+
+#endif  // !AK_NATIVE

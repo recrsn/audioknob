@@ -4,6 +4,8 @@
  * https://opensource.org/licenses/MIT
  */
 
+#ifndef AK_NATIVE
+
 #include "raop_setup.h"
 
 #include <stdio.h>
@@ -186,3 +188,5 @@ void raop_parse_rtp_info(const char *rtp_info, uint16_t *seqno, uint32_t *rtptim
         *rtptime = (uint32_t)value;
     }
 }
+
+#endif  // !AK_NATIVE
