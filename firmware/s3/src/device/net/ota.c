@@ -84,6 +84,12 @@ static bool fail(const char *error) {
     return false;
 }
 
+static void set_progress(unsigned percent) {
+    taskENTER_CRITICAL(&s_lock);
+    s_status.progress = percent;
+    taskEXIT_CRITICAL(&s_lock);
+}
+
 void ota_get_status(ota_status_t *out) {
     taskENTER_CRITICAL(&s_lock);
     *out = s_status;
@@ -128,6 +134,8 @@ static bool start_receiving(void) {
     bool ok = s_status.state != OTA_INSTALLING;
     if (ok) {
         s_status.state = OTA_RECEIVING;
+        s_status.progress = 0;
+        s_status.version[0] = '\0';
         s_status.error[0] = '\0';
     }
     taskEXIT_CRITICAL(&s_lock);
@@ -154,15 +162,25 @@ bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
     size_t len = size < CHUNK ? size : CHUNK;
     const char *error = read_full(read, ctx, buf, len) ? check_header(buf, &target, version) : "Upload interrupted";
     if (!error) {
+        // Known from the header on, so the device can say what's arriving.
+        taskENTER_CRITICAL(&s_lock);
+        s_status.target = target;
+        snprintf(s_status.version, sizeof(s_status.version), "%s", version);
+        taskEXIT_CRITICAL(&s_lock);
         error = k_sinks[target].begin(size);
         sink = error ? NULL : &k_sinks[target];
     }
+    unsigned percent = 0;
     for (size_t done = 0; !error;) {
         if (!sink->write(buf, len)) {
             error = "Flash write failed";
             break;
         }
         done += len;
+        if ((uint64_t)done * 100 / size != percent) {
+            percent = (uint64_t)done * 100 / size;
+            set_progress(percent);
+        }
         if (done == size) {
             break;
         }
@@ -185,18 +203,8 @@ bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
     }
     ESP_LOGI(TAG, "%s version %s received, waiting for confirmation", target == OTA_TARGET_S3 ? "S3" : "ESP32",
              version);
-    taskENTER_CRITICAL(&s_lock);
-    s_status.target = target;
-    snprintf(s_status.version, sizeof(s_status.version), "%s", version);
-    taskEXIT_CRITICAL(&s_lock);
     set_status(OTA_READY, NULL);
     return true;
-}
-
-static void set_progress(unsigned percent) {
-    taskENTER_CRITICAL(&s_lock);
-    s_status.progress = percent;
-    taskEXIT_CRITICAL(&s_lock);
 }
 
 static void esp32_install_task(void *arg) {
@@ -248,6 +256,16 @@ void ota_confirm_running(void) {
     if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
         state == ESP_OTA_IMG_PENDING_VERIFY) {
         esp_ota_mark_app_valid_cancel_rollback();
-        ESP_LOGI(TAG, "update kept: %s", esp_app_get_description()->version);
+        const char *version = esp_app_get_description()->version;
+        ESP_LOGI(TAG, "update kept: %s", version);
+        // Reported like an installed ESP32 update, so the device and the
+        // page can say it took.
+        taskENTER_CRITICAL(&s_lock);
+        if (s_status.state == OTA_IDLE) {
+            s_status.target = OTA_TARGET_S3;
+            snprintf(s_status.version, sizeof(s_status.version), "%s", version);
+            s_status.state = OTA_INSTALLED;
+        }
+        taskEXIT_CRITICAL(&s_lock);
     }
 }

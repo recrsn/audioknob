@@ -41,7 +41,17 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
 
     ota_status_t ota;
     ota_get_status(&ota);
-    ui_update_firmware(ota.state == OTA_READY ? ota.version : NULL, ota.target == OTA_TARGET_ESP32);
+    static const ui_firmware_state_t k_firmware[] = {
+        [OTA_IDLE] = UI_FIRMWARE_IDLE,           [OTA_RECEIVING] = UI_FIRMWARE_RECEIVING,
+        [OTA_READY] = UI_FIRMWARE_READY,         [OTA_DECLINED] = UI_FIRMWARE_IDLE,
+        [OTA_INSTALLING] = UI_FIRMWARE_INSTALLING, [OTA_INSTALLED] = UI_FIRMWARE_INSTALLED,
+        [OTA_FAILED] = UI_FIRMWARE_FAILED,
+    };
+    ui_update_firmware(&(ui_firmware_t){.state = k_firmware[ota.state],
+                                        .bluetooth = ota.target == OTA_TARGET_ESP32,
+                                        .progress = ota.progress,
+                                        .version = ota.version,
+                                        .error = ota.error});
 
     wifi_setup_info_t setup;
     if (wifi_get_setup_info(&setup)) {

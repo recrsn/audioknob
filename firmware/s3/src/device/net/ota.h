@@ -18,7 +18,7 @@ typedef enum {
     OTA_READY,      // written and checked, waiting for ota_install()
     OTA_DECLINED,   // the user said no on the device
     OTA_INSTALLING, // ESP32 only: sending it, then waiting for it to restart
-    OTA_INSTALLED,  // ESP32 only: it runs the new image
+    OTA_INSTALLED,  // the ESP32 runs the new image, or the S3 kept it
     OTA_FAILED,
 } ota_state_t;
 
@@ -30,8 +30,8 @@ typedef enum {
 typedef struct {
     ota_state_t state;
     ota_target_t target;
-    uint8_t progress; // percent sent, while INSTALLING
-    char version[32]; // of the image received
+    uint8_t progress; // percent received while RECEIVING, sent while INSTALLING
+    char version[32]; // of the image, once its header is in
     char error[48];   // FAILED
 } ota_status_t;
 
@@ -51,5 +51,6 @@ void ota_install(void);
 void ota_decline(void);
 
 // Keeps an image that's booting for the first time after an update; call
-// once it has shown it can take the next one (the web server is up).
+// once it has shown it can take the next one (the web server is up). The
+// first time, the status reads INSTALLED with the running version.
 void ota_confirm_running(void);

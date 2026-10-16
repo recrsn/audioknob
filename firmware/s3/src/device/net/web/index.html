@@ -63,6 +63,10 @@ select,input[type=text]{width:100%;padding:11px 12px;font-size:16px;border-radiu
 .btn.danger{background:none;color:var(--err);padding:0 4px;font-size:16px}
 #btactions .inline{justify-content:space-between;align-items:center}
 .split{justify-content:space-between;align-items:center}
+progress{-webkit-appearance:none;appearance:none;width:100%;height:6px;border:0;border-radius:3px;background:var(--line);overflow:hidden}
+progress::-webkit-progress-bar{background:var(--line)}
+progress::-webkit-progress-value{background:var(--accent);transition:width .3s}
+progress::-moz-progress-bar{background:var(--accent)}
 .btn.ghost{background:none;color:var(--accent);padding:0 4px;align-self:flex-start}
 #locresults{display:flex;flex-direction:column}
 #locresults button{display:flex;flex-direction:column;align-items:flex-start;border:0;border-top:1px solid var(--line);background:none;color:var(--text);padding:10px 4px;font-size:16px;text-align:left}
@@ -152,6 +156,7 @@ select,input[type=text]{width:100%;padding:11px 12px;font-size:16px;border-radiu
   <div class="row col">
     <div class="inline split"><span>Firmware update</span><button class="btn" id="updbtn">Choose file…</button></div>
     <input type="file" id="updfile" accept=".bin" hidden>
+    <progress id="updbar" max="100" hidden></progress>
     <p class="hint" id="updhint"></p>
   </div>
 </section>
@@ -193,6 +198,14 @@ const set = (key, value) => post("/api/set", {key, value});
 
 function setText(id, text) {
   if ($(id).textContent !== text) $(id).textContent = text;
+}
+
+// No percent makes it indeterminate.
+function setBar(percent) {
+  const bar = $("updbar");
+  bar.hidden = percent === null;
+  if (percent === undefined) bar.removeAttribute("value");
+  else if (percent !== null) bar.value = percent;
 }
 
 function setSeg(id, value) {
@@ -272,26 +285,30 @@ function renderUpdate(s) {
   const u = s.update;
   // Back from the restart: the bootloader rolls back an image that never
   // got this page up.
-  if (installing && wentOffline && u.state === "idle") {
+  if (installing && wentOffline && (u.state === "idle" || u.state === "installed")) {
     toast(s.version === installing ? "Updated to " + installing : "Update didn't take: still on " + s.version);
     installing = null;
   }
   if (uploading) return;
   // Only the main chip's update restarts the device under this page.
   if (u.state === "ready" && u.target === "s3") installing = u.version;
-  else if (u.state !== "idle") installing = null;
+  else if (u.state !== "idle" && u.state !== "installed") installing = null;
   const what = (u.target === "bluetooth" ? "Bluetooth firmware " : "Version ") + u.version;
   const hints = {
-    receiving: "Receiving an update…",
+    receiving: `Writing ${u.version || "the update"}… ${u.progress}%`,
     ready: `${what} is ready: confirm on the device to install it.`,
     declined: `${what} was declined on the device.`,
     installing: u.progress < 100 ? `Sending it to the Bluetooth chip… ${u.progress}%`
                                  : "Waiting for the Bluetooth chip to restart…",
-    installed: `Bluetooth firmware updated to ${u.version}.`,
+    installed: `${u.target === "bluetooth" ? "Bluetooth firmware" : "Firmware"} updated to ${u.version}.`,
     failed: "Update failed: " + u.error,
   };
   setText("updhint", hints[u.state] || UPDATE_HINT);
-  $("updbtn").disabled = u.state === "receiving" || u.state === "installing";
+  const busy = u.state === "receiving" || u.state === "installing";
+  // Sent in full, the Bluetooth chip is restarting: no telling how far along.
+  const restarting = u.state === "installing" && u.progress >= 100;
+  setBar(busy ? (restarting ? undefined : u.progress) : null);
+  $("updbtn").disabled = busy;
 }
 
 async function poll() {
@@ -311,6 +328,10 @@ async function poll() {
     $("conn").textContent = "Offline";
     $("conn").className = "off";
     wentOffline = true;
+    if (installing) {
+      setText("updhint", `Restarting into ${installing}…`);
+      setBar(undefined);
+    }
   }
   poll.timer = setTimeout(poll, document.hidden ? 5000 : 1000);
 }
@@ -426,8 +447,18 @@ $("updfile").onchange = () => {
   const xhr = new XMLHttpRequest();
   xhr.open("POST", "/api/update");
   xhr.setRequestHeader("Content-Type", "application/octet-stream");
+  setText("updhint", "Uploading… 0%");
+  setBar(0);
   xhr.upload.onprogress = e => {
-    if (e.lengthComputable) setText("updhint", `Sending… ${Math.floor(e.loaded * 100 / e.total)}%`);
+    if (!e.lengthComputable) return;
+    const percent = Math.floor(e.loaded * 100 / e.total);
+    setText("updhint", `Uploading… ${percent}%`);
+    setBar(percent);
+  };
+  // The device answers once it has written and checked the image.
+  xhr.upload.onload = () => {
+    setText("updhint", "Checking the image…");
+    setBar(undefined);
   };
   // A refused image's reason comes back in /api/state either way.
   xhr.onloadend = () => {

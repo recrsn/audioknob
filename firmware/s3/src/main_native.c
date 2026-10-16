@@ -148,6 +148,57 @@ static void on_pairing(ui_pairing_action_t action) {
     ui_update_pairing(&s_pairing);
 }
 
+// Stands in for ota.c so the update screens can be laid out: U sends a
+// sample image, in turn for the S3, for Bluetooth, and one that fails at
+// 40%. The S3 one reads as installed straight away, as after its restart.
+#define SIM_FW_TICK_MS 100
+static ui_firmware_t s_fw = {.version = "", .error = ""};
+static unsigned s_fw_run;
+static bool s_fw_fails;
+
+static void firmware_tick_cb(lv_timer_t *timer) {
+    (void)timer;
+    bool moving = s_fw.state == UI_FIRMWARE_RECEIVING || s_fw.state == UI_FIRMWARE_INSTALLING;
+    if (moving && s_fw.progress < 100) {
+        s_fw.progress += s_fw.state == UI_FIRMWARE_RECEIVING ? 4 : 2;
+        if (s_fw.progress > 100) {
+            s_fw.progress = 100;
+        }
+        if (s_fw.state == UI_FIRMWARE_RECEIVING && s_fw_fails && s_fw.progress >= 40) {
+            s_fw.state = UI_FIRMWARE_FAILED;
+            s_fw.error = "Upload interrupted";
+        }
+    } else if (moving) {
+        s_fw.state = s_fw.state == UI_FIRMWARE_RECEIVING ? UI_FIRMWARE_READY : UI_FIRMWARE_INSTALLED;
+    }
+    ui_update_firmware(&s_fw);
+}
+
+static void start_sample_update(void) {
+    // One at a time, as on the device.
+    if (s_fw.state == UI_FIRMWARE_RECEIVING || s_fw.state == UI_FIRMWARE_READY ||
+        s_fw.state == UI_FIRMWARE_INSTALLING) {
+        return;
+    }
+    s_fw_fails = s_fw_run % 3 == 2;
+    s_fw = (ui_firmware_t){
+        .state = UI_FIRMWARE_RECEIVING,
+        .bluetooth = s_fw_run % 3 == 1,
+        .version = s_fw_run % 3 == 1 ? "bt-1.4.2" : "1.4.2",
+        .error = "",
+    };
+    s_fw_run++;
+}
+
+static void on_firmware(bool install) {
+    if (install && s_fw.bluetooth) {
+        s_fw.state = UI_FIRMWARE_INSTALLING;
+        s_fw.progress = 0;
+    } else {
+        s_fw.state = install ? UI_FIRMWARE_INSTALLED : UI_FIRMWARE_IDLE;
+    }
+}
+
 // Fixed sample so the Weather page can be laid out without a network; the
 // place name says so.
 static void show_sample_weather(void) {
@@ -223,6 +274,8 @@ static void knob_key_cb(lv_event_t *e) {
     uint32_t key = lv_event_get_key(e);
     if (key == 'p' || key == 'P') {
         cycle_sample_playback();
+    } else if (key == 'u' || key == 'U') {
+        start_sample_update();
     } else if (key == LV_KEY_ESC) {
         ui_knob_long_press();
     } else if (key == LV_KEY_UP || (wheel && key == LV_KEY_RIGHT)) {
@@ -268,6 +321,8 @@ int main(void) {
     lv_timer_create(clock_tick_cb, 1000, NULL);
     ui_set_pairing_handler(on_pairing);
     lv_timer_create(pairing_tick_cb, 1000, NULL);
+    ui_set_firmware_handler(on_firmware);
+    lv_timer_create(firmware_tick_cb, SIM_FW_TICK_MS, NULL);
 
     while (1) {
         uint32_t idle_ms = lv_timer_handler();

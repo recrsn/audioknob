@@ -63,11 +63,28 @@ typedef enum {
 // ui_update_pairing().
 void ui_set_pairing_handler(void (*handler)(ui_pairing_action_t action));
 
-// Pushes the version of a firmware update that's been received and checked
-// and waits for the user, or NULL while there is none; bluetooth says it's
-// for the ESP32. Cheap to call every poll; a pending update asks once, over
-// whatever screen is up.
-void ui_update_firmware(const char *pending_version, bool bluetooth);
+typedef enum {
+    UI_FIRMWARE_IDLE,
+    UI_FIRMWARE_RECEIVING,  // arriving from the web page
+    UI_FIRMWARE_READY,      // received and checked, waiting for the user
+    UI_FIRMWARE_INSTALLING, // being sent to the Bluetooth chip
+    UI_FIRMWARE_INSTALLED,
+    UI_FIRMWARE_FAILED,
+} ui_firmware_state_t;
+
+typedef struct {
+    ui_firmware_state_t state;
+    bool bluetooth;     // the update is for the ESP32
+    unsigned progress;  // percent, while RECEIVING or INSTALLING
+    const char *version; // of the image; may be empty
+    const char *error;   // FAILED
+} ui_firmware_t;
+
+// Pushes the firmware update's status. Cheap to call every poll. Over
+// whatever screen is up, and waking the display: progress while receiving
+// and installing, the "Install update?" prompt once when ready, and the
+// result for a few seconds when it changes to INSTALLED or FAILED.
+void ui_update_firmware(const ui_firmware_t *fw);
 
 // Called on the LVGL task with the user's answer to that prompt; install
 // may restart the device.
