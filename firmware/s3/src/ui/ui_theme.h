@@ -29,6 +29,7 @@
 #define UI_TINT_AIRPLAY   0x4ea1ff
 #define UI_TINT_BLUETOOTH 0x7c6cff
 #define UI_TINT_USB       0x2dd4bf
+#define UI_TINT_RADIO     0xf472b6
 
 // Apps: each page's title, ring, primary button and launcher icon.
 #define UI_TINT_LIGHTS       0xffc35a

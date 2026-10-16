@@ -1,7 +1,7 @@
 #pragma once
 
 // Private to the app pages: ui_tools.c (shared widgets, the countdown
-// engine, page registry) and one file per page (ui_weather.c, ui_lights.c,
+// engine, page registry) and one file per page (ui_radio.c, ui_weather.c, ui_lights.c,
 // ui_timer.c, ui_tomato.c, ui_ambience.c, ui_stopwatch.c, ui_settings.c). ui.c only sees
 // ui_tools_*() in ui_internal.h.
 
@@ -96,6 +96,7 @@ typedef struct {
 
 void tool_page_register(lv_obj_t *screen, const tool_page_desc_t *desc);
 
+void radio_page_build(lv_obj_t *screen);
 void weather_page_build(lv_obj_t *screen);
 void lights_page_build(lv_obj_t *screen);
 void timer_page_build(lv_obj_t *screen);

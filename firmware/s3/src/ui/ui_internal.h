@@ -58,6 +58,7 @@ void ui_now_playing_bg_set_tint(ui_now_playing_bg_t *bg, uint32_t tint, bool ani
 // out until a real backend replaces lights_mock.c; build with AK_LIGHTS to
 // lay it out.
 typedef enum {
+    UI_APP_RADIO,
 #ifdef AK_LIGHTS
     UI_APP_LIGHTS,
 #endif

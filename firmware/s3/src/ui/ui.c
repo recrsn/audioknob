@@ -126,10 +126,43 @@ typedef struct {
 } usb_screen_t;
 #endif
 
+#define SOURCE_COUNT 3
+// The switch screen offers the sources a phone streams from; the radio is
+// an app, played from its own page.
+#define SWITCH_SOURCES 2
+
 typedef struct {
     lv_obj_t *screen;
-    lv_obj_t *items[2];  // indexed by ui_source_t
+    lv_obj_t *items[SWITCH_SOURCES];  // indexed by ui_source_t
 } switch_screen_t;
+
+// How each source looks wherever it's named: the switch screen, the
+// now-playing screen, the clock's row and the audio chip.
+static const struct {
+    const char *label;
+    const lv_image_dsc_t *icon;
+    uint32_t tint;
+    const char *wait_title;
+    const char *wait_hint;
+} k_sources[SOURCE_COUNT] = {
+    [UI_SOURCE_AIRPLAY] = {"AirPlay", &icon_airplay, UI_TINT_AIRPLAY, "Waiting for AirPlay",
+                           "Select this speaker from Control Center"},
+    [UI_SOURCE_BLUETOOTH] = {"Bluetooth", &icon_bluetooth, UI_TINT_BLUETOOTH,
+                             "Waiting for Bluetooth", "Tap the icon to pair a new phone"},
+    [UI_SOURCE_RADIO] = {"Radio", &icon_radio, UI_TINT_RADIO, "Radio",
+                         "Pick a station in the Radio app"},
+};
+
+static ui_source_t source_of(uint8_t wireless_source) {
+    switch (wireless_source) {
+    case SOURCE_A2DP:
+        return UI_SOURCE_BLUETOOTH;
+    case SOURCE_RADIO:
+        return UI_SOURCE_RADIO;
+    default:
+        return UI_SOURCE_AIRPLAY;
+    }
+}
 
 typedef struct {
     lv_obj_t *screen;
@@ -178,7 +211,7 @@ typedef struct {
 #ifdef AK_USB_AUDIO
     bool usb_playing;
 #endif
-    bool wireless_airplay;
+    ui_source_t wireless_source;
     char wireless_text[64];
     char wireless_subtitle[64];
     char wireless_peer[64];
@@ -1044,17 +1077,8 @@ static void usb_screen_build(void) {
 #define SWITCH_ITEM_W      220
 #define SWITCH_ITEM_GAP    UI_SPACE_M
 
-static const struct {
-    const char *label;
-    const lv_image_dsc_t *icon;
-    uint32_t tint;
-} k_sources[] = {
-    [UI_SOURCE_AIRPLAY] = {"AirPlay", &icon_airplay, UI_TINT_AIRPLAY},
-    [UI_SOURCE_BLUETOOTH] = {"Bluetooth", &icon_bluetooth, UI_TINT_BLUETOOTH},
-};
-
 static void switch_screen_refresh(void) {
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < SWITCH_SOURCES; i++) {
         bool active = i == (int)s_current_source;
         lv_obj_set_style_bg_opa(switch_screen.items[i], active ? UI_OPA_SELECTED : UI_OPA_GLASS, 0);
         lv_obj_set_style_border_color(switch_screen.items[i], lv_color_hex(k_sources[i].tint), 0);
@@ -1109,7 +1133,7 @@ static void switch_screen_build(void) {
     lv_obj_set_style_pad_row(list, SWITCH_ITEM_GAP, 0);
     lv_obj_align(list, LV_ALIGN_CENTER, 0, SWITCH_LIST_Y);
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < SWITCH_SOURCES; i++) {
         lv_obj_t *item = lv_obj_create(list);
         lv_obj_remove_style_all(item);
         lv_obj_remove_flag(item, LV_OBJ_FLAG_SCROLLABLE);
@@ -1260,7 +1284,7 @@ static void np_card_idle(void) {
 // The source's icon, white on the pill's tinted tile while playing, in the
 // source's tint on its own when connected but idle.
 static void np_card_source_icon(lv_color_t tint, bool on_tile) {
-    const lv_image_dsc_t *icon = s_audio.wireless_airplay ? &icon_airplay : &icon_bluetooth;
+    const lv_image_dsc_t *icon = k_sources[s_audio.wireless_source].icon;
     if (lv_image_get_src(idle_screen.np.icon) != icon) {
         lv_image_set_src(idle_screen.np.icon, icon);
     }
@@ -1304,7 +1328,7 @@ static void np_card_refresh(lv_obj_t *target) {
     bool usb = false;
     bool playing = s_audio.wireless_playing;
 #endif
-    lv_color_t tint = lv_color_hex(usb ? UI_TINT_USB : s_audio.wireless_airplay ? UI_TINT_AIRPLAY : UI_TINT_BLUETOOTH);
+    lv_color_t tint = lv_color_hex(usb ? UI_TINT_USB : k_sources[s_audio.wireless_source].tint);
     np_card_tint(tint);
     ui_set_visible(idle_screen.np.idle_icon, false);
 
@@ -1314,9 +1338,7 @@ static void np_card_refresh(lv_obj_t *target) {
         np_card_source_icon(tint, false);
         ui_set_visible(idle_screen.np.art, false);
         ui_set_visible(idle_screen.np.icon, !usb);
-        const char *name = s_audio.wireless_peer[0] ? s_audio.wireless_peer
-                           : s_audio.wireless_airplay ? "AirPlay"
-                                                      : "Bluetooth";
+        const char *name = s_audio.wireless_peer[0] ? s_audio.wireless_peer : k_sources[s_audio.wireless_source].label;
         ui_label_set_text(idle_screen.np.title, usb ? "USB Audio" : name);
         return;
     }
@@ -1374,11 +1396,10 @@ static void audio_chip_refresh(void) {
         return;
     }
     if (!usb) {
-        const lv_image_dsc_t *src = s_audio.wireless_airplay ? &icon_airplay : &icon_bluetooth;
+        const lv_image_dsc_t *src = k_sources[s_audio.wireless_source].icon;
         if (lv_image_get_src(audio_chip.icon) != src) {
             lv_image_set_src(audio_chip.icon, src);
-            lv_obj_set_style_image_recolor(audio_chip.icon, lv_color_hex(s_audio.wireless_airplay ? UI_TINT_AIRPLAY : UI_TINT_BLUETOOTH),
-                                           0);
+            lv_obj_set_style_image_recolor(audio_chip.icon, lv_color_hex(k_sources[s_audio.wireless_source].tint), 0);
         }
     }
     audio_chip_set_text(usb ? "USB Audio" : s_audio.wireless_text);
@@ -1658,28 +1679,27 @@ static void format_subtitle(const ui_track_info_t *track, char *out, size_t len)
 
 void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *track) {
     static surface_state_t surface;
-    bool airplay = state->source == SOURCE_AIRPLAY;
-    lv_color_t tint = lv_color_hex(airplay ? UI_TINT_AIRPLAY : UI_TINT_BLUETOOTH);
-    s_current_source = airplay ? UI_SOURCE_AIRPLAY : UI_SOURCE_BLUETOOTH;
+    ui_source_t source = source_of(state->source);
+    lv_color_t tint = lv_color_hex(k_sources[source].tint);
+    s_current_source = source;
 
     ring_set_volume(wireless_screen.ring, state->volume);
-    lv_image_set_src(wireless_screen.source_icon, airplay ? &icon_airplay : &icon_bluetooth);
+    lv_image_set_src(wireless_screen.source_icon, k_sources[source].icon);
     lv_obj_set_style_image_recolor(wireless_screen.source_icon, tint, 0);
-    ui_label_set_text(wireless_screen.source_label, airplay ? "AirPlay" : "Bluetooth");
+    ui_label_set_text(wireless_screen.source_label, k_sources[source].label);
+    // A station has no art; its tile carries the radio glyph instead.
+    const lv_image_dsc_t *tile = source == UI_SOURCE_RADIO ? &icon_radio : &icon_music_note;
+    if (lv_image_get_src(wireless_screen.tile_icon) != tile) {
+        lv_image_set_src(wireless_screen.tile_icon, tile);
+    }
 
     // Unconnected, there's no tile/track to show yet, nor a volume.
     bool waiting = !state->connected;
-
-    // Eased only where it shows; elsewhere the next look finds it done.
     uint32_t art_tint = track && track->art && ui_settings_current()->art_colors ? track->art_tint : 0;
-    ui_now_playing_bg_set_tint(&wireless_screen.bg, art_tint ? art_tint : airplay ? UI_TINT_AIRPLAY : UI_TINT_BLUETOOTH,
+    ui_now_playing_bg_set_tint(&wireless_screen.bg, art_tint ? art_tint : k_sources[source].tint,
                                !waiting && lv_screen_active() == wireless_screen.screen);
-    wireless_screen.bluetooth = !airplay;
-    if (airplay) {
-        lv_obj_remove_flag(wireless_screen.wait_chip, LV_OBJ_FLAG_CLICKABLE);
-    } else {
-        lv_obj_add_flag(wireless_screen.wait_chip, LV_OBJ_FLAG_CLICKABLE);
-    }
+    wireless_screen.bluetooth = source == UI_SOURCE_BLUETOOTH;
+    lv_obj_set_flag(wireless_screen.wait_chip, LV_OBJ_FLAG_CLICKABLE, wireless_screen.bluetooth);
     lv_obj_t *status_row = lv_obj_get_parent(wireless_screen.source_icon);
     // Connected, it's a chip like any other; waiting, it heads the centered
     // block below it.
@@ -1701,16 +1721,15 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     char subtitle[128];
     format_subtitle(track, subtitle, sizeof(subtitle));
     bool has_track = track && track->title[0];
-    const char *source_name = airplay ? "AirPlay" : "Bluetooth";
+    const char *source_name = k_sources[source].label;
     const char *peer = track ? track->peer : "";
     // With no track, what's connected is the next best title.
     const char *idle_title = peer[0] ? peer : source_name;
 
     if (waiting) {
-        lv_image_set_src(wireless_screen.wait_icon, airplay ? &icon_airplay : &icon_bluetooth);
-        ui_label_set_text(wireless_screen.wait_title, airplay ? "Waiting for AirPlay" : "Waiting for Bluetooth");
-        ui_label_set_text(wireless_screen.wait_subtitle,
-                           airplay ? "Select this speaker from Control Center" : "Tap the icon to pair a new phone");
+        lv_image_set_src(wireless_screen.wait_icon, k_sources[source].icon);
+        ui_label_set_text(wireless_screen.wait_title, k_sources[source].wait_title);
+        ui_label_set_text(wireless_screen.wait_subtitle, k_sources[source].wait_hint);
     } else {
         ui_label_set_text(wireless_screen.play_icon,
                            state->muted ? LV_SYMBOL_MUTE : (state->playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));
@@ -1724,7 +1743,7 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
 
     s_audio.wireless_connected = state->connected;
     s_audio.wireless_playing = state->playing;
-    s_audio.wireless_airplay = airplay;
+    s_audio.wireless_source = source;
     snprintf(s_audio.wireless_peer, sizeof(s_audio.wireless_peer), "%s", peer);
     snprintf(s_audio.wireless_text, sizeof(s_audio.wireless_text), "%s", has_track ? track->title : idle_title);
     snprintf(s_audio.wireless_subtitle, sizeof(s_audio.wireless_subtitle), "%s",

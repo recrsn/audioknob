@@ -8,3 +8,4 @@
 extern const lv_image_dsc_t icon_airplay;
 extern const lv_image_dsc_t icon_bluetooth;
 extern const lv_image_dsc_t icon_music_note;
+extern const lv_image_dsc_t icon_radio;

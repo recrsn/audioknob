@@ -17,6 +17,8 @@
 #include "now_playing.h"
 #include "online.h"
 #include "ota.h"
+#include "radio.h"
+#include "radio_stations.h"
 #include "settings_ui.h"
 #include "tz.h"
 #include "uart_link.h"
@@ -24,6 +26,8 @@
 #include "web_page.h"
 
 #define FORM_MAX     256
+// A station: a URL of up to 255 bytes and a name, both percent-encoded.
+#define STATION_FORM_MAX 1100
 #define HEADER_MAX   96
 #define ZONES_CHUNK  1024
 // Lets the reply reach the browser before the device restarts.
@@ -73,7 +77,9 @@ static cJSON *now_playing_json(void) {
     if (!now_playing_artwork(&art_version)) {
         art_version = 0;
     }
-    cJSON_AddStringToObject(np, "source", state.source == SOURCE_A2DP ? "bluetooth" : "airplay");
+    cJSON_AddStringToObject(np, "source", state.source == SOURCE_A2DP    ? "bluetooth"
+                                          : state.source == SOURCE_RADIO ? "radio"
+                                                                         : "airplay");
     cJSON_AddBoolToObject(np, "connected", known && state.connected);
     cJSON_AddBoolToObject(np, "playing", known && state.playing);
     cJSON_AddNumberToObject(np, "volume", state.volume);
@@ -122,6 +128,25 @@ static cJSON *weather_json(void) {
     return json;
 }
 
+static cJSON *radio_json(void) {
+    static const char *const k_states[] = {
+        [UI_RADIO_STOPPED] = "stopped",     [UI_RADIO_CONNECTING] = "connecting", [UI_RADIO_BUFFERING] = "buffering",
+        [UI_RADIO_PLAYING] = "playing",     [UI_RADIO_RETRYING] = "retrying",     [UI_RADIO_FAILED] = "failed",
+    };
+    ui_radio_t *r = heap_caps_malloc(sizeof(*r), MALLOC_CAP_SPIRAM);
+    cJSON *radio = cJSON_CreateObject();
+    if (r) {
+        radio_ui_snapshot(r);
+        cJSON_AddNumberToObject(radio, "current", r->current);
+        cJSON_AddStringToObject(radio, "state", k_states[r->state]);
+        cJSON_AddStringToObject(radio, "detail", r->detail);
+        heap_caps_free(r);
+    }
+    // Tells the page when to fetch /api/stations again.
+    cJSON_AddNumberToObject(radio, "list", radio_stations_version());
+    return radio;
+}
+
 static esp_err_t state_handler(httpd_req_t *req) {
     ui_settings_t s;
     settings_ui_snapshot(&s);
@@ -160,6 +185,7 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddBoolToObject(amb, "playing", focus_sound_playing(&kind));
     cJSON_AddNumberToObject(amb, "sound", kind);
     cJSON_AddNumberToObject(amb, "cpu", focus_sound_cpu_pct());
+    cJSON_AddItemToObject(json, "radio", radio_json());
     cJSON_AddItemToObject(json, "update", update_json());
     // null while Bluetooth is off or the ESP32 isn't answering.
     pairing_status_t pairing;
@@ -468,6 +494,77 @@ static esp_err_t pairing_handler(httpd_req_t *req) {
     return send_ok(req);
 }
 
+static esp_err_t stations_get_handler(httpd_req_t *req) {
+    cJSON *list = cJSON_CreateArray();
+    int count = radio_stations_count();
+    for (int i = 0; i < count; i++) {
+        radio_station_t station;
+        if (radio_stations_get(i, &station)) {
+            cJSON *item = cJSON_CreateObject();
+            cJSON_AddStringToObject(item, "name", station.name);
+            cJSON_AddStringToObject(item, "url", station.url);
+            cJSON_AddItemToArray(list, item);
+        }
+    }
+    return send_json(req, list);
+}
+
+// The station presets: add (name, url), remove (index), move (index, to),
+// play (index) or stop. Searching for stations is the page's job, done
+// from the phone against radio-browser.info.
+static esp_err_t stations_post_handler(httpd_req_t *req) {
+    enum { NAME_ENC = RADIO_NAME_MAX * 3, URL_ENC = STREAM_URL_MAX * 3 };
+    typedef struct {
+        char form[STATION_FORM_MAX + 1];
+        char name[NAME_ENC + 1];
+        char url[URL_ENC + 1];
+        char action[8], index[8], to[8];
+    } buf_t;
+    buf_t *b = heap_caps_malloc(sizeof(*b), MALLOC_CAP_SPIRAM);
+    if (!b) {
+        return httpd_resp_send_500(req);
+    }
+    esp_err_t err = ESP_OK;
+    if (!read_post(req, b->form, sizeof(b->form))) {
+        goto done;
+    }
+    web_form_value(b->form, "action", b->action, sizeof(b->action));
+    web_form_value(b->form, "index", b->index, sizeof(b->index));
+    web_form_value(b->form, "to", b->to, sizeof(b->to));
+    int index = 0, to = 0;
+    bool has_index = parse_int(b->index, 0, RADIO_STATIONS_MAX - 1, &index);
+    bool ok;
+    const char *why = "Unknown station";
+    if (!strcmp(b->action, "add")) {
+        web_form_value(b->form, "name", b->name, sizeof(b->name));
+        web_form_value(b->form, "url", b->url, sizeof(b->url));
+        char name[RADIO_NAME_MAX];
+        copy_utf8(name, sizeof(name), b->name);
+        ok = radio_stations_add(name, b->url);
+        why = radio_stations_count() >= RADIO_STATIONS_MAX ? "The list is full"
+                                                           : "Needs a name and an http(s):// address";
+    } else if (!strcmp(b->action, "remove")) {
+        ok = has_index && radio_stations_remove(index);
+    } else if (!strcmp(b->action, "move")) {
+        ok = has_index && parse_int(b->to, 0, RADIO_STATIONS_MAX - 1, &to) && radio_stations_move(index, to);
+    } else if (!strcmp(b->action, "play")) {
+        ok = has_index && index < radio_stations_count();
+        if (ok) {
+            radio_play(index);
+        }
+    } else if (!strcmp(b->action, "stop")) {
+        radio_stop();
+        ok = true;
+    } else {
+        ok = false;
+        why = "Unknown action";
+    }
+    err = ok ? send_ok(req) : httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, why);
+done:
+    heap_caps_free(b);
+    return err;
+}
+
 static esp_err_t forget_handler(httpd_req_t *req) {
     char form[FORM_MAX + 1];
     if (!read_post(req, form, sizeof(form))) {
@@ -524,6 +621,8 @@ bool web_settings_start(void) {
         {.uri = "/api/transport", .method = HTTP_POST, .handler = transport_handler},
         {.uri = "/api/ambience", .method = HTTP_POST, .handler = ambience_handler},
         {.uri = "/api/pairing", .method = HTTP_POST, .handler = pairing_handler},
+        {.uri = "/api/stations", .method = HTTP_GET, .handler = stations_get_handler},
+        {.uri = "/api/stations", .method = HTTP_POST, .handler = stations_post_handler},
         {.uri = "/api/forget", .method = HTTP_POST, .handler = forget_handler},
         {.uri = "/api/update", .method = HTTP_POST, .handler = update_handler},
     };

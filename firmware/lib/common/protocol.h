@@ -98,6 +98,8 @@ typedef struct __attribute__((packed)) {
 typedef enum {
     SOURCE_AIRPLAY = 0,
     SOURCE_A2DP = 1,
+    // S3-local only, for the S3's own now-playing state; never on the wire.
+    SOURCE_RADIO = 2,
 } wireless_source_t;
 
 typedef struct __attribute__((packed)) {

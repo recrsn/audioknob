@@ -313,6 +313,70 @@ static const uint16_t *sample_art(int art, uint32_t *tint) {
     return pixels[art];
 }
 
+// Stands in for the radio so its app and now-playing screen can be laid
+// out: a tapped station connects, buffers, then "plays" a sample title.
+static ui_radio_t s_radio = {
+    .count = 6,
+    .names = {"SomaFM Groove Salad", "Radio Paradise", "SomaFM Drone Zone", "KEXP 90.3 FM", "Sample Jazz",
+              "A station with a rather long name"},
+    .current = -1,
+};
+static uint8_t s_radio_volume = 40;
+static int s_radio_ticks;
+
+static void push_radio(void) {
+    ui_update_radio(&s_radio);
+    if (s_radio.current < 0) {
+        return;
+    }
+    bool playing = s_radio.state != UI_RADIO_STOPPED;
+    wireless_state_t state = {.volume = s_radio_volume, .connected = 1, .playing = playing, .source = SOURCE_RADIO};
+    ui_track_info_t track = {0};
+    const char *name = s_radio.names[s_radio.current];
+    bool live = s_radio.state == UI_RADIO_PLAYING;
+    snprintf(track.title, sizeof(track.title), "%s", live ? s_radio.detail : name);
+    snprintf(track.artist, sizeof(track.artist), "%s", live ? name : s_radio.state == UI_RADIO_STOPPED ? "" : "Buffering\xE2\x80\xA6");
+    snprintf(track.peer, sizeof(track.peer), "%s", name);
+    ui_update_wireless(&state, &track);
+}
+
+static void on_radio(int station) {
+    if (station < 0) {
+        s_radio.state = UI_RADIO_STOPPED;
+    } else {
+        s_radio.current = station;
+        s_radio.state = UI_RADIO_CONNECTING;
+        s_radio.detail[0] = '\0';
+        s_radio_ticks = 0;
+    }
+    push_radio();
+}
+
+static void radio_tick_cb(lv_timer_t *timer) {
+    (void)timer;
+    if (s_radio.current < 0 || s_radio.state == UI_RADIO_STOPPED || s_radio.state == UI_RADIO_PLAYING) {
+        return;
+    }
+    s_radio_ticks++;
+    s_radio.state = s_radio_ticks < 2 ? UI_RADIO_CONNECTING : s_radio_ticks < 4 ? UI_RADIO_BUFFERING : UI_RADIO_PLAYING;
+    if (s_radio.state == UI_RADIO_PLAYING) {
+        snprintf(s_radio.detail, sizeof(s_radio.detail), "Sample Artist - Sample Song");
+    }
+    push_radio();
+}
+
+static void on_transport(ui_transport_t button) {
+    if (s_radio.current < 0) {
+        return;
+    }
+    if (button == UI_TRANSPORT_PLAY_PAUSE) {
+        on_radio(s_radio.state == UI_RADIO_STOPPED ? s_radio.current : -1);
+    } else {
+        int step = button == UI_TRANSPORT_NEXT ? 1 : -1;
+        on_radio(((s_radio.current + step) % s_radio.count + s_radio.count) % s_radio.count);
+    }
+}
+
 // Stands in for a source so the now-playing screens can be laid out: P steps
 // through nothing, Bluetooth waiting to pair, and AirPlay playing a track
 // without art, then with each sample art (paused once), then Bluetooth with
@@ -355,6 +419,9 @@ static void show_sample_playback(void) {
 }
 
 static void cycle_sample_playback(void) {
+    s_radio.current = -1;
+    s_radio.state = UI_RADIO_STOPPED;
+    ui_update_radio(&s_radio);
     s_sample_step = (s_sample_step + 1) % SAMPLE_STEPS;
     show_sample_playback();
 }
@@ -445,6 +512,10 @@ int main(void) {
     lv_timer_create(pairing_tick_cb, 1000, NULL);
     ui_set_firmware_handler(on_firmware);
     lv_timer_create(firmware_tick_cb, SIM_FW_TICK_MS, NULL);
+    ui_set_radio_handler(on_radio);
+    ui_set_transport_handler(on_transport);
+    ui_update_radio(&s_radio);
+    lv_timer_create(radio_tick_cb, 500, NULL);
 
     while (1) {
         uint32_t idle_ms = lv_timer_handler();

@@ -28,7 +28,7 @@ typedef struct {
 } ui_track_info_t;
 
 // Pushes a fresh wireless_state_t (A2DP state from the ESP32 over UART, or
-// AirPlay state from this MCU -- state->source says which) and
+// AirPlay or radio state from this MCU -- state->source says which) and
 // the currently playing track into the wireless now-playing screen. Safe to
 // call whether or not that screen is currently visible.
 void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *track);
@@ -46,6 +46,7 @@ void ui_set_transport_handler(void (*handler)(ui_transport_t button));
 typedef enum {
     UI_SOURCE_AIRPLAY,
     UI_SOURCE_BLUETOOTH,
+    UI_SOURCE_RADIO, // shown in front, never picked
 } ui_source_t;
 
 // Ambient sounds generated on the device, for focus or on their own. In
@@ -122,7 +123,9 @@ void ui_set_firmware_handler(void (*handler)(bool install));
 // Called on the LVGL task when the user picks a source on the switch screen
 // (tap the status row of the wireless screen); must not block. The UI then
 // shows that source's screen -- its waiting state if nothing is connected --
-// until a stream starts or the user swipes home.
+// until a stream starts or the user swipes home. Only AirPlay and
+// Bluetooth are offered: the radio is an app, and playing a station is what
+// brings it in front.
 void ui_set_source_handler(void (*handler)(ui_source_t source));
 
 // Knob input for what the UI owns outright: the launcher and the app pages
@@ -198,6 +201,36 @@ typedef struct {
 
 // Pushes the weather page's data; call when it changes, not every poll.
 void ui_update_weather(const ui_weather_t *weather);
+
+#define UI_RADIO_MAX 24
+#define UI_RADIO_NAME_MAX 48
+
+typedef enum {
+    UI_RADIO_STOPPED,
+    UI_RADIO_CONNECTING,
+    UI_RADIO_BUFFERING,
+    UI_RADIO_PLAYING,
+    UI_RADIO_RETRYING, // lost the stream, reconnecting
+    UI_RADIO_FAILED,   // gave up: detail says why
+} ui_radio_state_t;
+
+typedef struct {
+    int count;
+    char names[UI_RADIO_MAX][UI_RADIO_NAME_MAX]; // the presets, in order
+    int current;            // the loaded station's index, or -1
+    ui_radio_state_t state; // of `current`
+    // The stream's title while playing; why, while retrying or failed.
+    char detail[64];
+} ui_radio_t;
+
+// Pushes the Radio app's stations and the current one's state; call when
+// it changes, not every poll. Its playback reaches the now-playing screens
+// through ui_update_wireless() like any source.
+void ui_update_radio(const ui_radio_t *radio);
+
+// Called on the LVGL task when a station is tapped: its index to play it,
+// or -1 to stop the one playing. Must not block.
+void ui_set_radio_handler(void (*handler)(int station));
 
 #define UI_LIGHTS_MAX 6
 

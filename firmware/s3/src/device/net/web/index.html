@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark">
 <title>AudioKnob</title>
 <style>
-:root{--bg:#0b0b10;--card:#15151d;--line:#262631;--text:#eeeef2;--dim:#8d8d99;--accent:#4ea1ff;--ok:#6fd08c;--err:#ff7a7a;--ap:#4ea1ff;--bt:#5b7cff}
+:root{--bg:#0b0b10;--card:#15151d;--line:#262631;--text:#eeeef2;--dim:#8d8d99;--accent:#4ea1ff;--ok:#6fd08c;--err:#ff7a7a;--ap:#4ea1ff;--bt:#5b7cff;--radio:#f472b6}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
 main{max-width:460px;margin:0 auto;padding:20px 16px 48px}
@@ -30,6 +30,7 @@ h2{font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
 #src{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:#22222c;color:var(--dim)}
 #src.airplay{background:rgba(78,161,255,.16);color:var(--ap)}
 #src.bluetooth{background:rgba(91,124,255,.18);color:#8ea4ff}
+#src.radio{background:rgba(244,114,182,.16);color:var(--radio)}
 #title{font-size:18px;font-weight:600;margin-top:6px}
 #artist,#album{color:var(--dim);font-size:14px}
 #title,#artist,#album{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -72,6 +73,27 @@ progress::-moz-progress-bar{background:var(--accent)}
 #locresults{display:flex;flex-direction:column}
 #locresults button{display:flex;flex-direction:column;align-items:flex-start;border:0;border-top:1px solid var(--line);background:none;color:var(--text);padding:10px 4px;font-size:16px;text-align:left}
 #locresults small{color:var(--dim);font-size:13px}
+/* Radio */
+.station{display:flex;align-items:center;gap:6px;min-height:52px;padding:6px 8px 6px 16px;border-top:1px solid var(--line)}
+.station:first-child{border-top:0}
+.station .sname{flex:1;min-width:0}
+.station .sname div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.station .sname small{display:block;color:var(--dim);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.station.on .sname div{color:var(--radio);font-weight:600}
+.station.failed small{color:var(--err)}
+.icon{flex:none;width:36px;height:36px;border-radius:50%;border:0;background:none;color:var(--dim);font-size:17px;line-height:1;padding:0;display:grid;place-items:center}
+.icon:disabled{opacity:.25}
+.icon.play{background:#22222c;color:var(--text)}
+.station.on .icon.play{background:var(--radio);color:#fff}
+.icon.del{color:var(--err)}
+#stationsempty{padding:16px;color:var(--dim)}
+#rbresults{display:flex;flex-direction:column}
+#rbresults button{display:flex;flex-direction:column;align-items:flex-start;border:0;border-top:1px solid var(--line);background:none;color:var(--text);padding:10px 4px;font-size:16px;text-align:left}
+#rbresults small{color:var(--dim);font-size:13px}
+details summary{color:var(--accent);cursor:pointer;font-size:15px}
+details[open] summary{margin-bottom:8px}
+.stack{display:flex;flex-direction:column;gap:8px}
+.stack .btn{align-self:flex-start}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#2a2a35;color:var(--text);padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.show{opacity:1}
 </style>
@@ -102,6 +124,24 @@ progress::-moz-progress-bar{background:var(--accent)}
       <button id="volup" aria-label="Volume up">+</button>
       <span id="volval"></span>
     </div>
+  </div>
+</section>
+
+<h2>Radio</h2>
+<section class="card">
+  <div id="stations"></div>
+  <div class="row col">
+    <form class="inline" id="rbform"><input type="text" id="rbq" placeholder="Find a station" autocomplete="off"><button class="btn">Search</button></form>
+    <div id="rbresults"></div>
+    <details>
+      <summary>Add by address</summary>
+      <form class="stack" id="addform">
+        <input type="text" id="addname" placeholder="Name" maxlength="47" required autocomplete="off">
+        <input type="text" id="addurl" placeholder="https://… (MP3 or AAC stream, .pls or .m3u)" maxlength="255" required autocomplete="off" inputmode="url">
+        <button class="btn">Add</button>
+      </form>
+    </details>
+    <p class="hint">Search covers radio-browser.info's directory, asked from this phone. The knob plays the list in this order.</p>
   </div>
 </section>
 
@@ -247,7 +287,7 @@ function holdable(input, send, delay) {
 function renderNowPlaying(np) {
   const active = np.connected || np.playing;
   $("src").className = active ? np.source : "";
-  setText("src", !active ? "Idle" : np.source === "airplay" ? "AirPlay" : "Bluetooth");
+  setText("src", !active ? "Idle" : {airplay: "AirPlay", bluetooth: "Bluetooth", radio: "Radio"}[np.source]);
   setText("title", np.title || (active ? (np.playing ? "Playing" : "Paused") : "Nothing playing"));
   setText("artist", np.artist || "");
   setText("album", np.album || "");
@@ -291,11 +331,85 @@ function renderWeather(w, fahrenheit) {
   }
 }
 
+// The list comes from /api/stations when its version moves; what's playing
+// comes with every poll.
+let stations = [], stationsVersion = -1;
+const RADIO_STATES = {connecting: "Connecting…", buffering: "Buffering…", retrying: "Reconnecting…"};
+
+async function loadStations(version) {
+  try {
+    stations = await (await fetch("/api/stations", {cache: "no-store"})).json();
+    stationsVersion = version;
+    renderStations();
+  } catch (e) {
+    // The next poll tries again.
+  }
+}
+
+function iconButton(text, label, cls, onclick, disabled) {
+  const b = document.createElement("button");
+  b.className = "icon " + (cls || "");
+  b.type = "button";
+  b.textContent = text;
+  b.setAttribute("aria-label", label);
+  b.disabled = !!disabled;
+  b.onclick = onclick;
+  return b;
+}
+
+function renderStations() {
+  const box = $("stations"), radio = state && state.radio;
+  box.textContent = "";
+  if (!stations.length) {
+    const p = document.createElement("div");
+    p.id = "stationsempty";
+    p.textContent = "No stations yet. Find some below.";
+    box.append(p);
+    return;
+  }
+  stations.forEach((st, i) => {
+    const on = radio && radio.current === i && radio.state !== "stopped";
+    const failed = on && radio.state === "failed";
+    const row = document.createElement("div");
+    row.className = "station" + (on ? " on" : "") + (failed ? " failed" : "");
+    const name = document.createElement("div");
+    name.className = "sname";
+    const title = document.createElement("div");
+    title.textContent = st.name;
+    const sub = document.createElement("small");
+    sub.textContent = !on ? st.url : radio.state === "playing" ? (radio.detail || "Playing")
+                    : RADIO_STATES[radio.state] || radio.detail || "Can't play this station";
+    name.append(title, sub);
+    const playing = on && !failed;
+    row.append(
+      iconButton(playing ? "■" : "▶", playing ? "Stop" : "Play", "play",
+                 () => post("/api/stations", playing ? {action: "stop"} : {action: "play", index: i})),
+      name,
+      iconButton("↑", "Move up", "", () => post("/api/stations", {action: "move", index: i, to: i - 1}), i === 0),
+      iconButton("↓", "Move down", "", () => post("/api/stations", {action: "move", index: i, to: i + 1}),
+                 i === stations.length - 1),
+      iconButton("✕", "Remove", "del", async () => {
+        if (confirm(`Remove ${st.name}?`)) await post("/api/stations", {action: "remove", index: i});
+      }));
+    box.append(row);
+  });
+}
+
+function renderRadio(s) {
+  if (s.radio.list !== stationsVersion) loadStations(s.radio.list);
+  const key = JSON.stringify(s.radio);
+  if (key !== renderRadio.last) {
+    renderRadio.last = key;
+    renderStations();
+  }
+}
+
 function render(s) {
   setText("name", s.name);
   document.title = s.name;
   if (document.activeElement !== $("newname") && !$("newname").value) $("newname").value = s.name;
   renderNowPlaying(s.np);
+  renderRadio(s);
   if (!busy.has($("brightness"))) $("brightness").value = s.brightness;
   setText("brightval", s.brightness + "%");
   $("sleep").value = s.sleep;
@@ -465,6 +579,61 @@ $("locform").onsubmit = async e => {
   }
 };
 $("locauto").onclick = () => post("/api/location", {auto: 1});
+
+async function addStation(name, url) {
+  name = name.trim().slice(0, 47);
+  url = url.trim();
+  if (url.length > 255) {
+    toast("That address is too long for the device");
+    return false;
+  }
+  if (!await post("/api/stations", {action: "add", name, url})) return false;
+  toast("Added " + name);
+  return true;
+}
+
+// The phone asks radio-browser.info's directory (any of its mirrors answers
+// on all.api); the device only stores the pick. HLS and codecs the device
+// can't decode are left out.
+$("rbform").onsubmit = async e => {
+  e.preventDefault();
+  const q = $("rbq").value.trim(), list = $("rbresults");
+  if (!q) return;
+  list.textContent = "";
+  let found;
+  try {
+    const params = new URLSearchParams({name: q, limit: 30, hidebroken: "true", order: "clickcount", reverse: "true"});
+    found = await (await fetch("https://all.api.radio-browser.info/json/stations/search?" + params)).json();
+  } catch (err) {
+    toast("Couldn't search: is this phone online?");
+    return;
+  }
+  found = found.filter(r => !r.hls && /^(mp3|aac\+?)$/i.test(r.codec) && (r.url_resolved || r.url).length <= 255)
+               .slice(0, 10);
+  if (!found.length) toast("No stations found");
+  for (const r of found) {
+    const b = document.createElement("button");
+    const sub = document.createElement("small");
+    b.type = "button";
+    b.textContent = r.name.trim();
+    sub.textContent = [r.codec + (r.bitrate ? ` ${r.bitrate} kbps` : ""), r.country].filter(Boolean).join(" · ");
+    b.append(sub);
+    b.onclick = async () => {
+      if (await addStation(r.name, r.url_resolved || r.url)) {
+        list.textContent = "";
+        $("rbq").value = "";
+      }
+    };
+    list.append(b);
+  }
+};
+
+$("addform").onsubmit = async e => {
+  e.preventDefault();
+  if (await addStation($("addname").value, $("addurl").value)) {
+    $("addname").value = $("addurl").value = "";
+  }
+};
 
 function airplayMask() {
   if (!state.airplay2) return $("ap2").checked ? 1 : 0;

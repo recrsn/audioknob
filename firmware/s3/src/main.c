@@ -6,6 +6,7 @@
 #include "audio_out.h"
 #include "audio_source.h"
 #include "device_name.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "focus_sound.h"
@@ -18,6 +19,7 @@
 #include "ntp.h"
 #include "online.h"
 #include "ota.h"
+#include "radio.h"
 #include "settings_ui.h"
 #include "uart_link.h"
 #include "web_settings.h"
@@ -91,6 +93,21 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
     ambience_kind_t kind;
     bool ambience = focus_sound_playing(&kind);
     ui_update_ambience(ambience, (ui_ambience_t)kind);
+    // ~1.2 KB, so in PSRAM rather than on the LVGL task's stack.
+    static ui_radio_t *radio;
+    static uint32_t radio_version;
+    static bool radio_pushed;
+    if (!radio) {
+        radio = heap_caps_malloc(sizeof(*radio), MALLOC_CAP_SPIRAM);
+    }
+    if (radio) {
+        uint32_t rv = radio_ui_snapshot(radio);
+        if (!radio_pushed || rv != radio_version) {
+            radio_pushed = true;
+            radio_version = rv;
+            ui_update_radio(radio);
+        }
+    }
 
     static uint32_t weather_version;
     ui_weather_t weather;
@@ -185,6 +202,16 @@ static void on_ambience_play(ui_ambience_t kind) {
     focus_sound_play((ambience_kind_t)kind);
 }
 
+// Another source started playing and took the DAC. Runs on the claiming
+// task or a timer task; both stops are non-blocking.
+static void on_preempted(audio_source_t source) {
+    if (source == AUDIO_SOURCE_AIRPLAY) {
+        airplay_preempt();
+    } else if (source == AUDIO_SOURCE_RADIO) {
+        radio_preempt();
+    }
+}
+
 static void on_network_up(const uint8_t mac[6]) {
     airplay_network_up(mac);
     online_network_up();
@@ -210,18 +237,21 @@ void app_main(void) {
     audio_out_init();
     airplay_init();
     // Past boot strapping, so GPIO0 (CH445P select) is safe to drive now.
-    audio_source_init(airplay_preempt);
+    audio_source_init(on_preempted);
     focus_sound_init();
 
     lcd_driver_init();
     haptic_init(lcd_driver_i2c_bus());
     online_start();
     settings_ui_init();
+    // After settings, which brings NVS up.
+    radio_init();
     device_name_init(on_device_name);
     lcd_driver_lvgl_lock();
     ui_init();
     ui_set_transport_handler(now_playing_transport);
     ui_set_source_handler(now_playing_pick);
+    ui_set_radio_handler(radio_play);
     ui_set_pairing_handler(on_pairing);
     ui_set_firmware_handler(on_firmware);
     ui_set_alert_handler(on_alert);

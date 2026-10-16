@@ -42,3 +42,4 @@ extern const lv_font_t icons_20;
 // icons_20 only: the weather complication and page's air quality and UV.
 #define ICON_AIR          "\xEE\xBF\x98"
 #define ICON_UV           "\xEE\x94\x98"
+#define ICON_RADIO        "\xEE\x80\xBE"

@@ -144,7 +144,7 @@ static void end_session(void) {
     s_client[0] = '\0';
     xSemaphoreGive(s_lock);
     post_artwork(NULL, 0);
-    audio_source_release_airplay();
+    audio_source_release(AUDIO_SOURCE_AIRPLAY);
 }
 
 static bool on_raop_event(const raop_event_t *event) {
@@ -166,6 +166,11 @@ static bool on_raop_event(const raop_event_t *event) {
             break;
         }
         set_playing(true);
+        if (!audio_source_claim(AUDIO_SOURCE_AIRPLAY)) {
+            airplay_preempt();
+            break;
+        }
+        set_playing(true);
         break;
 
     case RAOP_EVENT_FLUSH:
@@ -173,7 +178,7 @@ static bool on_raop_event(const raop_event_t *event) {
         // never blocks A2DP; the next PLAY claims it again.
         airplay_player_flush();
         set_playing(false);
-        audio_source_release_airplay();
+        audio_source_release(AUDIO_SOURCE_AIRPLAY);
         break;
 
     case RAOP_EVENT_SESSION_END:

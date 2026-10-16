@@ -6,12 +6,20 @@
 #include "protocol.h"
 #include "ui.h"
 
-// Which wireless source is "in front" -- shown on the now-playing screen and
-// driven by the knob, the touch transport and the web page -- and the
-// controls that act on it. AirPlay is in front while it holds the DAC, or
-// while it has a session open and A2DP is idle; otherwise the ESP32 owns
-// wireless controls and this MCU only displays. Safe from any task.
+// Which source is "in front" -- shown on the now-playing screen and driven
+// by the knob, the touch transport and the web page -- and the controls
+// that act on it. Whatever holds the DAC is in front; with nothing playing,
+// an open AirPlay session, then a stopped radio station, then Bluetooth.
+// Only for Bluetooth does the ESP32 own the controls, this MCU only
+// displaying. Safe from any task.
 
+typedef enum {
+    NOW_PLAYING_BLUETOOTH,
+    NOW_PLAYING_AIRPLAY,
+    NOW_PLAYING_RADIO,
+} now_playing_front_t;
+
+now_playing_front_t now_playing_front(void);
 bool now_playing_airplay_in_front(void);
 
 // Snapshot of the source in front. False while that's Bluetooth and the
@@ -33,6 +41,7 @@ bool now_playing_set_volume(uint8_t pct);
 void now_playing_transport(ui_transport_t button);
 
 // A manual pick from the switch screen. It holds only while the DAC stays
-// where the pick put it: if the other source then starts playing, "last to
-// start wins" takes over and the pick is dropped.
+// where the pick put it: if another source then starts playing, "last to
+// start wins" takes over and the pick is dropped. Picking either one stops
+// a playing radio.
 void now_playing_pick(ui_source_t source);
