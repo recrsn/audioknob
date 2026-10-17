@@ -107,7 +107,9 @@ void audio_source_init(void (*on_preempted)(audio_source_t source)) {
 
 bool audio_source_claim(audio_source_t source) {
     static const char *const k_names[] = {
-        [AUDIO_SOURCE_ESP32] = "A2DP", [AUDIO_SOURCE_AIRPLAY] = "AirPlay", [AUDIO_SOURCE_RADIO] = "Radio", [AUDIO_SOURCE_LOCAL] = "Ambience"};
+        [AUDIO_SOURCE_ESP32] = "A2DP", [AUDIO_SOURCE_AIRPLAY] = "AirPlay",
+        [AUDIO_SOURCE_RADIO] = "Radio", [AUDIO_SOURCE_NOTE] = "Voice note",
+        [AUDIO_SOURCE_TALK] = "Talk", [AUDIO_SOURCE_LOCAL] = "Ambience"};
     if (!take(source)) {
         return false;
     }
@@ -168,6 +170,8 @@ void audio_source_suspend(bool suspended) {
     if (suspended) {
         s_on_preempted(AUDIO_SOURCE_AIRPLAY);
         s_on_preempted(AUDIO_SOURCE_RADIO);
+        s_on_preempted(AUDIO_SOURCE_TALK);
+        s_on_preempted(AUDIO_SOURCE_NOTE);
         if (s_on_local_preempted) {
             s_on_local_preempted();
         }

@@ -32,6 +32,7 @@
 #define UI_TINT_RADIO     0xf472b6
 
 // Apps: each page's title, ring, primary button and launcher icon.
+#define UI_TINT_TALK         0x2dd4bf
 #define UI_TINT_LIGHTS       0xffc35a
 #define UI_TINT_TIMER        0xff9f43
 #define UI_TINT_TOMATO       0xff6347 // focus

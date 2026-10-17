@@ -34,3 +34,7 @@ void kd_free(key_data_t *kd);
 // Binds a socket of `type` on INADDR_ANY. *port of 0 picks an ephemeral
 // port and writes it back. Returns the socket or -1.
 int bind_socket(uint16_t *port, int type);
+
+// Same parser, retaining the complete start line for RTSP client responses.
+bool http_parse_message(int sock, char *start_line, size_t start_size, key_data_t *kd,
+                        int max_headers, char **body, int *body_len);

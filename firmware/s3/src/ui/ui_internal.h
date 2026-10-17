@@ -59,6 +59,8 @@ void ui_now_playing_bg_set_tint(ui_now_playing_bg_t *bg, uint32_t tint, bool ani
 // lay it out.
 typedef enum {
     UI_APP_RADIO,
+    UI_APP_TALK,
+    UI_APP_INBOX,
 #ifdef AK_LIGHTS
     UI_APP_LIGHTS,
 #endif
@@ -174,3 +176,12 @@ const pairing_status_t *ui_pairing_status(void);
 // Re-renders the settings page's Bluetooth rows after ui_pairing_status()
 // changes.
 void ui_settings_refresh(void);
+
+void ui_talk_page_update(const ui_talk_t *talk);
+
+const ui_voice_t *ui_voice_current(void);
+void ui_voice_record(uint32_t peer, bool held);
+void ui_voice_play(const char *id);
+void ui_voice_stop(void);
+void ui_inbox_voice_changed(void);
+void ui_talk_voice_changed(void);

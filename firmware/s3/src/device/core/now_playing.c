@@ -6,6 +6,7 @@
 #include "audio_source.h"
 #include "freertos/FreeRTOS.h"
 #include "radio.h"
+#include "talk.h"
 #include "uart_link.h"
 
 typedef enum { PICK_NONE, PICK_AIRPLAY, PICK_BLUETOOTH } source_pick_t;
@@ -32,6 +33,8 @@ now_playing_front_t now_playing_front(void) {
         return NOW_PLAYING_RADIO;
     case AUDIO_SOURCE_ESP32:
     case AUDIO_SOURCE_LOCAL:
+    case AUDIO_SOURCE_TALK:
+    case AUDIO_SOURCE_NOTE:
         break;
     }
     wireless_state_t esp32;
@@ -98,7 +101,19 @@ const uint16_t *now_playing_artwork(uint32_t *version) {
     return uart_link_get_artwork(version);
 }
 
+static bool voice_in_front(void) {
+    audio_source_t source = audio_source_active();
+    return source == AUDIO_SOURCE_TALK || source == AUDIO_SOURCE_NOTE;
+}
+
 bool now_playing_adjust_volume(int steps) {
+    if (voice_in_front()) {
+        ui_talk_t voice;
+        talk_get_state(&voice);
+        int volume = (int)voice.volume + steps;
+        talk_set_volume(volume < 0 ? 0 : volume > 100 ? 100 : volume);
+        return true;
+    }
     switch (now_playing_front()) {
     case NOW_PLAYING_AIRPLAY:
         airplay_adjust_volume(steps);
@@ -123,6 +138,7 @@ bool now_playing_adjust_volume(int steps) {
 
 bool now_playing_set_volume(uint8_t pct) {
     pct = pct > 100 ? 100 : pct;
+    if (voice_in_front()) { talk_set_volume(pct); return true; }
     wireless_state_t state;
     track_info_t track;
     now_playing_front_t front = now_playing_front();

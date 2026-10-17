@@ -10,3 +10,6 @@ ota_1,    app,  ota_1,     0x620000, 6M
 # inter-MCU UART.
 esp32_fw, data, undefined, 0xc20000, 2M
 coredump, data, coredump,  0xe20000, 64K
+# Saved messages and Opus voice notes. Uses only the formerly unused tail;
+# the OTA, NVS, staged ESP32 image and core-dump offsets stay unchanged.
+user_data, data, spiffs, 0xe30000, 0x1d0000

@@ -14,6 +14,10 @@
 #include "haptic.h"
 #include "knob.h"
 #include "mic.h"
+#include "talk.h"
+#include "flash_message.h"
+#include "message_store.h"
+#include "voice_notes.h"
 #include "lcd_driver.h"
 #include "lights.h"
 #include "lvgl.h"
@@ -110,6 +114,15 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
             ui_update_radio(radio);
         }
     }
+
+    static ui_inbox_t *inbox;
+    if (!inbox) inbox = heap_caps_calloc(1, sizeof(*inbox), MALLOC_CAP_SPIRAM);
+    if (inbox) { flash_message_snapshot(inbox); ui_update_inbox(inbox); }
+
+    ui_voice_t voice; voice_notes_get_state(&voice); ui_update_voice(&voice);
+    ui_talk_t talk;
+    talk_get_state(&talk);
+    ui_update_talk(&talk);
 
     static uint32_t weather_version;
     ui_weather_t weather;
@@ -208,6 +221,11 @@ static void on_alert(ui_alert_t alert) {
 
 _Static_assert((int)UI_AMBIENCE_COUNT == (int)AMBIENCE_COUNT, "ui_ambience_t mirrors ambience_kind_t");
 
+static void on_voice_record(uint32_t peer, bool held) { char id[17]; if (held) voice_notes_record(peer, id); else voice_notes_stop(); }
+static void on_voice_play(const char *id) { voice_notes_play(id); }
+static void on_message_ack(const char *id) { flash_message_ack(id); }
+static void on_message_delete(const char *id) { flash_message_delete(id); }
+
 static void on_ambience_play(ui_ambience_t kind) {
     focus_sound_play((ambience_kind_t)kind);
 }
@@ -219,12 +237,17 @@ static void on_preempted(audio_source_t source) {
         airplay_preempt();
     } else if (source == AUDIO_SOURCE_RADIO) {
         radio_preempt();
+    } else if (source == AUDIO_SOURCE_TALK) {
+        talk_preempt();
+    } else if (source == AUDIO_SOURCE_NOTE) {
+        voice_notes_preempt();
     }
 }
 
 static void on_network_up(const uint8_t mac[6]) {
     airplay_network_up(mac);
     online_network_up();
+    talk_network_up();
     // The web page is how the next update arrives, so a new image that
     // gets this far is kept.
     if (web_settings_start()) {
@@ -236,6 +259,7 @@ static void on_network_up(const uint8_t mac[6]) {
 static void on_device_name(const char *name) {
     uart_link_set_device_name(name);
     airplay_rename();
+    talk_rename();
 }
 
 void app_main(void) {
@@ -258,12 +282,19 @@ void app_main(void) {
     settings_ui_init();
     // After settings, which brings NVS up.
     radio_init();
+    message_store_init();
+    flash_message_init();
+    voice_notes_init();
+    talk_init();
     device_name_init(on_device_name);
     lcd_driver_lvgl_lock();
     ui_init();
     ui_set_transport_handler(now_playing_transport);
     ui_set_source_handler(now_playing_pick);
     ui_set_radio_handler(radio_play);
+    ui_set_talk_handler(talk_press, talk_set_volume);
+    ui_set_inbox_handler(on_message_ack, on_message_delete);
+    ui_set_voice_handler(on_voice_record, on_voice_play, voice_notes_stop);
     ui_set_pairing_handler(on_pairing);
     ui_set_firmware_handler(on_firmware);
     ui_set_alert_handler(on_alert);

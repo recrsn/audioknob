@@ -94,7 +94,7 @@ static char *ltrim(char *s) {
     return s;
 }
 
-bool http_parse(int sock, char *method, size_t method_size, key_data_t *kd, int max_headers, char **body, int *body_len) {
+bool http_parse_message(int sock, char *start_line, size_t start_size, key_data_t *kd, int max_headers, char **body, int *body_len) {
     char line[256];
     int i = 0;
     long content_len = 0;
@@ -107,12 +107,7 @@ bool http_parse(int sock, char *method, size_t method_size, key_data_t *kd, int 
         return false;
     }
 
-    char fmt[16];
-    snprintf(fmt, sizeof(fmt), "%%%us", (unsigned)(method_size - 1));
-    if (sscanf(line, fmt, method) != 1) {
-        ESP_LOGE(TAG, "missing method");
-        return false;
-    }
+    snprintf(start_line, start_size, "%s", line);
 
     while (read_line(sock, line, sizeof(line)) > 0) {
         // Obsolete line folding: append to the previous header's value.
@@ -244,4 +239,14 @@ int bind_socket(uint16_t *port, int type) {
         *port = ntohs(addr.sin_port);
     }
     return sock;
+}
+
+bool http_parse(int sock, char *method, size_t method_size, key_data_t *kd, int max_headers, char **body, int *body_len) {
+    char start[256];
+    if (!http_parse_message(sock, start, sizeof(start), kd, max_headers, body, body_len)) return false;
+    char fmt[16];
+    snprintf(fmt, sizeof(fmt), "%%%us", (unsigned)(method_size - 1));
+    if (sscanf(start, fmt, method) == 1) return true;
+    kd_free(kd); free(*body); *body = NULL; *body_len = 0;
+    return false;
 }

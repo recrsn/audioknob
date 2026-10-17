@@ -336,3 +336,43 @@ typedef enum {
 // Called on the LVGL task when the user changes a setting; must not block.
 // The handler applies and persists it, then pushes ui_update_settings().
 void ui_set_settings_handler(void (*handler)(ui_setting_t setting, int value, const char *zone));
+
+// Half-duplex LAN voice. Peer IDs stay stable as discovery results change.
+#define UI_TALK_MAX 8
+typedef enum { UI_TALK_IDLE, UI_TALK_CONNECTING, UI_TALK_SENDING, UI_TALK_RECEIVING } ui_talk_state_t;
+typedef struct {
+    uint32_t id;
+    char name[33];
+} ui_talk_peer_t;
+typedef struct {
+    ui_talk_peer_t peers[UI_TALK_MAX];
+    uint8_t count, volume, level;
+    ui_talk_state_t state;
+    char peer[33];
+    uint32_t peer_id;
+    char message[48];
+} ui_talk_t;
+void ui_update_talk(const ui_talk_t *talk);
+void ui_set_talk_handler(void (*press)(uint32_t peer, bool held), void (*volume)(uint8_t pct));
+
+#define UI_INBOX_MAX 8
+#define UI_MESSAGE_TEXT_MAX 160
+typedef struct {
+    char id[17], sender[33], text[UI_MESSAGE_TEXT_MAX + 1];
+    bool acknowledged, pending, failed, voice, local;
+    uint32_t duration_ms;
+} ui_message_t;
+typedef struct { uint8_t count; ui_message_t messages[UI_INBOX_MAX]; } ui_inbox_t;
+void ui_update_inbox(const ui_inbox_t *inbox);
+void ui_set_inbox_handler(void (*ack)(const char *id), void (*remove)(const char *id));
+
+typedef enum { UI_VOICE_IDLE, UI_VOICE_RECORDING, UI_VOICE_SAVING, UI_VOICE_PLAYING } ui_voice_state_t;
+typedef struct {
+    ui_voice_state_t state;
+    uint8_t level;
+    uint16_t seconds;
+    bool storage_ready;
+    char id[17], message[48];
+} ui_voice_t;
+void ui_update_voice(const ui_voice_t *voice);
+void ui_set_voice_handler(void (*record)(uint32_t peer, bool held), void (*play)(const char *id), void (*stop)(void));

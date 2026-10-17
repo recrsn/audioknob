@@ -1870,3 +1870,14 @@ void ui_show_wifi_setup(const char *qr_payload, const char *ssid, const char *pa
         }
     }
 }
+
+void ui_update_talk(const ui_talk_t *talk) {
+    static bool receiving;
+    bool incoming = talk->state == UI_TALK_RECEIVING;
+    ui_talk_page_update(talk);
+    if (incoming && !receiving && !ui_firmware_visible() && !ui_pairing_visible() && !ui_tools_alerting()) {
+        ui_wake();
+        open_app(UI_APP_TALK);
+    }
+    receiving = incoming;
+}

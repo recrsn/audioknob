@@ -13,6 +13,11 @@
 #include "esp_log.h"
 #include "focus_sound.h"
 #include "mic.h"
+#include "talk.h"
+#include "flash_message.h"
+#include "voice_notes.h"
+#include "message_store.h"
+#include "lwip/inet.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "now_playing.h"
@@ -676,6 +681,108 @@ static esp_err_t update_handler(httpd_req_t *req) {
     return ESP_FAIL;
 }
 
+static esp_err_t voice_get_handler(httpd_req_t *req) {
+    char query[64] = "", id[18] = "";
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK)
+        web_form_value(query, "id", id, sizeof(id));
+    if (id[0]) {
+        size_t length;
+        void *data = voice_notes_read(id, &length);
+        if (!data)
+            return httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Voice note not found");
+        httpd_resp_set_type(req, "audio/ogg");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+        esp_err_t err = httpd_resp_send(req, data, length);
+        free(data);
+        return err;
+    }
+    ui_voice_t voice;
+    voice_notes_get_state(&voice);
+    size_t total, used;
+    message_store_usage(&total, &used);
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddNumberToObject(json, "state", voice.state);
+    cJSON_AddStringToObject(json, "id", voice.id);
+    cJSON_AddStringToObject(json, "message", voice.message);
+    cJSON_AddNumberToObject(json, "seconds", voice.seconds);
+    cJSON_AddBoolToObject(json, "storageReady", voice.storage_ready);
+    cJSON_AddNumberToObject(json, "storageBytes", total);
+    cJSON_AddNumberToObject(json, "usedBytes", used);
+    return send_json(req, json);
+}
+static esp_err_t voice_post_handler(httpd_req_t *req) {
+    char form[128], action[12], id[18], peer[16];
+    if (!read_post(req, form, sizeof(form)))
+        return ESP_OK;
+    web_form_value(form, "action", action, sizeof(action));
+    web_form_value(form, "id", id, sizeof(id));
+    web_form_value(form, "peer", peer, sizeof(peer));
+    struct in_addr addr = {0};
+    if (peer[0] && (!inet_aton(peer, &addr) || !addr.s_addr))
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad peer address");
+    bool ok = false;
+    if (!strcmp(action, "stop")) {
+        voice_notes_stop();
+        return send_ok(req);
+    }
+    if (!strcmp(action, "record"))
+        ok = voice_notes_record(addr.s_addr, id);
+    else if (!strcmp(action, "play"))
+        ok = voice_notes_play(id);
+    else if (!strcmp(action, "send"))
+        ok = flash_message_send_voice(addr.s_addr, id);
+    if (!ok)
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Voice note unavailable, busy, or storage full");
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "id", id);
+    cJSON_AddStringToObject(json, "status", "queued");
+    httpd_resp_set_status(req, "202 Accepted");
+    return send_json(req, json);
+}
+
+static esp_err_t messages_get_handler(httpd_req_t *req) {
+    return send_json(req, flash_message_json());
+}
+static esp_err_t messages_post_handler(httpd_req_t *req) {
+    char form[1024], action[12], peer[16], text[UI_MESSAGE_TEXT_MAX + 2], id[18];
+    if (!read_post(req, form, sizeof(form)))
+        return ESP_OK;
+    web_form_value(form, "action", action, sizeof(action));
+    web_form_value(form, "id", id, sizeof(id));
+    if (!strcmp(action, "ack"))
+        return flash_message_ack(id) ? send_ok(req)
+                                     : httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Cannot acknowledge message");
+    if (!strcmp(action, "delete"))
+        return flash_message_delete(id) ? send_ok(req)
+                                        : httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Cannot delete message");
+    web_form_value(form, "peer", peer, sizeof(peer));
+    web_form_value(form, "text", text, sizeof(text));
+    struct in_addr addr;
+    if (strcmp(action, "send") || inet_aton(peer, &addr) == 0 || !addr.s_addr ||
+        !flash_message_send(addr.s_addr, text, id))
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Bad message or outbox full");
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddStringToObject(json, "id", id);
+    cJSON_AddStringToObject(json, "status", "queued");
+    httpd_resp_set_status(req, "202 Accepted");
+    return send_json(req, json);
+}
+static esp_err_t talk_get_handler(httpd_req_t *req) {
+    ui_talk_t state;
+    talk_get_state(&state);
+    cJSON *json = cJSON_CreateObject(), *peers = cJSON_AddArrayToObject(json, "peers");
+    for (int i = 0; i < state.count; i++) {
+        cJSON *p = cJSON_CreateObject();
+        cJSON_AddItemToArray(peers, p);
+        struct in_addr addr = {.s_addr = state.peers[i].id};
+        cJSON_AddStringToObject(p, "ip", inet_ntoa(addr));
+        cJSON_AddStringToObject(p, "name", state.peers[i].name);
+    }
+    cJSON_AddNumberToObject(json, "state", state.state);
+    cJSON_AddNumberToObject(json, "volume", state.volume);
+    cJSON_AddStringToObject(json, "peer", state.peer);
+    return send_json(req, json);
+}
 bool web_settings_start(void) {
     if (s_server) {
         return true;
@@ -685,6 +792,11 @@ bool web_settings_start(void) {
         {.uri = "/api/state", .method = HTTP_GET, .handler = state_handler},
         {.uri = "/api/zones", .method = HTTP_GET, .handler = zones_handler},
         {.uri = "/api/art.bmp", .method = HTTP_GET, .handler = art_handler},
+        {.uri = "/api/voice", .method = HTTP_GET, .handler = voice_get_handler},
+        {.uri = "/api/voice", .method = HTTP_POST, .handler = voice_post_handler},
+        {.uri = "/api/talk", .method = HTTP_GET, .handler = talk_get_handler},
+        {.uri = "/api/messages", .method = HTTP_GET, .handler = messages_get_handler},
+        {.uri = "/api/messages", .method = HTTP_POST, .handler = messages_post_handler},
         {.uri = "/api/mic.wav", .method = HTTP_GET, .handler = mic_wav_handler},
         {.uri = "/api/set", .method = HTTP_POST, .handler = set_handler},
         {.uri = "/api/name", .method = HTTP_POST, .handler = name_handler},

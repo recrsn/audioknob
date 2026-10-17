@@ -354,6 +354,54 @@ static void push_radio(void) {
     ui_update_wireless(&state, &track);
 }
 
+static ui_voice_t s_voice = {.storage_ready = true};
+static void on_voice_record(uint32_t peer, bool held) {
+    (void)peer;
+    s_voice.state = held ? UI_VOICE_RECORDING : UI_VOICE_IDLE;
+    snprintf(s_voice.message, sizeof(s_voice.message), "%s", held ? "Recording" : "Voice note saved");
+    ui_update_voice(&s_voice);
+}
+static void on_voice_play(const char *id) {
+    snprintf(s_voice.id, sizeof(s_voice.id), "%s", id);
+    s_voice.state = UI_VOICE_PLAYING;
+    ui_update_voice(&s_voice);
+}
+static void on_voice_stop(void) {
+    s_voice.state = UI_VOICE_IDLE;
+    ui_update_voice(&s_voice);
+}
+static ui_talk_t s_talk = {.count = 2, .volume = 70, .peers = {{1, "AudioKnob-Priya-Desk"}, {2, "Kitchen"}}};
+static ui_inbox_t s_inbox = {
+    .count = 3,
+    .messages = {
+        {.id = "0123456789abcdef", .sender = "Priya", .text = "Tea is ready. Come downstairs when you have a moment."},
+        {.id = "123456789abcdef0", .sender = "Kitchen", .text = "The doorbell rang.", .acknowledged = true},
+        {.id = "223456789abcdef0", .sender = "Priya", .text = "Voice note (6 s)", .voice = true, .duration_ms = 6000}}};
+static void on_talk(uint32_t peer, bool held) {
+    s_talk.state = held ? UI_TALK_SENDING : UI_TALK_IDLE;
+    s_talk.level = held ? 65 : 0;
+    snprintf(s_talk.peer, sizeof(s_talk.peer), "%s", peer == 1 ? "AudioKnob-Priya-Desk" : "Kitchen");
+    ui_update_talk(&s_talk);
+}
+static void on_talk_volume(uint8_t v) {
+    s_talk.volume = v;
+    ui_update_talk(&s_talk);
+}
+static void on_message_ack(const char *id) {
+    for (int i = 0; i < s_inbox.count; i++)
+        if (!strcmp(id, s_inbox.messages[i].id))
+            s_inbox.messages[i].acknowledged = true;
+    ui_update_inbox(&s_inbox);
+}
+static void on_message_delete(const char *id) {
+    for (int i = 0; i < s_inbox.count; i++)
+        if (!strcmp(id, s_inbox.messages[i].id)) {
+            memmove(&s_inbox.messages[i], &s_inbox.messages[i + 1], (s_inbox.count - i - 1) * sizeof(ui_message_t));
+            s_inbox.count--;
+            break;
+        }
+    ui_update_inbox(&s_inbox);
+}
 static void on_radio(int station) {
     if (station < 0) {
         s_radio.state = UI_RADIO_STOPPED;
@@ -474,6 +522,9 @@ static void knob_key_cb(lv_event_t *e) {
     uint32_t key = lv_event_get_key(e);
     if (key == 'p' || key == 'P') {
         cycle_sample_playback();
+    } else if (key == 't' || key == 'T') {
+        s_talk.state = s_talk.state == UI_TALK_RECEIVING ? UI_TALK_IDLE : UI_TALK_RECEIVING;
+        snprintf(s_talk.peer, sizeof(s_talk.peer), "AudioKnob-Priya-Desk"); s_talk.peer_id = 1; s_talk.level = 55; ui_update_talk(&s_talk);
     } else if (key == 'u' || key == 'U') {
         start_sample_update();
     } else if (key == 'a' || key == 'A') {
@@ -528,6 +579,9 @@ int main(void) {
     ui_set_firmware_handler(on_firmware);
     lv_timer_create(firmware_tick_cb, SIM_FW_TICK_MS, NULL);
     ui_set_radio_handler(on_radio);
+    ui_set_talk_handler(on_talk, on_talk_volume); ui_update_talk(&s_talk);
+    ui_set_inbox_handler(on_message_ack, on_message_delete); ui_update_inbox(&s_inbox);
+    ui_set_voice_handler(on_voice_record, on_voice_play, on_voice_stop); ui_update_voice(&s_voice);
     ui_set_transport_handler(on_transport);
     ui_update_radio(&s_radio);
     lv_timer_create(radio_tick_cb, 500, NULL);

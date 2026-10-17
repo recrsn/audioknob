@@ -487,6 +487,7 @@ static lv_font_fmt_txt_dsc_t font_dsc = {
 
 /*Initialize a public general font descriptor*/
 #if LVGL_VERSION_MAJOR >= 8
+extern const lv_font_t icons_talk_20;
 const lv_font_t icons_20 = {
 #else
 lv_font_t icons_20 = {
@@ -504,7 +505,7 @@ lv_font_t icons_20 = {
 #endif
     .dsc = &font_dsc,          /*The custom font data. Will be accessed by `get_glyph_bitmap/dsc` */
 #if LV_VERSION_CHECK(8, 2, 0) || LVGL_VERSION_MAJOR >= 9
-    .fallback = NULL,
+    .fallback = &icons_talk_20,
 #endif
     .user_data = NULL,
 };

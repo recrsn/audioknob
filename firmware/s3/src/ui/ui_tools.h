@@ -97,6 +97,8 @@ typedef struct {
 
 void tool_page_register(lv_obj_t *screen, const tool_page_desc_t *desc);
 
+void inbox_page_build(lv_obj_t *screen);
+void talk_page_build(lv_obj_t *screen);
 void radio_page_build(lv_obj_t *screen);
 void weather_page_build(lv_obj_t *screen);
 void lights_page_build(lv_obj_t *screen);

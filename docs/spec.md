@@ -213,3 +213,21 @@ Per the CH445P datasheet, `EN#`=0 and `IN`=0 selects S1, `IN`=1 selects S2 — s
 - CNX Software hardware overview: https://www.cnx-software.com/2025/06/25/battery-powered-knob-display-board-pairs-esp32-s3-and-esp32-wireless-socs-features-audio-dac-for-audio-visualization/
 **AirPlay/multi-protocol reference (for lessons on S3 porting friction, not for direct reuse given lean-build scope)**
 - squeezelite-esp32 ESP32-S3 support discussion: https://github.com/sle118/squeezelite-esp32/discussions/236
+
+## 9. LAN voice and saved messages
+The Talk app uses half-duplex hold-to-talk between knobs on the LAN. Discovery
+is `_audioknob._tcp`; control uses RTSP/1.0 sharing the AirPlay request helpers,
+and media is Opus 16 kHz mono in 20 ms frames over RTP/UDP, resampled to the
+44.1 kHz DAC path. Incoming speech preempts the current source. The knob has no
+physical press available for this feature: all start/stop actions use touch.
+
+Text messages and recorded voice notes are fire-and-forget deliveries to a
+persistent inbox. They do not require the receiver to be present and do not
+play automatically. The receiver can send a separate manual acknowledgement.
+Voice notes can also be saved locally and played later. See
+[lan-talk.md](lan-talk.md) for the API and implementation/testing status.
+
+The previously unused flash tail is reserved for `user_data` (SPIFFS), offset
+0xe30000, size 0x1d0000. No existing partition moves. Application-only OTA from
+an old table can register this exact region at runtime after IDF overlap and
+flash-size checks. Unknown non-erased contents are never automatically formatted.
