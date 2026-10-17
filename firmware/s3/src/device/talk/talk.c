@@ -111,11 +111,6 @@ void talk_preempt(void) {
     xSemaphoreTake(s_write_lock, portMAX_DELAY);
     xSemaphoreGive(s_write_lock);
 }
-void talk_network_up(void) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_network = true;
-    xSemaphoreGive(s_lock);
-}
 void talk_rename(void) {
     if (!s_lock)
         return;
@@ -547,7 +542,17 @@ void talk_init(void) {
     BaseType_t d =
         xTaskCreateWithCaps(discovery, "talk_discovery", 4096, NULL, 3, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     ESP_ERROR_CHECK(w == pdPASS && d == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
-    talk_rtsp_init(&(talk_rtsp_ops_t){
-        .start = incoming_start, .stop = incoming_stop, .active = incoming_active, .message = on_message});
-    ESP_LOGI(TAG, "LAN voice ready, RTSP %d / RTP %d", TALK_RTSP_PORT, TALK_RTP_PORT);
+}
+void talk_network_up(void) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool first = !s_network;
+    s_network = true;
+    xSemaphoreGive(s_lock);
+    // WiFi brings lwIP up after talk_init(). Opening a socket before then
+    // asserts in tcpip_send_msg_wait_sem. Keep one listener across reconnects.
+    if (first) {
+        talk_rtsp_init(&(talk_rtsp_ops_t){
+            .start = incoming_start, .stop = incoming_stop, .active = incoming_active, .message = on_message});
+        ESP_LOGI(TAG, "LAN voice ready, RTSP %d / RTP %d", TALK_RTSP_PORT, TALK_RTP_PORT);
+    }
 }
