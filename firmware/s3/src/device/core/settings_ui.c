@@ -13,6 +13,7 @@
 #include "focus_sound.h"
 #include "lcd_driver.h"
 #include "lvgl.h"
+#include "message_store.h"
 #include "online.h"
 #include "settings.h"
 #include "tz.h"
@@ -106,6 +107,10 @@ static void fill(ui_settings_t *out) {
         .free_internal_kb = heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024,
         .free_psram_kb = heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024,
     };
+    size_t storage_total, storage_used;
+    message_store_usage(&storage_total, &storage_used);
+    out->storage_total_bytes = storage_total;
+    out->storage_used_bytes = storage_used;
     snprintf(out->tz_name, sizeof(out->tz_name), "%s", s_zone);
     geo_t geo;
     bool manual = false;

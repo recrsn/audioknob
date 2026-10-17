@@ -99,11 +99,17 @@ PSRAM; flash writes run on internal stacks, never on the codec tasks.
 
 ## Flash data
 
-`user_data` uses the formerly unallocated tail at **0xe30000, size 0x1d0000**
-(1.8125 MiB). Existing NVS, OTA slots, ESP32 staging and core-dump offsets are
-unchanged. For application-only OTA from an older partition table, the app
-registers this same range with ESP-IDF; overlap and actual flash-size checks must
-succeed before it mounts anything. It never rewrites the partition table.
+`user_data` occupies **0x930000–0xffffff**, size **0x6d0000 (6.8125 MiB)**.
+Both S3 OTA slots are 4 MiB and the ESP32 staging partition is 1 MiB. See
+[flash-layout.md](flash-layout.md) for the complete table and fresh-flash steps.
+This layout requires a full erase and USB flash; application-only OTA cannot
+migrate the old partition table. No runtime partitions are registered.
+
+Settings → About → Storage used and the web page's About section report used
+and total mounted filesystem capacity. `GET /api/state` exposes
+`storageUsedBytes` and `storageTotalBytes` (zero total means unavailable).
+The mounted capacity excludes SPIFFS overhead; writes also keep its last
+quarter free for garbage collection.
 
 The filesystem is SPIFFS. First use formats only a completely erased region.
 A damaged or unknown non-erased region is preserved, with storage reported

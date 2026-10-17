@@ -227,7 +227,9 @@ play automatically. The receiver can send a separate manual acknowledgement.
 Voice notes can also be saved locally and played later. See
 [lan-talk.md](lan-talk.md) for the API and implementation/testing status.
 
-The previously unused flash tail is reserved for `user_data` (SPIFFS), offset
-0xe30000, size 0x1d0000. No existing partition moves. Application-only OTA from
-an old table can register this exact region at runtime after IDF overlap and
-flash-size checks. Unknown non-erased contents are never automatically formatted.
+The S3 reserves 6.8125 MiB for `user_data` (SPIFFS), offset 0x930000, size
+0x6d0000. Both S3 OTA slots are 4 MiB; ESP32 firmware staging is 1 MiB.
+The new layout requires a full erase and USB flash. Ordinary later OTA keeps
+saved data. Unknown non-erased contents are never automatically formatted.
+Settings and the web About section show used/total filesystem space.
+See [flash-layout.md](flash-layout.md) for the complete map.

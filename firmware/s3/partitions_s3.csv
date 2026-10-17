@@ -1,15 +1,13 @@
-# Name,   Type, SubType,   Offset,   Size
-# nvs stays where it was, so a USB flash onto the old layout keeps settings,
-# WiFi credentials and the device name.
-nvs,      data, nvs,       0x9000,   0x6000
-otadata,  data, ota,       0xf000,   0x2000
-phy_init, data, phy,       0x11000,  0x1000
-ota_0,    app,  ota_0,     0x20000,  6M
-ota_1,    app,  ota_1,     0x620000, 6M
-# The ESP32's firmware, staged here and checked before it's sent over the
-# inter-MCU UART.
-esp32_fw, data, undefined, 0xc20000, 2M
-coredump, data, coredump,  0xe20000, 64K
-# Saved messages and Opus voice notes. Uses only the formerly unused tail;
-# the OTA, NVS, staged ESP32 image and core-dump offsets stay unchanged.
-user_data, data, spiffs, 0xe30000, 0x1d0000
+# 16 MiB S3 flash. Install with a full erase and USB flash; old layouts cannot OTA-migrate.
+# Name,    Type, SubType,   Offset,   Size
+nvs,       data, nvs,       0x9000,   0x6000
+otadata,   data, ota,       0xf000,   0x2000
+phy_init,  data, phy,       0x11000,  0x1000
+# App offsets are 64 KiB aligned; both slots support rollback.
+ota_0,     app,  ota_0,     0x20000,  4M
+ota_1,     app,  ota_1,     0x420000, 4M
+# Staged Bluetooth MCU firmware, checked before relaying over UART.
+esp32_fw,  data, undefined, 0x820000, 1M
+coredump,  data, coredump,  0x920000, 64K
+# Remaining flash: saved messages and Ogg Opus voice notes (6.8125 MiB).
+user_data, data, spiffs,    0x930000, 0x6d0000

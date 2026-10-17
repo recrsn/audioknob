@@ -11,8 +11,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
-#define DATA_OFFSET 0xe30000
-#define DATA_SIZE 0x1d0000
 static const char *TAG = "message_store";
 static bool s_ready;
 static SemaphoreHandle_t s_lock;
@@ -30,14 +28,10 @@ void message_store_init(void) {
         return;
     const esp_partition_t *part =
         esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, "user_data");
-    // An application OTA does not rewrite the partition table. Register the
-    // same unused range on older devices; IDF rejects overlaps and ranges
-    // outside the actual flash chip. No partition-table write is needed.
-    if (!part && esp_partition_register_external(NULL, DATA_OFFSET, DATA_SIZE, "user_data", ESP_PARTITION_TYPE_DATA,
-                                                 ESP_PARTITION_SUBTYPE_DATA_SPIFFS, &part) != ESP_OK)
+    if (!part) {
+        ESP_LOGE(TAG, "Missing user_data partition; install the full flash image over USB");
         return;
-    if (part->address != DATA_OFFSET || part->size != DATA_SIZE)
-        return;
+    }
     esp_vfs_spiffs_conf_t cfg = {.base_path = MESSAGE_DATA_PATH,
                                  .partition_label = "user_data",
                                  .max_files = 5,
@@ -68,15 +62,15 @@ void message_store_init(void) {
     }
     s_ready = err == ESP_OK;
     if (s_ready)
-        ESP_LOGI(TAG, "Saved-message partition mounted (%u bytes)", DATA_SIZE);
+        ESP_LOGI(TAG, "Saved-message partition mounted (%u bytes)", (unsigned)part->size);
 }
 bool message_store_ready(void) {
     return s_ready;
 }
 void message_store_usage(size_t *total, size_t *used) {
     *total = *used = 0;
-    if (s_ready)
-        esp_spiffs_info("user_data", total, used);
+    if (s_ready && esp_spiffs_info("user_data", total, used) != ESP_OK)
+        *total = *used = 0;
 }
 bool message_store_write(const char *name, const void *data, size_t size) {
     if (!s_ready || !filename(name))

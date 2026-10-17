@@ -167,6 +167,8 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddStringToObject(json, "btVersion", esp32.version);
     cJSON_AddNumberToObject(json, "freeInternalKb", s.free_internal_kb);
     cJSON_AddNumberToObject(json, "freePsramKb", s.free_psram_kb);
+    cJSON_AddNumberToObject(json, "storageTotalBytes", s.storage_total_bytes);
+    cJSON_AddNumberToObject(json, "storageUsedBytes", s.storage_used_bytes);
     cJSON_AddNumberToObject(json, "brightness", s.brightness);
     cJSON_AddNumberToObject(json, "sleep", s.sleep_s);
     cJSON_AddBoolToObject(json, "clock24", s.clock_24h);

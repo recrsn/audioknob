@@ -216,6 +216,7 @@ details[open] summary{margin-bottom:8px}
   <div class="row"><span>Version</span><span class="val" id="version"></span></div>
   <div class="row"><span>Bluetooth firmware</span><span class="val" id="btversion"></span></div>
   <div class="row"><span>Free memory</span><span class="val" id="mem"></span></div>
+  <div class="row"><span>Storage used</span><span class="val" id="storage"></span></div>
   <div class="row col">
     <div class="inline split"><span>Firmware update</span><button class="btn" id="updbtn">Choose file…</button></div>
     <input type="file" id="updfile" accept=".bin" hidden>
@@ -455,6 +456,7 @@ function render(s) {
   setText("addr", s.ip ? `${s.hostname}.local · ${s.ip}` : "—");
   setText("version", s.version);
   setText("btversion", s.btVersion || "—");
+  setText("storage", s.storageTotalBytes ? `${(s.storageUsedBytes / 1048576).toFixed(1)} / ${(s.storageTotalBytes / 1048576).toFixed(1)} MiB` : "Unavailable");
   setText("mem", `${s.freeInternalKb} KB · ${(s.freePsramKb / 1024).toFixed(1)} MB PSRAM`);
   renderUpdate(s);
 }

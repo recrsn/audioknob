@@ -50,6 +50,8 @@ static ui_settings_t s_settings = {
     .wifi_ssid = "Sample",
     .ip = "192.168.1.50",
     .version = "native",
+    .storage_total_bytes = 6 * 1024 * 1024,
+    .storage_used_bytes = 384 * 1024,
 };
 
 static void host_zone(char *out, size_t len) {

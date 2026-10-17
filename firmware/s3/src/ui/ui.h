@@ -288,6 +288,8 @@ typedef struct {
     char version[32];
     uint32_t free_internal_kb;
     uint32_t free_psram_kb;
+    uint32_t storage_total_bytes; // mounted filesystem capacity, excluding SPIFFS overhead
+    uint32_t storage_used_bytes;
 } ui_settings_t;
 
 typedef enum {

@@ -31,23 +31,12 @@ bool talk_rtsp_message_bytes(uint32_t ip, const char *path, const char *type, co
     (void)size;
     return true;
 }
-static const esp_partition_t part = {.address = 0xe30000, .size = 0x1d0000};
+static const esp_partition_t part = {.address = 0x930000, .size = 0x6d0000};
 const esp_partition_t *esp_partition_find_first(int type, int subtype, const char *name) {
     (void)type;
     (void)subtype;
     assert(!strcmp(name, "user_data"));
-    return &part;
-}
-int esp_partition_register_external(void *chip, size_t offset, size_t size, const char *label, int type, int subtype,
-                                    const esp_partition_t **out) {
-    (void)chip;
-    (void)offset;
-    (void)size;
-    (void)label;
-    (void)type;
-    (void)subtype;
-    (void)out;
-    abort();
+    return getenv("STORE_MISSING") ? NULL : &part;
 }
 int esp_partition_read(const esp_partition_t *p, size_t offset, void *data, size_t length) {
     (void)p;
@@ -61,7 +50,7 @@ int esp_vfs_spiffs_register(const esp_vfs_spiffs_conf_t *cfg) {
 }
 int esp_spiffs_info(const char *name, size_t *total, size_t *used) {
     (void)name;
-    *total = getenv("STORE_FAIL") ? 4096 : 0x1d0000;
+    *total = getenv("STORE_FAIL") ? 4096 : 0x6d0000;
     *used = 0;
     return 0;
 }
@@ -71,7 +60,18 @@ static void wait_idle(void) {
 int main(int argc, char **argv) {
     assert(argc == 2);
     message_store_init();
+    if (!strcmp(argv[1], "missing")) {
+        assert(!message_store_ready());
+        size_t total = 1, used = 1;
+        message_store_usage(&total, &used);
+        assert(!total && !used);
+        puts("Missing filesystem reported unavailable");
+        return 0;
+    }
     assert(message_store_ready());
+    size_t total, used;
+    message_store_usage(&total, &used);
+    assert(total == (getenv("STORE_FAIL") ? 4096 : part.size) && !used);
     flash_message_init();
     ui_inbox_t inbox;
     flash_message_snapshot(&inbox);
