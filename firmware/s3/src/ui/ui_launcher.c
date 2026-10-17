@@ -3,7 +3,8 @@
 #include "fonts.h"
 
 #define LAUNCHER_RADIUS    116
-#define LAUNCHER_ITEM      72
+#define LAUNCHER_ITEM      64
+#define LAUNCHER_ICON_SCALE 224 // 7/8: 48 px app glyphs appear at 42 px
 #define LAUNCHER_CENTER    140
 #define LAUNCHER_NAME_Y    (-9)
 #define LAUNCHER_STATUS_Y  13
@@ -127,6 +128,9 @@ static void item_icon_create(lv_obj_t *item, int pos) {
         lv_obj_set_style_text_font(icon, UI_FONT_ICON, 0);
     }
     lv_obj_set_style_text_color(icon, tint, 0);
+    lv_obj_set_style_transform_pivot_x(icon, lv_pct(50), 0);
+    lv_obj_set_style_transform_pivot_y(icon, lv_pct(50), 0);
+    lv_obj_set_style_transform_scale(icon, LAUNCHER_ICON_SCALE, 0);
     lv_obj_center(icon);
 }
 
