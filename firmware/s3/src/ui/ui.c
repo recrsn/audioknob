@@ -177,8 +177,13 @@ typedef struct {
     lv_obj_t *weather_icon;
     lv_obj_t *weather_temp;
     lv_obj_t *weather_sky;
-    // The top band: one thing asking for attention (Talk, unread messages,
-    // air quality), a tap away from its page.
+    // The weather's second line, per the Settings page's "Show air
+    // quality": per reading, a glyph tinted by severity, then the value.
+    lv_obj_t *weather_air_row;
+    lv_obj_t *weather_air_icon[2];
+    lv_obj_t *weather_air[2];
+    // The top band: one thing asking for attention (Talk, unread messages),
+    // a tap away from its page.
     lv_obj_t *band;
     lv_obj_t *band_glyph;
     lv_obj_t *band_label;
@@ -773,27 +778,51 @@ static void np_card_build(lv_obj_t *col) {
     lv_obj_add_event_cb(btn, np_play_cb, LV_EVENT_CLICKED, NULL);
 }
 
-// Under the time, one quiet line -- conditions glyph, temperature and sky --
-// opening the weather page on tap.
+// Under the time: conditions glyph, temperature and sky, then air quality
+// and UV when they matter, opening the weather page on tap.
 static void weather_complication_build(lv_obj_t *col) {
-    lv_obj_t *comp = flex_row_create(col, UI_SPACE_S, 0);
+    lv_obj_t *comp = lv_obj_create(col);
+    lv_obj_remove_style_all(comp);
+    lv_obj_remove_flag(comp, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(comp, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(comp, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(comp, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(comp, UI_SPACE_XS, 0);
     lv_obj_set_style_margin_top(comp, FACE_COMP_GAP, 0);
     lv_obj_add_flag(comp, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_ext_click_area(comp, UI_TOUCH_EXT);
     lv_obj_add_event_cb(comp, clock_weather_cb, LV_EVENT_CLICKED, NULL);
     idle_screen.weather = comp;
 
-    idle_screen.weather_icon = lv_label_create(comp);
+    lv_obj_t *now = flex_row_create(comp, UI_SPACE_S, 0);
+    lv_obj_remove_flag(now, LV_OBJ_FLAG_CLICKABLE);
+    idle_screen.weather_icon = lv_label_create(now);
     lv_obj_set_style_text_font(idle_screen.weather_icon, UI_FONT_ICON_SM, 0);
     lv_obj_set_style_text_color(idle_screen.weather_icon, lv_color_hex(UI_TINT_WEATHER), 0);
     lv_label_set_text(idle_screen.weather_icon, ICON_CLOUD);
-    idle_screen.weather_temp = lv_label_create(comp);
+    idle_screen.weather_temp = lv_label_create(now);
     lv_obj_set_style_text_font(idle_screen.weather_temp, UI_FONT_TITLE, 0);
     lv_obj_set_style_text_color(idle_screen.weather_temp, lv_color_hex(UI_COLOR_TEXT), 0);
-    idle_screen.weather_sky = lv_label_create(comp);
+    idle_screen.weather_sky = lv_label_create(now);
     lv_obj_set_style_text_font(idle_screen.weather_sky, UI_FONT_BODY, 0);
     lv_obj_set_style_text_color(idle_screen.weather_sky, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_set_style_text_opa(idle_screen.weather_sky, UI_OPA_TEXT_MUTED, 0);
+
+    lv_obj_t *air = flex_row_create(comp, UI_SPACE_S, 0);
+    lv_obj_remove_flag(air, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(air, LV_OBJ_FLAG_HIDDEN);
+    idle_screen.weather_air_row = air;
+    static const char *const k_air_icons[2] = {ICON_AIR, ICON_UV};
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *icon = lv_label_create(air);
+        lv_obj_set_style_text_font(icon, UI_FONT_ICON_SM, 0);
+        lv_obj_set_style_margin_left(icon, i ? UI_SPACE_XS : 0, 0);
+        lv_label_set_text(icon, k_air_icons[i]);
+        idle_screen.weather_air_icon[i] = icon;
+        idle_screen.weather_air[i] = lv_label_create(air);
+        lv_obj_set_style_text_font(idle_screen.weather_air[i], UI_FONT_LABEL, 0);
+        lv_obj_set_style_text_color(idle_screen.weather_air[i], lv_color_hex(UI_COLOR_TEXT), 0);
+    }
 }
 
 static void band_cb(lv_event_t *e) {
@@ -891,37 +920,32 @@ static bool band_app_item(ui_app_t app, band_item_t *out) {
     return true;
 }
 
-// Air quality and UV, when they matter (or always, per settings); a glyph in
-// the worse reading's color.
-static bool band_air_item(band_item_t *out) {
+// Talk, then unread messages.
+static bool band_item(band_item_t *out) {
+    return band_app_item(UI_APP_TALK, out) || band_app_item(UI_APP_INBOX, out);
+}
+
+// Air quality and UV under the weather when they matter (or always, per
+// settings), each a glyph in its severity's color and the reading.
+static void weather_air_refresh(bool have_weather) {
     ui_air_reading_t r[2];
     ui_air_readings(&r[0], &r[1]);
     uint8_t mode = ui_settings_current()->air_show;
-    static const char *const names[2] = {"AQI", "UV"};
-    static const char *const icons[2] = {ICON_AIR, ICON_UV};
-    int shown = 0;
-    size_t n = 0;
-    out->text[0] = '\0';
+    bool show[2];
     for (int i = 0; i < 2; i++) {
-        if (!r[i].known || !(mode == UI_AIR_SHOW_ALWAYS || (mode == UI_AIR_SHOW_HIGH && r[i].high))) {
+        show[i] = have_weather && r[i].known && (mode == UI_AIR_SHOW_ALWAYS || (mode == UI_AIR_SHOW_HIGH && r[i].high));
+        ui_set_visible(idle_screen.weather_air_icon[i], show[i]);
+        ui_set_visible(idle_screen.weather_air[i], show[i]);
+        if (!show[i]) {
             continue;
         }
-        n += snprintf(out->text + n, sizeof(out->text) - n, "%s%s %d", shown ? " \xC2\xB7 " : "", names[i],
-                      r[i].value);
-        if (!shown || r[i].high) {
-            out->icon = icons[i];
-            out->tint = lv_color_hex(r[i].high ? r[i].color : UI_TINT_WEATHER);
-        }
-        shown++;
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%d", r[i].value);
+        ui_label_set_text(idle_screen.weather_air[i], buf);
+        lv_obj_set_style_text_color(idle_screen.weather_air_icon[i],
+                                    lv_color_hex(r[i].high ? r[i].color : UI_TINT_WEATHER), 0);
     }
-    out->app = UI_APP_WEATHER;
-    return shown > 0;
-}
-
-// Talk, then unread messages; air quality only on the clock, where the
-// audio doesn't need the band.
-static bool band_item(bool with_air, band_item_t *out) {
-    return band_app_item(UI_APP_TALK, out) || band_app_item(UI_APP_INBOX, out) || (with_air && band_air_item(out));
+    ui_set_visible(idle_screen.weather_air_row, show[0] || show[1]);
 }
 
 static bool band_owns(ui_app_t app) {
@@ -930,7 +954,7 @@ static bool band_owns(ui_app_t app) {
 
 static void band_refresh(void) {
     band_item_t item;
-    bool show = band_item(true, &item);
+    bool show = band_item(&item);
     ui_set_visible(idle_screen.band, show);
     if (!show) {
         return;
@@ -960,6 +984,7 @@ static void idle_screen_refresh(void) {
         ui_label_set_text(idle_screen.weather_temp, buf);
         ui_label_set_text(idle_screen.weather_sky, wx.sky);
     }
+    weather_air_refresh(have_weather);
     band_refresh();
     ampm_place();
 }
@@ -1734,7 +1759,7 @@ static void format_subtitle(const ui_track_info_t *track, char *out, size_t len)
 // it's the time and the source. Waiting, it names the source alone.
 static void wireless_pill_refresh(bool waiting) {
     band_item_t item;
-    bool other = !waiting && band_item(false, &item);
+    bool other = !waiting && band_item(&item);
     for (int i = 0; !waiting && !other && i < UI_APP_COUNT; i++) {
         other = !band_owns((ui_app_t)i) && band_app_item((ui_app_t)i, &item);
     }
