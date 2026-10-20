@@ -75,7 +75,8 @@ static lv_indev_t *s_touch_indev;
 static esp_lcd_touch_handle_t s_touch_handle;
 static i2c_master_bus_handle_t s_i2c_bus;
 static uint8_t s_brightness = CONFIG_AK_BACKLIGHT_DEFAULT_PCT;
-static bool s_backlight_on = true;
+static bool s_backlight_on;
+static bool s_starting = true;
 
 void lcd_driver_lvgl_lock(void) {
     xSemaphoreTake(s_lvgl_mutex, portMAX_DELAY);
@@ -105,6 +106,12 @@ static void lvgl_flush_wait_cb(lv_display_t *disp) {
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
     esp_lcd_panel_handle_t panel = (esp_lcd_panel_handle_t)lv_display_get_user_data(disp);
     esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px_map);
+    // During startup, finish every strip before returning so the first UI
+    // refresh is fully on the panel before its backlight is enabled.
+    if (s_starting) {
+        lvgl_flush_wait_cb(disp);
+        lv_display_flush_ready(disp);
+    }
 }
 
 // The ST77916 only accepts column/row windows that start on an even and end
@@ -307,7 +314,7 @@ void lcd_driver_set_backlight_on(bool on) {
     backlight_apply();
 }
 
-static void backlight_init(void) {
+void lcd_driver_backlight_init(void) {
     const ledc_timer_config_t timer_cfg = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .duty_resolution = BLK_LEDC_RES,
@@ -325,6 +332,13 @@ static void backlight_init(void) {
     };
     ESP_ERROR_CHECK(ledc_channel_config(&chan_cfg));
     backlight_apply();
+}
+
+void lcd_driver_show_ui(void) {
+    lv_obj_invalidate(lv_screen_active());
+    lv_refr_now(NULL);
+    s_starting = false;
+    lcd_driver_set_backlight_on(true);
 }
 
 static i2c_master_bus_handle_t touch_i2c_bus_init(void) {
@@ -368,8 +382,6 @@ static void touch_init(lv_display_t *disp) {
 void lcd_driver_init(void) {
     s_lvgl_mutex = xSemaphoreCreateMutex();
     lv_init();
-
-    backlight_init();
 
     const spi_bus_config_t bus_cfg = ST77916_PANEL_BUS_QSPI_CONFIG(
         PIN_LCD_QSPI_SCL, PIN_LCD_QSPI_D0, PIN_LCD_QSPI_D1, PIN_LCD_QSPI_D2, PIN_LCD_QSPI_D3,

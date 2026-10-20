@@ -6,10 +6,18 @@
 #include "driver/i2c_master.h"
 #include "lvgl.h"
 
-// Brings up the ST77916 QSPI LCD, CST816 touch, and backlight (see spec.md
+// Configure the backlight off at the start of app_main(), before other
+// peripherals initialize. Brightness changes stay dark until show_ui().
+void lcd_driver_backlight_init(void);
+
+// Brings up the ST77916 QSPI LCD and CST816 touch (see spec.md
 // §7 for the pin table this is wired against), and registers both with
 // LVGL. Must run before ui_init() or any other LVGL call.
 void lcd_driver_init(void);
+
+// Render and finish transferring the first UI frame, then light the screen.
+// Call once after UI/settings initialization, with the LVGL lock held.
+void lcd_driver_show_ui(void);
 
 // Backlight PWM duty in percent, clamped to 5..100 (0 would look like a
 // dead board). Starts at CONFIG_AK_BACKLIGHT_DEFAULT_PCT.

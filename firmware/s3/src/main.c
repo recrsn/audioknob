@@ -289,6 +289,7 @@ static void on_device_name(const char *name) {
 }
 
 void app_main(void) {
+    lcd_driver_backlight_init();
     ESP_LOGI(TAG, "ESP32-S3 target boot");
     ntp_restore_rtc();
 
@@ -332,6 +333,7 @@ void app_main(void) {
     lights_ui_start();
 #endif
     lv_timer_create(state_poll_timer_cb, 33, NULL);
+    lcd_driver_show_ui();
     lcd_driver_lvgl_unlock();
 
     knob_start(on_knob_rotate, on_knob_press, on_knob_long_press);
