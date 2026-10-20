@@ -968,12 +968,20 @@ static void band_refresh(void) {
 // Polled: what's in progress changes every second, the weather every 15 min.
 static void idle_screen_refresh(void) {
     char buf[16];
+    bool busy[UI_APP_COUNT];
+    int count = 0;
     for (int i = 0; i < UI_APP_COUNT; i++) {
-        bool busy = !band_owns((ui_app_t)i) && ui_tools_status((ui_app_t)i, buf, sizeof(buf));
-        ui_set_visible(idle_screen.chips[i], busy);
-        if (busy) {
+        busy[i] = !band_owns((ui_app_t)i) && ui_tools_status((ui_app_t)i, buf, sizeof(buf));
+        count += busy[i];
+        ui_set_visible(idle_screen.chips[i], busy[i]);
+        if (busy[i]) {
             ui_label_set_text(idle_screen.chip_labels[i], buf);
         }
+    }
+    // Two chips with their times don't fit the band at the round edge, so
+    // more than one shows icons only.
+    for (int i = 0; i < UI_APP_COUNT; i++) {
+        ui_set_visible(idle_screen.chip_labels[i], busy[i] && count == 1);
     }
     ui_weather_glance_t wx;
     bool have_weather = ui_weather_glance(&wx);
