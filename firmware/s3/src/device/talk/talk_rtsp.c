@@ -21,6 +21,11 @@
 #include "wifi.h"
 
 #define MAX_HEADERS 16
+// A message's reply comes only once the receiver has saved it to flash:
+// ~650 ms for text, 1.6 s for a 4 s voice note.
+#define SETUP_REPLY_MS 1000
+#define TEXT_REPLY_MS 5000
+#define VOICE_REPLY_MS 20000
 static talk_rtsp_ops_t s_ops;
 static SemaphoreHandle_t s_connections, s_receiver;
 static const char *TAG = "talk_rtsp";
@@ -28,12 +33,6 @@ static void timeout(int fd) {
     struct timeval tv = {.tv_sec = 1};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-}
-// A message's reply comes only after the receiver has saved it to flash:
-// ~650 ms for text, longer for a voice note.
-static void reply_timeout(int fd, int seconds) {
-    struct timeval tv = {.tv_sec = seconds};
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 }
 static bool send_body(int fd, const void *data, size_t remaining) {
     const char *body = data;
@@ -70,7 +69,7 @@ static int connect_peer(uint32_t ip) {
 }
 static bool exchange(int fd, const char *method, const char *path, int cseq, const char *session, const char *transport,
                      const char *type, const void *body, size_t body_size, const char *rtp_info, char *new_session,
-                     size_t session_len, uint16_t *server_port) {
+                     size_t session_len, uint16_t *server_port, int reply_ms) {
     char line[256], seq[16], length[16], name[33];
     device_name_get(name, sizeof(name));
     snprintf(line, sizeof(line), "%s %s RTSP/1.0", method, path);
@@ -89,7 +88,11 @@ static bool exchange(int fd, const char *method, const char *path, int cseq, con
     key_data_t response[MAX_HEADERS + 1] = {0};
     char *reply = NULL;
     int reply_len;
-    bool ok = http_parse_message(fd, line, sizeof(line), response, MAX_HEADERS, &reply, &reply_len);
+    // http_parse_message() gives up on a line after 100 ms, so wait for the
+    // reply to start first.
+    struct pollfd p = {.fd = fd, .events = POLLIN};
+    bool ok = poll(&p, 1, reply_ms) > 0 &&
+              http_parse_message(fd, line, sizeof(line), response, MAX_HEADERS, &reply, &reply_len);
     int code = 0;
     if (ok)
         ok = sscanf(line, "RTSP/1.0 %d", &code) == 1 && code == 200;
@@ -132,9 +135,11 @@ int talk_rtsp_begin(uint32_t ip, uint16_t sequence, uint32_t timestamp, uint16_t
     snprintf(transport, sizeof(transport), "RTP/AVP/UDP;unicast;client_port=%d;mode=record", TALK_RTP_PORT);
     snprintf(info, sizeof(info), "seq=%u;rtptime=%lu", sequence, (unsigned long)timestamp);
     // Initial sequence belongs in RECORD's RTP-Info (shared RAOP parser).
-    if (!exchange(fd, "ANNOUNCE", "/talk", 1, NULL, NULL, "application/sdp", sdp, strlen(sdp), NULL, NULL, 0, NULL) ||
-        !exchange(fd, "SETUP", "/talk", 2, NULL, transport, NULL, NULL, 0, NULL, session, sizeof(session), peer_port) ||
-        !exchange(fd, "RECORD", "/talk", 3, session, NULL, NULL, NULL, 0, info, NULL, 0, NULL)) {
+    if (!exchange(fd, "ANNOUNCE", "/talk", 1, NULL, NULL, "application/sdp", sdp, strlen(sdp), NULL, NULL, 0, NULL,
+                  SETUP_REPLY_MS) ||
+        !exchange(fd, "SETUP", "/talk", 2, NULL, transport, NULL, NULL, 0, NULL, session, sizeof(session), peer_port,
+                  SETUP_REPLY_MS) ||
+        !exchange(fd, "RECORD", "/talk", 3, session, NULL, NULL, NULL, 0, info, NULL, 0, NULL, SETUP_REPLY_MS)) {
         close(fd);
         return -1;
     }
@@ -157,9 +162,8 @@ bool talk_rtsp_message(uint32_t ip, const char *path, const char *json) {
     int fd = connect_peer(ip);
     if (fd < 0)
         return false;
-    reply_timeout(fd, 5);
-    bool ok =
-        exchange(fd, "SET_PARAMETER", path, 1, NULL, NULL, "application/json", json, strlen(json), NULL, NULL, 0, NULL);
+    bool ok = exchange(fd, "SET_PARAMETER", path, 1, NULL, NULL, "application/json", json, strlen(json), NULL, NULL, 0,
+                       NULL, TEXT_REPLY_MS);
     close(fd);
     return ok;
 }
@@ -167,8 +171,8 @@ bool talk_rtsp_message_bytes(uint32_t ip, const char *path, const char *type, co
     int fd = connect_peer(ip);
     if (fd < 0)
         return false;
-    reply_timeout(fd, 20);
-    bool ok = exchange(fd, "SET_PARAMETER", path, 1, NULL, NULL, type, data, length, NULL, NULL, 0, NULL);
+    bool ok =
+        exchange(fd, "SET_PARAMETER", path, 1, NULL, NULL, type, data, length, NULL, NULL, 0, NULL, VOICE_REPLY_MS);
     close(fd);
     return ok;
 }
