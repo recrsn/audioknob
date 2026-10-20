@@ -13,6 +13,13 @@ menu "AudioKnob"
         string "Fallback WiFi password (s3 target)"
         default ""
 
+    config AK_UPDATE_REPOSITORY
+        string "GitHub repository for firmware releases"
+        default "recrsn/audioknob"
+        help
+            Public owner/repository checked at startup and daily over HTTPS.
+            Releases must contain firmware-s3.bin and/or firmware-esp32.bin.
+
     config AK_LCD_PCLK_MHZ
         int "LCD QSPI clock (MHz, s3 target)"
         depends on IDF_TARGET_ESP32S3

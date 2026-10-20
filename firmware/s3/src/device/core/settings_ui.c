@@ -15,6 +15,7 @@
 #include "lvgl.h"
 #include "message_store.h"
 #include "online.h"
+#include "github_release.h"
 #include "settings.h"
 #include "tz.h"
 #include "uart_link.h"
@@ -190,6 +191,9 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         apply_timezone();
         push();
         return;
+    case UI_SETTING_CHECK_UPDATES:
+        github_release_check();
+        break;
     case UI_SETTING_FORGET_WIFI:
         wifi_forget();
         return;

@@ -18,7 +18,7 @@ Firmware that turns the [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.wave
 - **LAN Talk and inbox**: hold-to-talk between AudioKnobs on the same network, plus text messages and voice notes kept in an inbox ([docs/lan-talk.md](docs/lan-talk.md)).
 - **Ambient sounds**: brown/pink noise, rain, ocean and forest, synthesized live so nothing loops; the pomodoro can play one during focus blocks.
 - **Web settings page** at `http://<device-name>.local/` and Wi-Fi setup through a captive portal.
-- **OTA updates** for both chips, with rollback.
+- **OTA updates** for both chips, with rollback: upload a `.bin` or download from GitHub releases, with daily update checks. [Update guide](docs/firmware-updates.md).
 - **Desktop emulator** of the UI (SDL2), so UI work needs no hardware.
 
 USB-C audio (UAC2) is planned but not implemented.

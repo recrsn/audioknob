@@ -14,6 +14,7 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "https_download.h"
 
 // Internal RAM: flash writes from PSRAM go through a bounce buffer anyway.
 #define CHUNK 4096
@@ -133,7 +134,8 @@ static const char *check_header(const char *buf, ota_target_t *target, char vers
 // upload arriving on the web server can't both proceed.
 static bool start_receiving(void) {
     taskENTER_CRITICAL(&s_lock);
-    bool ok = s_status.state != OTA_INSTALLING && s_status.state != OTA_RECEIVING;
+    bool ok = s_status.state != OTA_INSTALLING && s_status.state != OTA_RECEIVING &&
+              s_status.state != OTA_READY;
     if (ok) {
         s_status.state = OTA_RECEIVING;
         s_status.progress = 0;
@@ -144,12 +146,7 @@ static bool start_receiving(void) {
     return ok;
 }
 
-bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
-    // The ESP32's image is read from staging while it's sent. Not fail():
-    // the install's own status stays up.
-    if (!start_receiving()) {
-        return false;
-    }
+static bool receive_image(size_t size, ota_read_fn read, void *ctx, const ota_target_t *expected) {
     audio_source_suspend(true);
     if (size < HEADER_LEN) {
         return fail("Not a firmware image");
@@ -163,7 +160,10 @@ bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
     char version[32];
     const ota_sink_t *sink = NULL;
     size_t len = size < CHUNK ? size : CHUNK;
-    const char *error = read_full(read, ctx, buf, len) ? check_header(buf, &target, version) : "Upload interrupted";
+    const char *error = read_full(read, ctx, buf, len) ? check_header(buf, &target, version) : "Transfer interrupted";
+    if (!error && expected && target != *expected) {
+        error = "Release image is for the wrong chip";
+    }
     if (!error) {
         // Known from the header on, so the device can say what's arriving.
         taskENTER_CRITICAL(&s_lock);
@@ -189,7 +189,7 @@ bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
         }
         len = size - done < CHUNK ? size - done : CHUNK;
         if (!read_full(read, ctx, buf, len)) {
-            error = "Upload interrupted";
+            error = "Transfer interrupted";
         }
     }
     free(buf);
@@ -207,6 +207,66 @@ bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
     ESP_LOGI(TAG, "%s version %s received, waiting for confirmation", target == OTA_TARGET_S3 ? "S3" : "ESP32",
              version);
     set_status(OTA_READY, NULL);
+    return true;
+}
+
+bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
+    return start_receiving() && receive_image(size, read, ctx, NULL);
+}
+
+typedef struct {
+    char *url;
+    size_t size;
+    ota_target_t target;
+} download_t;
+
+static int read_download(void *ctx, char *buf, size_t len) {
+    return esp_http_client_read(ctx, buf, len);
+}
+
+static void download_task(void *arg) {
+    download_t *download = arg;
+    int status;
+    esp_http_client_handle_t client = https_download_open(download->url, &status);
+    if (!client) {
+        fail("Couldn't download release (check WiFi/time)");
+    } else {
+        int64_t length = esp_http_client_get_content_length(client);
+        if (length > 0 && (uint64_t)length != download->size) {
+            fail("Release image size changed; check again");
+        } else {
+            receive_image(download->size, read_download, client, &download->target);
+        }
+        esp_http_client_cleanup(client);
+    }
+    free(download->url);
+    free(download);
+    vTaskDelete(NULL);
+}
+
+bool ota_download(const char *url, size_t size, ota_target_t target) {
+    download_t *download = calloc(1, sizeof(*download));
+    if (!download) {
+        return false;
+    }
+    download->url = strdup(url);
+    download->size = size;
+    download->target = target;
+    // Reserve before returning to the web task: uploads and on-device
+    // confirmation cannot race the TLS handshake or background download.
+    if (!download->url || !start_receiving()) {
+        free(download->url);
+        free(download);
+        return false;
+    }
+    taskENTER_CRITICAL(&s_lock);
+    s_status.target = target;
+    taskEXIT_CRITICAL(&s_lock);
+    if (xTaskCreate(download_task, "ota_download", 8192, download, 3, NULL) != pdPASS) {
+        free(download->url);
+        free(download);
+        return fail("Out of memory");
+    }
     return true;
 }
 

@@ -22,6 +22,7 @@
 #include "lights.h"
 #include "lvgl.h"
 #include "now_playing.h"
+#include "github_release.h"
 #include "ntp.h"
 #include "online.h"
 #include "ota.h"
@@ -74,11 +75,30 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
         [OTA_INSTALLING] = UI_FIRMWARE_INSTALLING, [OTA_INSTALLED] = UI_FIRMWARE_INSTALLED,
         [OTA_FAILED] = UI_FIRMWARE_FAILED,
     };
-    ui_update_firmware(&(ui_firmware_t){.state = k_firmware[ota.state],
-                                        .bluetooth = ota.target == OTA_TARGET_ESP32,
-                                        .progress = ota.progress,
-                                        .version = ota.version,
-                                        .error = ota.error});
+    github_release_status_t release;
+    github_release_get_status(&release);
+    bool active = ota.state == OTA_RECEIVING || ota.state == OTA_READY || ota.state == OTA_INSTALLING;
+    if (active && release.notice != RELEASE_QUIET) {
+        github_release_answer(false);
+    }
+    if (!active && release.notice != RELEASE_QUIET) {
+        static const ui_firmware_state_t k_release[] = {
+            [RELEASE_CHECKING] = UI_FIRMWARE_CHECKING,
+            [RELEASE_AVAILABLE] = UI_FIRMWARE_AVAILABLE,
+            [RELEASE_CURRENT] = UI_FIRMWARE_CURRENT,
+            [RELEASE_ERROR] = UI_FIRMWARE_CHECK_FAILED,
+        };
+        ui_update_firmware(&(ui_firmware_t){.state = k_release[release.notice],
+                                            .bluetooth = release.target == OTA_TARGET_ESP32,
+                                            .version = release.tag,
+                                            .error = release.error});
+    } else {
+        ui_update_firmware(&(ui_firmware_t){.state = k_firmware[ota.state],
+                                            .bluetooth = ota.target == OTA_TARGET_ESP32,
+                                            .progress = ota.progress,
+                                            .version = ota.version,
+                                            .error = ota.error});
+    }
 
     wifi_setup_info_t setup;
     if (wifi_get_setup_info(&setup)) {
@@ -196,6 +216,12 @@ static void on_pairing(ui_pairing_action_t action) {
 }
 
 static void on_firmware(bool install) {
+    ota_status_t status;
+    ota_get_status(&status);
+    if (status.state != OTA_READY) {
+        github_release_answer(install);
+        return;
+    }
     if (install) {
         ota_install();
     } else {
@@ -311,5 +337,6 @@ void app_main(void) {
     knob_start(on_knob_rotate, on_knob_press, on_knob_long_press);
 
     wifi_start(on_network_up);
+    github_release_start();
     ntp_start();
 }

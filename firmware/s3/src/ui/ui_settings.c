@@ -70,6 +70,7 @@ typedef enum {
     ROW_WEB,
     ROW_FORGET,
     ROW_VERSION,
+    ROW_UPDATES,
     ROW_MEMORY,
     ROW_STORAGE,
     ROW_COUNT,
@@ -105,6 +106,7 @@ static const struct {
     [ROW_WIFI] = {"WiFi", KIND_VALUE},
     [ROW_WEB] = {"Web page", KIND_VALUE},
     [ROW_FORGET] = {"Forget WiFi", KIND_VALUE},
+    [ROW_UPDATES] = {"Check for updates", KIND_VALUE},
     [ROW_VERSION] = {"Version", KIND_VALUE},
     [ROW_MEMORY] = {"Free memory", KIND_VALUE},
     [ROW_STORAGE] = {"Storage used", KIND_VALUE},
@@ -143,6 +145,7 @@ static const struct {
     {NULL, ROW_FORGET},
     HEADER("ABOUT"),
     {NULL, ROW_VERSION},
+    {NULL, ROW_UPDATES},
     {NULL, ROW_MEMORY},
     {NULL, ROW_STORAGE},
 };
@@ -634,6 +637,9 @@ static void activate(void) {
         return;
     }
     switch (st.selected) {
+    case ROW_UPDATES:
+        emit(UI_SETTING_CHECK_UPDATES, 0, NULL);
+        break;
     case ROW_BRIGHTNESS:
     case ROW_SLEEP:
     case ROW_TIMER_VOLUME:

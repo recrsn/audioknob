@@ -66,9 +66,13 @@ static void host_zone(char *out, size_t len) {
 }
 
 static void show_sample_playback(void);
+static void show_sample_release(void);
 
 static void on_setting(ui_setting_t setting, int value, const char *zone) {
     switch (setting) {
+    case UI_SETTING_CHECK_UPDATES:
+        show_sample_release();
+        break;
     case UI_SETTING_BRIGHTNESS:
         s_settings.brightness = (uint8_t)value;
         break;
@@ -207,6 +211,11 @@ static void on_pairing(ui_pairing_action_t action) {
 // 40%. The S3 one reads as installed straight away, as after its restart.
 #define SIM_FW_TICK_MS 100
 static ui_firmware_t s_fw = {.version = "", .error = ""};
+static void show_sample_release(void) {
+    s_fw = (ui_firmware_t){.state = UI_FIRMWARE_AVAILABLE, .version = "1.4.2", .error = ""};
+    ui_update_firmware(&s_fw);
+}
+
 static unsigned s_fw_run;
 static bool s_fw_fails;
 
@@ -245,7 +254,10 @@ static void start_sample_update(void) {
 }
 
 static void on_firmware(bool install) {
-    if (install && s_fw.bluetooth) {
+    if (install && s_fw.state == UI_FIRMWARE_AVAILABLE) {
+        s_fw.state = UI_FIRMWARE_RECEIVING;
+        s_fw.progress = 0;
+    } else if (install && s_fw.bluetooth) {
         s_fw.state = UI_FIRMWARE_INSTALLING;
         s_fw.progress = 0;
     } else {

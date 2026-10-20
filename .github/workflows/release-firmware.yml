@@ -1,0 +1,114 @@
+name: Release firmware
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag (a draft release is also supported)
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-firmware-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  firmware:
+    name: Build and attach OTA firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      RELEASE_DIR: release-artifacts
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Set the firmware version
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ['RELEASE_TAG']
+          if not re.fullmatch(r'v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', tag):
+              raise SystemExit('Use a version tag such as v1.2.3 or v1.2.3-rc.1')
+          if len(tag.encode('utf-8')) > 31:
+              raise SystemExit('The release tag must fit the 31-byte firmware version field')
+          for chip in ('s3', 'esp32'):
+              Path(f'firmware/{chip}/version.txt').write_text(tag + '\n')
+          PY
+
+      - name: Check the release accepts assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          immutable="$(gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" --jq '.immutable // false')"
+          if [[ "$immutable" == "true" ]]; then
+            echo '::error::This release is immutable. Run this workflow against a draft release before publishing it.'
+            exit 1
+          fi
+
+      - name: Install PlatformIO
+        run: python -m pip install 'platformio==6.2.0'
+
+      - name: Build main firmware
+        run: pio run -d firmware/s3 -e s3
+
+      - name: Build Bluetooth firmware
+        run: pio run -d firmware/esp32 -e esp32
+
+      - name: Check partition limits
+        run: python tests/partitions/check.py
+
+      - name: Package and verify OTA images
+        run: |
+          python - <<'PY'
+          import os
+          import shutil
+          import struct
+          from pathlib import Path
+
+          tag = os.environ['RELEASE_TAG']
+          output = Path(os.environ['RELEASE_DIR'])
+          output.mkdir(parents=True, exist_ok=True)
+          for chip, chip_id, limit in (('s3', 9, 4 * 1024 * 1024), ('esp32', 0, 1024 * 1024)):
+              source = Path(f'firmware/{chip}/.pio/build/{chip}/firmware.bin')
+              data = source.read_bytes()
+              if not 288 <= len(data) <= limit:
+                  raise SystemExit(f'{chip}: image does not fit its OTA partition')
+              if data[0] != 0xe9 or struct.unpack_from('<H', data, 12)[0] != chip_id:
+                  raise SystemExit(f'{chip}: incorrect application image or chip ID')
+              if struct.unpack_from('<I', data, 32)[0] != 0xabcd5432:
+                  raise SystemExit(f'{chip}: missing application descriptor')
+              version = data[48:80].split(b'\0', 1)[0].decode('utf-8')
+              if version != tag:
+                  raise SystemExit(f'{chip}: embedded version {version!r} does not match {tag!r}')
+              shutil.copyfile(source, output / f'firmware-{chip}.bin')
+              print(f'firmware-{chip}.bin: {len(data):,} bytes, version {version}')
+          PY
+
+      - name: Attach both images to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release upload "$RELEASE_TAG" \
+            "$RELEASE_DIR/firmware-s3.bin" \
+            "$RELEASE_DIR/firmware-esp32.bin" \
+            --clobber

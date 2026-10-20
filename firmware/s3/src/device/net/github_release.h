@@ -1,0 +1,32 @@
+#pragma once
+
+#include <stdbool.h>
+#include <stddef.h>
+#include "ota.h"
+
+typedef enum {
+    RELEASE_QUIET,
+    RELEASE_CHECKING,
+    RELEASE_AVAILABLE,
+    RELEASE_CURRENT,
+    RELEASE_ERROR,
+} release_notice_t;
+
+typedef struct {
+    bool checking;
+    bool checked;
+    bool s3_available;
+    bool bluetooth_available;
+    release_notice_t notice;
+    ota_target_t target;
+    char tag[32];
+    char error[96];
+} github_release_status_t;
+
+// Start once after networking is initialized. Checks after WiFi/time are
+// ready, then daily; transient failures retry hourly. Manual checks wake it.
+void github_release_start(void);
+bool github_release_check(void);
+void github_release_get_status(github_release_status_t *out);
+bool github_release_download(ota_target_t target);
+void github_release_answer(bool download);

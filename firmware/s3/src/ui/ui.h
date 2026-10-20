@@ -95,6 +95,10 @@ void ui_set_pairing_handler(void (*handler)(ui_pairing_action_t action));
 
 typedef enum {
     UI_FIRMWARE_IDLE,
+    UI_FIRMWARE_CHECKING,
+    UI_FIRMWARE_AVAILABLE,
+    UI_FIRMWARE_CURRENT,
+    UI_FIRMWARE_CHECK_FAILED,
     UI_FIRMWARE_RECEIVING,  // arriving from the web page
     UI_FIRMWARE_READY,      // received and checked, waiting for the user
     UI_FIRMWARE_INSTALLING, // being sent to the Bluetooth chip
@@ -308,6 +312,7 @@ typedef enum {
     UI_SETTING_HAPTICS,    // value: 0/1
     UI_SETTING_TIMEZONE,   // zone: a tz_db name, or NULL for automatic
     UI_SETTING_FORGET_WIFI,
+    UI_SETTING_CHECK_UPDATES,
     UI_SETTING_BLUETOOTH,  // value: 0/1
     UI_SETTING_AIRPLAY,    // value: UI_AIRPLAY_* mask
     UI_SETTING_SLEEP,      // value: seconds, 0-UI_SLEEP_MAX_S; 0 = never

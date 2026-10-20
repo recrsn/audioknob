@@ -44,6 +44,10 @@ typedef int (*ota_read_fn)(void *ctx, char *buf, size_t len);
 // On failure, false with the reason in the status; playback is allowed again.
 bool ota_receive(size_t size, ota_read_fn read, void *ctx);
 
+// Starts a background HTTPS download into the same validation/confirmation path.
+// False if an update is pending/busy or the worker could not be started.
+bool ota_download(const char *url, size_t size, ota_target_t target);
+
 void ota_get_status(ota_status_t *out);
 
 // Installs the image waiting in OTA_READY. For the S3 it restarts, so it

@@ -12,6 +12,7 @@
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "focus_sound.h"
+#include "github_release.h"
 #include "mic.h"
 #include "talk.h"
 #include "flash_message.h"
@@ -197,6 +198,15 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddNumberToObject(amb, "cpu", focus_sound_cpu_pct());
     cJSON_AddItemToObject(json, "radio", radio_json());
     cJSON_AddItemToObject(json, "update", update_json());
+    github_release_status_t release;
+    github_release_get_status(&release);
+    cJSON *r = cJSON_AddObjectToObject(json, "release");
+    cJSON_AddBoolToObject(r, "checking", release.checking);
+    cJSON_AddBoolToObject(r, "checked", release.checked);
+    cJSON_AddBoolToObject(r, "s3", release.s3_available);
+    cJSON_AddBoolToObject(r, "bluetooth", release.bluetooth_available);
+    cJSON_AddStringToObject(r, "tag", release.tag);
+    cJSON_AddStringToObject(r, "error", release.error);
     // null while Bluetooth is off or the ESP32 isn't answering.
     pairing_status_t pairing;
     if (s.bluetooth && uart_link_get_pairing(&pairing)) {
@@ -676,11 +686,30 @@ static esp_err_t update_handler(httpd_req_t *req) {
     ota_status_t ota;
     ota_get_status(&ota);
     // No error of its own when an install is running: that one's status stays.
-    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota.error[0] ? ota.error : "Another update is installing");
+    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota.error[0] ? ota.error : "Another update is pending or in progress");
     // Closes the socket instead of draining what's left of a refused
     // image; the browser may see that as a network error, so the page
     // reads the reason from /api/state.
     return ESP_FAIL;
+}
+
+static esp_err_t release_handler(httpd_req_t *req) {
+    char form[FORM_MAX + 1], action[16], target[16];
+    if (!read_post(req, form, sizeof(form))) {
+        return ESP_OK;
+    }
+    web_form_value(form, "action", action, sizeof(action));
+    web_form_value(form, "target", target, sizeof(target));
+    bool ok;
+    if (!strcmp(action, "check")) {
+        ok = github_release_check();
+    } else if (!strcmp(action, "download") && (!strcmp(target, "s3") || !strcmp(target, "bluetooth"))) {
+        ok = github_release_download(!strcmp(target, "s3") ? OTA_TARGET_S3 : OTA_TARGET_ESP32);
+    } else {
+        return httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Unknown release action or target");
+    }
+    return ok ? send_ok(req) : httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST,
+        "Update busy or unavailable; check for updates first");
 }
 
 static esp_err_t voice_get_handler(httpd_req_t *req) {
@@ -810,6 +839,7 @@ bool web_settings_start(void) {
         {.uri = "/api/stations", .method = HTTP_GET, .handler = stations_get_handler},
         {.uri = "/api/stations", .method = HTTP_POST, .handler = stations_post_handler},
         {.uri = "/api/forget", .method = HTTP_POST, .handler = forget_handler},
+        {.uri = "/api/releases", .method = HTTP_POST, .handler = release_handler},
         {.uri = "/api/update", .method = HTTP_POST, .handler = update_handler},
     };
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();

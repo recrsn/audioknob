@@ -218,7 +218,13 @@ details[open] summary{margin-bottom:8px}
   <div class="row"><span>Free memory</span><span class="val" id="mem"></span></div>
   <div class="row"><span>Storage used</span><span class="val" id="storage"></span></div>
   <div class="row col">
-    <div class="inline split"><span>Firmware update</span><button class="btn" id="updbtn">Choose file…</button></div>
+    <div class="inline split"><span>GitHub updates</span><button class="btn" id="checkupd">Check for updates</button></div>
+    <p class="hint" id="releasehint">Checks automatically every day.</p>
+    <div class="inline">
+      <button class="btn" id="releases3" hidden>Download main update</button>
+      <button class="btn" id="releasebt" hidden>Download Bluetooth update</button>
+    </div>
+    <div class="inline split"><span>Upload firmware</span><button class="btn" id="updbtn">Choose file…</button></div>
     <input type="file" id="updfile" accept=".bin" hidden>
     <progress id="updbar" max="100" hidden></progress>
     <p class="hint" id="updhint"></p>
@@ -463,6 +469,15 @@ function render(s) {
 
 function renderUpdate(s) {
   const u = s.update;
+  const r = s.release;
+  const locked = uploading || ["receiving", "ready", "installing"].includes(u.state);
+  $("checkupd").disabled = locked || r.checking;
+  $("releases3").hidden = !r.s3;
+  $("releasebt").hidden = !r.bluetooth;
+  $("releases3").disabled = $("releasebt").disabled = locked || r.checking;
+  setText("releasehint", r.checking ? "Checking GitHub…" : r.error ? r.error :
+    r.s3 || r.bluetooth ? `Update available: ${r.tag}. Confirm on the device after downloading.` :
+    r.checked ? "You're up to date. Checks automatically every day." : "Checks automatically every day.");
   // Back from the restart: the bootloader rolls back an image that never
   // got this page up.
   if (installing && wentOffline && (u.state === "idle" || u.state === "installed")) {
@@ -488,7 +503,7 @@ function renderUpdate(s) {
   // Sent in full, the Bluetooth chip is restarting: no telling how far along.
   const restarting = u.state === "installing" && u.progress >= 100;
   setBar(busy ? (restarting ? undefined : u.progress) : null);
-  $("updbtn").disabled = busy;
+  $("updbtn").disabled = locked;
 }
 
 async function poll() {
@@ -681,6 +696,14 @@ $("forget").onclick = async () => {
   if (await post("/api/forget", {})) toast("Restarting into setup…");
 };
 
+$("checkupd").onclick = () => post("/api/releases", {action: "check"});
+for (const [id, target] of [["releases3", "s3"], ["releasebt", "bluetooth"]]) {
+  $(id).onclick = async () => {
+    $(id).disabled = true;
+    wentOffline = false;
+    await post("/api/releases", {action: "download", target});
+  };
+}
 $("updbtn").onclick = () => $("updfile").click();
 $("updfile").onchange = () => {
   const file = $("updfile").files[0];

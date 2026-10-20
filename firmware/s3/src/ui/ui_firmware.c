@@ -23,6 +23,8 @@ static struct {
     lv_timer_t *result_timer;
     ui_firmware_state_t state; // the last one pushed
     unsigned progress;
+    bool bluetooth;
+    char version[32];
     void (*handler)(bool install);
 } fw;
 
@@ -45,7 +47,8 @@ static void hide(void) {
 }
 
 static bool showing_result(void) {
-    return ui_firmware_visible() && (fw.state == UI_FIRMWARE_INSTALLED || fw.state == UI_FIRMWARE_FAILED);
+    return ui_firmware_visible() && (fw.state == UI_FIRMWARE_INSTALLED || fw.state == UI_FIRMWARE_FAILED ||
+                                     fw.state == UI_FIRMWARE_CURRENT || fw.state == UI_FIRMWARE_CHECK_FAILED);
 }
 
 static void answer(bool install) {
@@ -98,7 +101,7 @@ static void show(void) {
 
 static void render_ready(const ui_firmware_t *f) {
     char body[96];
-    snprintf(body, sizeof(body), "Version %s, sent from the web page. %s", f->version,
+    snprintf(body, sizeof(body), "Version %s is ready. %s", f->version,
              f->bluetooth ? "Bluetooth restarts when it's in." : "The device restarts.");
     ui_prompt_render(&fw.prompt, &(ui_prompt_content_t){.symbol = LV_SYMBOL_DOWNLOAD,
                                                          .tint = UI_COLOR_ACCENT,
@@ -150,13 +153,17 @@ static void render_result(const ui_firmware_t *f) {
 }
 
 void ui_update_firmware(const ui_firmware_t *f) {
-    bool changed = f->state != fw.state;
-    bool result = f->state == UI_FIRMWARE_INSTALLED || f->state == UI_FIRMWARE_FAILED;
+    bool changed = f->state != fw.state || f->bluetooth != fw.bluetooth ||
+                   strcmp(fw.version, f->version);
+    bool result = f->state == UI_FIRMWARE_INSTALLED || f->state == UI_FIRMWARE_FAILED ||
+                  f->state == UI_FIRMWARE_CURRENT || f->state == UI_FIRMWARE_CHECK_FAILED;
     // A result shows once, on the change; progress redraws as it moves.
     if (!changed && (result || f->progress == fw.progress)) {
         return;
     }
     fw.state = f->state;
+    fw.bluetooth = f->bluetooth;
+    snprintf(fw.version, sizeof(fw.version), "%s", f->version);
     fw.progress = f->progress;
     if (f->state == UI_FIRMWARE_IDLE) {
         hide();
@@ -170,6 +177,29 @@ void ui_update_firmware(const ui_firmware_t *f) {
         fw.result_timer = NULL;
     }
     switch (f->state) {
+    case UI_FIRMWARE_AVAILABLE: {
+        char body[128];
+        snprintf(body, sizeof(body), "%s %s is available. Download now? You'll confirm again before installing.",
+                 f->bluetooth ? "Bluetooth" : "Version", f->version);
+        ui_prompt_render(&fw.prompt, &(ui_prompt_content_t){.symbol = LV_SYMBOL_DOWNLOAD,
+            .tint = UI_COLOR_ACCENT, .title = "Update available", .body = body, .cancel = true, .accept = true});
+        ui_set_visible(fw.bar, false);
+        break;
+    }
+    case UI_FIRMWARE_CHECKING:
+    case UI_FIRMWARE_CURRENT:
+    case UI_FIRMWARE_CHECK_FAILED:
+        ui_prompt_render(&fw.prompt, &(ui_prompt_content_t){.symbol = LV_SYMBOL_DOWNLOAD,
+            .tint = UI_COLOR_ACCENT,
+            .title = f->state == UI_FIRMWARE_CHECKING ? "Checking for updates" :
+                     f->state == UI_FIRMWARE_CURRENT ? "You're up to date" : "Couldn't check updates",
+            .body = f->state == UI_FIRMWARE_CHECK_FAILED ? f->error : "Checks automatically every day."});
+        ui_set_visible(fw.bar, false);
+        if (result) {
+            fw.result_timer = lv_timer_create(result_timer_cb, FW_RESULT_MS, NULL);
+            lv_timer_set_repeat_count(fw.result_timer, 1);
+        }
+        break;
     case UI_FIRMWARE_READY:
         render_ready(f);
         break;
@@ -197,7 +227,7 @@ bool ui_firmware_knob_press(void) {
     if (!ui_firmware_visible()) {
         return false;
     }
-    if (fw.state == UI_FIRMWARE_READY) {
+    if (fw.state == UI_FIRMWARE_READY || fw.state == UI_FIRMWARE_AVAILABLE) {
         install();
     } else if (showing_result()) {
         hide();
@@ -209,7 +239,7 @@ bool ui_firmware_knob_long_press(void) {
     if (!ui_firmware_visible()) {
         return false;
     }
-    if (fw.state == UI_FIRMWARE_READY) {
+    if (fw.state == UI_FIRMWARE_READY || fw.state == UI_FIRMWARE_AVAILABLE) {
         decline();
     } else if (showing_result()) {
         hide();
