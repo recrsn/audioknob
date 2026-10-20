@@ -420,8 +420,9 @@ buffered_t *buffered_start(const uint8_t key[32], uint16_t *port, size_t *buffer
         destroy(b);
         return NULL;
     }
-    // Largest internal stack first, while fragmentation still leaves a block for it.
-    if (!ap2_task_start(decoder_task, "ap2_buf_dec", DECODER_STACK, b, DECODER_PRIO, TASK_CORE, false)) {
+    // PSRAM stack: internal RAM runs out during a buffered stream, and the
+    // decoder never writes flash. Measured: same average decode time.
+    if (!ap2_task_start(decoder_task, "ap2_buf_dec", DECODER_STACK, b, DECODER_PRIO, TASK_CORE, true)) {
         destroy(b);
         return NULL;
     }
