@@ -45,6 +45,7 @@ extern const lv_font_t icons_20;
 #define ICON_RADIO        "\xEE\x80\xBE"
 
 // Talk/inbox glyphs live in icons_talk_48/20, fallbacks of icons_48/20.
+// Talk is a walkie-talkie; regenerate both sizes with tools/gen_talk_icons.py.
 #define ICON_TALK "\xEE\x80\xA9"
 
 #define ICON_INBOX "\xEE\x85\x98"
