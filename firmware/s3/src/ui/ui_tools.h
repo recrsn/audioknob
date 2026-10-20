@@ -30,7 +30,11 @@ void tool_ring_touch_create(lv_obj_t *parent, tool_ring_touch_cb_t cb, void *use
 // A finger circling the ring turns the knob: rotate() gets a step per
 // TOOL_JOG_DEG travelled, clockwise positive.
 void tool_ring_jog_create(lv_obj_t *parent, bool (*rotate)(int steps));
+// `text` must outlive the title: tool_title_flash() goes back to it.
 lv_obj_t *tool_title_create(lv_obj_t *parent, const char *text, lv_color_t tint);
+// Shows `text` (a value the knob just changed) in place of the title for a
+// moment.
+void tool_title_flash(lv_obj_t *title, const char *text);
 lv_obj_t *tool_time_label_create(lv_obj_t *parent);
 lv_obj_t *tool_hint_label_create(lv_obj_t *parent);
 
@@ -40,6 +44,26 @@ lv_obj_t *tool_button_row_create(lv_obj_t *parent);
 lv_obj_t *tool_button_create(lv_obj_t *row, const char *text, lv_event_cb_t cb);
 lv_obj_t *tool_primary_button_create(lv_obj_t *row, lv_color_t tint, lv_event_cb_t cb);
 void tool_button_set_enabled(lv_obj_t *label, bool enabled);
+// A small round button for a page's secondary actions (back, delete);
+// returns the button, its glyph is its only child. `cb` (on click) may be
+// NULL for a button that handles its own events.
+lv_obj_t *tool_icon_button_create(lv_obj_t *parent, const char *symbol, lv_event_cb_t cb);
+
+// Settings-style lists (Radio, Talk, Inbox, Ambience): a column of pill rows
+// under the title. Rows are the list's only children, in order.
+#define TOOL_LIST_W   272
+#define TOOL_LIST_TOP (UI_SAFE_TOP + 22)
+lv_obj_t *tool_list_create(lv_obj_t *parent, int32_t height);
+// A row with a name over a detail line (hidden until needed); trailing glyphs
+// are added to the row after it.
+lv_obj_t *tool_list_row_create(lv_obj_t *list, int32_t height, lv_obj_t **name, lv_obj_t **detail);
+// Rows fade with their distance from the selected one, as the knob moves it.
+void tool_list_fade(lv_obj_t *list, int selected, int count);
+// Scrolls `index` toward the middle, as far as the ends allow.
+void tool_list_center(lv_obj_t *list, int index, lv_anim_enable_t anim);
+// After a drag: `selected` if it's still in view, else the row nearest the
+// middle, so the knob carries on from what's on screen.
+int tool_list_in_view(lv_obj_t *list, int selected, int count);
 
 typedef enum {
     COUNTDOWN_IDLE,

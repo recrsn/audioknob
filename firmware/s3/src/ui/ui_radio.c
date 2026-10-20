@@ -10,13 +10,8 @@
 // ordered on the device's web page.
 
 #define RADIO_TITLE_Y   UI_TITLE_TOP_Y
-#define RADIO_LIST_W    272
-#define RADIO_LIST_TOP  (UI_SAFE_TOP + 22)
-#define RADIO_LIST_H    (304 - RADIO_LIST_TOP)
+#define RADIO_LIST_H    (304 - TOOL_LIST_TOP)
 #define RADIO_ROW_H     48
-#define RADIO_ROW_PAD   UI_SPACE_L
-#define RADIO_FADE_ROWS 3
-#define RADIO_FADE_MIN  40
 #define RADIO_EMPTY_Y   (-8)
 
 typedef struct {
@@ -64,26 +59,8 @@ static const char *detail_text(const ui_radio_t *r) {
     return "";
 }
 
-// Rows fade with their distance from the selection, per label (a whole-row
-// opa would render each row through a layer).
 static void fade(void) {
-    if (!rd.data->count) {
-        return;
-    }
-    lv_obj_update_layout(rd.list);
-    lv_area_t sel;
-    lv_obj_get_coords(rd.rows[rd.selected].row, &sel);
-    int32_t mid = (sel.y1 + sel.y2) / 2;
-    for (int i = 0; i < rd.data->count; i++) {
-        lv_area_t a;
-        lv_obj_get_coords(rd.rows[i].row, &a);
-        int32_t dist = LV_ABS((a.y1 + a.y2) / 2 - mid);
-        int32_t opa = LV_OPA_COVER - (LV_OPA_COVER - RADIO_FADE_MIN) * dist / (RADIO_ROW_H * RADIO_FADE_ROWS);
-        opa = opa < RADIO_FADE_MIN ? RADIO_FADE_MIN : opa;
-        lv_obj_set_style_text_opa(rd.rows[i].name, (lv_opa_t)opa, 0);
-        lv_obj_set_style_text_opa(rd.rows[i].detail, (lv_opa_t)opa, 0);
-        lv_obj_set_style_text_opa(rd.rows[i].glyph, (lv_opa_t)opa, 0);
-    }
+    tool_list_fade(rd.list, rd.selected, rd.data->count);
 }
 
 static void render(void) {
@@ -115,18 +92,6 @@ static void render(void) {
     }
 }
 
-static void center_row(int index, lv_anim_enable_t anim) {
-    lv_obj_update_layout(rd.list);
-    lv_area_t list_area, row_area;
-    lv_obj_get_coords(rd.list, &list_area);
-    lv_obj_get_coords(rd.rows[index].row, &row_area);
-    int32_t y = lv_obj_get_scroll_y(rd.list);
-    int32_t target = y + (row_area.y1 + row_area.y2) / 2 - (list_area.y1 + list_area.y2) / 2;
-    int32_t max = y + lv_obj_get_scroll_bottom(rd.list);
-    target = target < 0 ? 0 : target > max ? max : target;
-    lv_obj_scroll_to_y(rd.list, target, anim);
-}
-
 static void select_row(int index, bool scroll) {
     if (index < 0 || index >= rd.data->count) {
         return;
@@ -137,7 +102,7 @@ static void select_row(int index, bool scroll) {
         fade();
     }
     if (scroll) {
-        center_row(index, LV_ANIM_ON);
+        tool_list_center(rd.list, index, LV_ANIM_ON);
     }
 }
 
@@ -160,28 +125,9 @@ static void row_click_cb(lv_event_t *e) {
     }
 }
 
-// A drag that takes the selection out of view moves it to the row nearest
-// the middle, so the knob carries on from what's on screen.
 static void list_scroll_end_cb(lv_event_t *e) {
     (void)e;
-    lv_area_t list_area, a;
-    lv_obj_get_coords(rd.list, &list_area);
-    lv_obj_get_coords(rd.rows[rd.selected].row, &a);
-    if (a.y1 >= list_area.y1 && a.y2 <= list_area.y2) {
-        return;
-    }
-    int32_t mid = (list_area.y1 + list_area.y2) / 2;
-    int best = rd.selected;
-    int32_t best_dist = INT32_MAX;
-    for (int i = 0; i < rd.data->count; i++) {
-        lv_obj_get_coords(rd.rows[i].row, &a);
-        int32_t dist = LV_ABS((a.y1 + a.y2) / 2 - mid);
-        if (dist < best_dist) {
-            best_dist = dist;
-            best = i;
-        }
-    }
-    select_row(best, false);
+    select_row(tool_list_in_view(rd.list, rd.selected, rd.data->count), false);
 }
 
 static bool radio_rotate(int steps) {
@@ -199,41 +145,10 @@ static lv_obj_t *label_create(lv_obj_t *parent, const lv_font_t *font, uint32_t 
     return label;
 }
 
-// A content-tall label wraps rather than dots, so each is one line tall.
-static lv_obj_t *line_create(lv_obj_t *parent, const lv_font_t *font, uint32_t color) {
-    lv_obj_t *label = label_create(parent, font, color);
-    lv_obj_set_width(label, lv_pct(100));
-    lv_obj_set_height(label, lv_font_get_line_height(font));
-    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
-    lv_label_set_text(label, "");
-    return label;
-}
-
 static void row_create(int index) {
     station_row_t *r = &rd.rows[index];
-    r->row = lv_obj_create(rd.list);
-    lv_obj_remove_style_all(r->row);
-    lv_obj_remove_flag(r->row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(r->row, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(r->row, lv_pct(100), RADIO_ROW_H);
-    lv_obj_set_style_radius(r->row, UI_RADIUS_PILL, 0);
-    lv_obj_set_style_bg_color(r->row, lv_color_hex(UI_COLOR_TEXT), 0);
-    lv_obj_set_style_pad_hor(r->row, RADIO_ROW_PAD, 0);
-    lv_obj_set_style_pad_column(r->row, UI_SPACE_M, 0);
-    lv_obj_set_flex_flow(r->row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(r->row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    r->row = tool_list_row_create(rd.list, RADIO_ROW_H, &r->name, &r->detail);
     lv_obj_add_event_cb(r->row, row_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)index);
-
-    lv_obj_t *text = lv_obj_create(r->row);
-    lv_obj_remove_style_all(text);
-    lv_obj_remove_flag(text, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_height(text, LV_SIZE_CONTENT);
-    lv_obj_set_flex_grow(text, 1);
-    lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(text, UI_SPACE_XXS, 0);
-    r->name = line_create(text, UI_FONT_TITLE, UI_COLOR_TEXT);
-    r->detail = line_create(text, UI_FONT_CAPTION, UI_COLOR_TEXT_DIM);
-
     r->glyph = label_create(r->row, UI_FONT_SYMBOL_SM, UI_TINT_RADIO);
     lv_label_set_text(r->glyph, LV_SYMBOL_STOP);
 }
@@ -277,7 +192,7 @@ static void screen_load_cb(lv_event_t *e) {
     render();
     if (rd.data->count) {
         fade();
-        center_row(rd.selected, LV_ANIM_OFF);
+        tool_list_center(rd.list, rd.selected, LV_ANIM_OFF);
     }
 }
 
@@ -292,14 +207,7 @@ void radio_page_build(lv_obj_t *screen) {
     lv_obj_t *title = tool_title_create(screen, "RADIO", lv_color_hex(UI_TINT_RADIO));
     lv_obj_align(title, LV_ALIGN_CENTER, 0, RADIO_TITLE_Y);
 
-    rd.list = lv_obj_create(screen);
-    lv_obj_remove_style_all(rd.list);
-    lv_obj_set_size(rd.list, RADIO_LIST_W, RADIO_LIST_H);
-    lv_obj_set_flex_flow(rd.list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_scroll_dir(rd.list, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(rd.list, LV_SCROLLBAR_MODE_OFF);
-    lv_obj_remove_flag(rd.list, LV_OBJ_FLAG_SCROLL_ELASTIC);
-    lv_obj_align(rd.list, LV_ALIGN_TOP_MID, 0, RADIO_LIST_TOP);
+    rd.list = tool_list_create(screen, RADIO_LIST_H);
     lv_obj_add_event_cb(rd.list, list_scroll_end_cb, LV_EVENT_SCROLL_END, NULL);
 
     rd.empty = label_create(screen, UI_FONT_TITLE, UI_COLOR_TEXT);

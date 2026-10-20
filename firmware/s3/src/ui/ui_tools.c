@@ -17,6 +17,10 @@
 // follow.
 #define TOOL_TOUCH_R_MIN 48
 #define TOOL_JOG_DEG     10
+#define TOOL_ICON_BTN    UI_BUTTON_SIZE_SM
+#define TOOL_LIST_FADE_ROWS 3
+#define TOOL_LIST_FADE_MIN  40
+#define TOOL_FLASH_MS       1500
 
 // Haptics may be missing, so a ringing countdown doesn't pulse forever.
 #define ALERT_MS 60000
@@ -215,8 +219,40 @@ lv_obj_t *tool_title_create(lv_obj_t *parent, const char *text, lv_color_t tint)
     lv_obj_set_style_text_font(title, UI_FONT_OVERLINE, 0);
     lv_obj_set_style_text_color(title, tint, 0);
     lv_obj_set_style_text_letter_space(title, UI_OVERLINE_SPACING, 0);
+    lv_obj_set_user_data(title, (void *)text);
     lv_obj_align(title, LV_ALIGN_CENTER, 0, UI_TITLE_Y);
     return title;
+}
+
+// Only the page on screen flashes its title, so one timer serves them all.
+static struct {
+    lv_obj_t *title;
+    lv_timer_t *timer;
+} s_flash;
+
+static void title_restore(void) {
+    if (s_flash.title) {
+        ui_label_set_text(s_flash.title, lv_obj_get_user_data(s_flash.title));
+        s_flash.title = NULL;
+    }
+}
+
+static void title_flash_cb(lv_timer_t *t) {
+    lv_timer_pause(t);
+    title_restore();
+}
+
+void tool_title_flash(lv_obj_t *title, const char *text) {
+    if (s_flash.title != title) {
+        title_restore();
+    }
+    if (!s_flash.timer) {
+        s_flash.timer = lv_timer_create(title_flash_cb, TOOL_FLASH_MS, NULL);
+    }
+    s_flash.title = title;
+    ui_label_set_text(title, text);
+    lv_timer_reset(s_flash.timer);
+    lv_timer_resume(s_flash.timer);
 }
 
 // Tabular digits (inter_tnum_*) keep a running time from wobbling sideways.
@@ -282,6 +318,124 @@ void tool_button_set_enabled(lv_obj_t *label, bool enabled) {
     } else {
         lv_obj_remove_flag(btn, LV_OBJ_FLAG_CLICKABLE);
     }
+}
+
+lv_obj_t *tool_icon_button_create(lv_obj_t *parent, const char *symbol, lv_event_cb_t cb) {
+    lv_obj_t *btn = lv_obj_get_parent(ui_round_button_create(parent, symbol, TOOL_ICON_BTN, UI_FONT_SYMBOL, false));
+    lv_obj_add_flag(btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_ext_click_area(btn, (UI_TOUCH_MIN - TOOL_ICON_BTN) / 2);
+    if (cb) {
+        lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
+    }
+    return btn;
+}
+
+// -- lists --
+
+lv_obj_t *tool_list_create(lv_obj_t *parent, int32_t height) {
+    lv_obj_t *list = lv_obj_create(parent);
+    lv_obj_remove_style_all(list);
+    lv_obj_set_size(list, TOOL_LIST_W, height);
+    lv_obj_set_flex_flow(list, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_OFF);
+    lv_obj_remove_flag(list, LV_OBJ_FLAG_SCROLL_ELASTIC);
+    lv_obj_align(list, LV_ALIGN_TOP_MID, 0, TOOL_LIST_TOP);
+    return list;
+}
+
+// A content-tall label wraps rather than dots, so each is one line tall.
+static lv_obj_t *list_line_create(lv_obj_t *parent, const lv_font_t *font, uint32_t color) {
+    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_set_style_text_font(label, font, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
+    lv_obj_set_width(label, lv_pct(100));
+    lv_obj_set_height(label, lv_font_get_line_height(font));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+    lv_label_set_text(label, "");
+    return label;
+}
+
+lv_obj_t *tool_list_row_create(lv_obj_t *list, int32_t height, lv_obj_t **name, lv_obj_t **detail) {
+    lv_obj_t *row = lv_obj_create(list);
+    lv_obj_remove_style_all(row);
+    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(row, lv_pct(100), height);
+    lv_obj_set_style_radius(row, UI_RADIUS_PILL, 0);
+    lv_obj_set_style_bg_color(row, lv_color_hex(UI_COLOR_TEXT), 0);
+    lv_obj_set_style_pad_hor(row, UI_SPACE_L, 0);
+    lv_obj_set_style_pad_column(row, UI_SPACE_M, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *text = lv_obj_create(row);
+    lv_obj_remove_style_all(text);
+    lv_obj_remove_flag(text, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_height(text, LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(text, 1);
+    lv_obj_set_flex_flow(text, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(text, UI_SPACE_XXS, 0);
+    *name = list_line_create(text, UI_FONT_TITLE, UI_COLOR_TEXT);
+    *detail = list_line_create(text, UI_FONT_CAPTION, UI_COLOR_TEXT_DIM);
+    ui_set_visible(*detail, false);
+    return row;
+}
+
+static int32_t row_mid(lv_obj_t *list, int index) {
+    lv_area_t a;
+    lv_obj_get_coords(lv_obj_get_child(list, index), &a);
+    return (a.y1 + a.y2) / 2;
+}
+
+static int32_t list_mid(lv_obj_t *list) {
+    lv_area_t a;
+    lv_obj_get_coords(list, &a);
+    return (a.y1 + a.y2) / 2;
+}
+
+// text_opa is inherited, so the row's reaches every label in it without the
+// layer a whole-row opa would render it through.
+void tool_list_fade(lv_obj_t *list, int selected, int count) {
+    if (!count) {
+        return;
+    }
+    lv_obj_update_layout(list);
+    int32_t mid = row_mid(list, selected);
+    int32_t span = lv_obj_get_height(lv_obj_get_child(list, selected)) * TOOL_LIST_FADE_ROWS;
+    for (int i = 0; i < count; i++) {
+        int32_t dist = LV_ABS(row_mid(list, i) - mid);
+        int32_t opa = LV_OPA_COVER - (LV_OPA_COVER - TOOL_LIST_FADE_MIN) * dist / span;
+        lv_obj_set_style_text_opa(lv_obj_get_child(list, i), (lv_opa_t)LV_MAX(opa, TOOL_LIST_FADE_MIN), 0);
+    }
+}
+
+void tool_list_center(lv_obj_t *list, int index, lv_anim_enable_t anim) {
+    lv_obj_update_layout(list);
+    int32_t y = lv_obj_get_scroll_y(list);
+    int32_t target = y + row_mid(list, index) - list_mid(list);
+    int32_t max = y + lv_obj_get_scroll_bottom(list);
+    lv_obj_scroll_to_y(list, LV_CLAMP(0, target, max), anim);
+}
+
+int tool_list_in_view(lv_obj_t *list, int selected, int count) {
+    lv_area_t list_area, a;
+    lv_obj_get_coords(list, &list_area);
+    lv_obj_get_coords(lv_obj_get_child(list, selected), &a);
+    if (a.y1 >= list_area.y1 && a.y2 <= list_area.y2) {
+        return selected;
+    }
+    int32_t mid = list_mid(list);
+    int best = selected;
+    int32_t best_dist = INT32_MAX;
+    for (int i = 0; i < count; i++) {
+        int32_t dist = LV_ABS(row_mid(list, i) - mid);
+        if (dist < best_dist) {
+            best_dist = dist;
+            best = i;
+        }
+    }
+    return best;
 }
 
 static void opa_exec(void *obj, int32_t v) {
