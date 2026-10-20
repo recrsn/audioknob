@@ -26,9 +26,11 @@ static release_manifest_t s_manifest;
 
 static void refresh_available(const hello_t *bluetooth) {
     s_status.s3_available =
-        s_manifest.s3.size && release_version_newer(s_manifest.tag, esp_app_get_description()->version);
+        s_manifest.s3.size && release_version_newer(s_manifest.s3.version, esp_app_get_description()->version);
     s_status.bluetooth_available = s_manifest.bluetooth.size && bluetooth->version[0] &&
-                                   release_version_newer(s_manifest.tag, bluetooth->version);
+                                   release_version_newer(s_manifest.bluetooth.version, bluetooth->version);
+    snprintf(s_status.s3_version, sizeof(s_status.s3_version), "%s", s_manifest.s3.version);
+    snprintf(s_status.bluetooth_version, sizeof(s_status.bluetooth_version), "%s", s_manifest.bluetooth.version);
     s_status.target = s_status.s3_available ? OTA_TARGET_S3 : OTA_TARGET_ESP32;
     if (s_status.notice == RELEASE_AVAILABLE && !s_status.s3_available && !s_status.bluetooth_available) {
         s_status.notice = RELEASE_QUIET;
@@ -70,7 +72,7 @@ static void check_release(void) {
         if (n < 0 || !esp_http_client_is_complete_data_received(client)) {
             error = "Incomplete or oversized release response";
         } else if (!release_manifest_parse(body, CONFIG_AK_UPDATE_REPOSITORY, manifest)) {
-            error = "Release has no compatible firmware assets";
+            error = "Release has no verified compatible assets";
         }
     }
     if (client) {
@@ -86,7 +88,9 @@ static void check_release(void) {
     snprintf(s_status.error, sizeof(s_status.error), "%s", error ? error : "");
     if (!error) {
         // Dismissal lasts for this release and boot, even across daily checks.
-        bool changed = strcmp(s_manifest.tag, manifest->tag) != 0;
+        bool changed = strcmp(s_manifest.tag, manifest->tag) ||
+                       strcmp(s_manifest.s3.version, manifest->s3.version) ||
+                       strcmp(s_manifest.bluetooth.version, manifest->bluetooth.version);
         s_manifest = *manifest;
         snprintf(s_status.tag, sizeof(s_status.tag), "%s", manifest->tag);
         refresh_available(&bluetooth);
@@ -174,7 +178,7 @@ bool github_release_download(ota_target_t target) {
                      (target == OTA_TARGET_S3 ? s_status.s3_available : s_status.bluetooth_available);
     asset = target == OTA_TARGET_S3 ? s_manifest.s3 : s_manifest.bluetooth;
     taskEXIT_CRITICAL(&s_lock);
-    if (!available || !ota_download(asset.url, asset.size, target)) {
+    if (!available || !ota_download(asset.url, asset.size, target, asset.sha256)) {
         return false;
     }
     taskENTER_CRITICAL(&s_lock);

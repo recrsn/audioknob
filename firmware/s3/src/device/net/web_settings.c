@@ -206,6 +206,8 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddBoolToObject(r, "s3", release.s3_available);
     cJSON_AddBoolToObject(r, "bluetooth", release.bluetooth_available);
     cJSON_AddStringToObject(r, "tag", release.tag);
+    cJSON_AddStringToObject(r, "s3Version", release.s3_version);
+    cJSON_AddStringToObject(r, "bluetoothVersion", release.bluetooth_version);
     cJSON_AddStringToObject(r, "error", release.error);
     // null while Bluetooth is off or the ESP32 isn't answering.
     pairing_status_t pairing;

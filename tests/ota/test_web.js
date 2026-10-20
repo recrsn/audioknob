@@ -26,9 +26,12 @@ const state = {
   release: {checking: false, checked: true, s3: true, bluetooth: true, tag: "v1.2.3", error: ""},
   update: {state: "idle", target: "s3", progress: 0, version: "", error: ""},
 };
+state.release.s3Version = "v1.2.3";
+state.release.bluetoothVersion = "v1.0.0";
 context.renderUpdate(state);
-assert.match(elements.releasehint.textContent, /Update available: v1.2.3/);
+assert.match(elements.releasehint.textContent, /Update available: Main v1.2.3/);
 assert.equal(elements.releases3.hidden, false);
+assert.equal(elements.releasebt.textContent, "Download Bluetooth v1.0.0");
 assert.equal(elements.releasebt.hidden, false);
 assert.equal(elements.updbtn.disabled, false);
 state.update.state = "ready";

@@ -90,7 +90,7 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
         };
         ui_update_firmware(&(ui_firmware_t){.state = k_release[release.notice],
                                             .bluetooth = release.target == OTA_TARGET_ESP32,
-                                            .version = release.tag,
+                                            .version = release.target == OTA_TARGET_ESP32 ? release.bluetooth_version : release.s3_version,
                                             .error = release.error});
     } else {
         ui_update_firmware(&(ui_firmware_t){.state = k_firmware[ota.state],

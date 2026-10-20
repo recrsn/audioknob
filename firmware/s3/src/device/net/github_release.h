@@ -20,6 +20,8 @@ typedef struct {
     release_notice_t notice;
     ota_target_t target;
     char tag[32];
+    char s3_version[32];
+    char bluetooth_version[32];
     char error[96];
 } github_release_status_t;
 

@@ -31,27 +31,22 @@ jobs:
         with:
           ref: refs/tags/${{ github.event.release.tag_name || inputs.tag }}
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
-      - name: Set the firmware version
-        run: |
-          python - <<'PY'
-          import os
-          import re
-          from pathlib import Path
+      - name: Check release tooling
+        run: python -m unittest discover -s tests/ota -p test_release_ci.py
 
-          tag = os.environ['RELEASE_TAG']
-          if not re.fullmatch(r'v?[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?', tag):
-              raise SystemExit('Use a version tag such as v1.2.3 or v1.2.3-rc.1')
-          if len(tag.encode('utf-8')) > 31:
-              raise SystemExit('The release tag must fit the 31-byte firmware version field')
-          for chip in ('s3', 'esp32'):
-              Path(f'firmware/{chip}/version.txt').write_text(tag + '\n')
-          PY
+      - name: Prepare independently versioned firmware
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: python tools/release_firmware.py prepare
 
       - name: Check the release accepts assets
         env:
@@ -71,44 +66,26 @@ jobs:
         run: pio run -d firmware/s3 -e s3
 
       - name: Build Bluetooth firmware
+        if: steps.release.outputs.bluetooth_changed == 'true'
         run: pio run -d firmware/esp32 -e esp32
 
       - name: Check partition limits
         run: python tests/partitions/check.py
 
       - name: Package and verify OTA images
-        run: |
-          python - <<'PY'
-          import os
-          import shutil
-          import struct
-          from pathlib import Path
-
-          tag = os.environ['RELEASE_TAG']
-          output = Path(os.environ['RELEASE_DIR'])
-          output.mkdir(parents=True, exist_ok=True)
-          for chip, chip_id, limit in (('s3', 9, 4 * 1024 * 1024), ('esp32', 0, 1024 * 1024)):
-              source = Path(f'firmware/{chip}/.pio/build/{chip}/firmware.bin')
-              data = source.read_bytes()
-              if not 288 <= len(data) <= limit:
-                  raise SystemExit(f'{chip}: image does not fit its OTA partition')
-              if data[0] != 0xe9 or struct.unpack_from('<H', data, 12)[0] != chip_id:
-                  raise SystemExit(f'{chip}: incorrect application image or chip ID')
-              if struct.unpack_from('<I', data, 32)[0] != 0xabcd5432:
-                  raise SystemExit(f'{chip}: missing application descriptor')
-              version = data[48:80].split(b'\0', 1)[0].decode('utf-8')
-              if version != tag:
-                  raise SystemExit(f'{chip}: embedded version {version!r} does not match {tag!r}')
-              shutil.copyfile(source, output / f'firmware-{chip}.bin')
-              print(f'firmware-{chip}.bin: {len(data):,} bytes, version {version}')
-          PY
+        env:
+          BLUETOOTH_CHANGED: ${{ steps.release.outputs.bluetooth_changed }}
+          BLUETOOTH_VERSION: ${{ steps.release.outputs.bluetooth_version }}
+        run: python tools/release_firmware.py package
 
       - name: Attach both images to the release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          BLUETOOTH_VERSION: ${{ steps.release.outputs.bluetooth_version }}
         run: |
           gh release upload "$RELEASE_TAG" \
-            "$RELEASE_DIR/firmware-s3.bin" \
-            "$RELEASE_DIR/firmware-esp32.bin" \
+            "$RELEASE_DIR/firmware-s3.bin#version:$RELEASE_TAG" \
+            "$RELEASE_DIR/firmware-esp32.bin#version:$BLUETOOTH_VERSION" \
+            "$RELEASE_DIR/SHA256SUMS" \
             --clobber

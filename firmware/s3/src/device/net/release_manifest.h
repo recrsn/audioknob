@@ -2,9 +2,12 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef struct {
     char url[512];
+    char version[32];
+    uint8_t sha256[32];
     size_t size;
 } release_asset_t;
 

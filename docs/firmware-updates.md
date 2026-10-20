@@ -31,20 +31,42 @@ Audio pauses while writing and through the install confirmation.
 The default public repository is `recrsn/audioknob`. Forks can change
 `CONFIG_AK_UPDATE_REPOSITORY` in the S3's menuconfig.
 
-Use stable version tags such as `v1.2.3`. Both application images must embed
-the matching version (`1.2.3` or `v1.2.3`): ESP-IDF accepts a project-root
+Use stable version tags such as `v1.2.3`. The main image embeds the release
+version (`1.2.3` or `v1.2.3`). Bluetooth keeps its own version until its sources
+or shared protocol change. For local builds, ESP-IDF accepts a project-root
 `version.txt`, or derives the version from `git describe`. Exact versions
 ignore a leading `v`; numeric `major.minor.patch` versions also prevent
 announcing a downgrade. A development/git-hash version is treated as
 updateable when it differs from the release tag.
 
 Publishing a GitHub release runs `.github/workflows/release-firmware.yml`.
-It checks out the exact release tag, writes that tag into both projects'
-`version.txt`, builds both chips with PlatformIO 6.2.0, checks partition limits,
-and verifies each binary's chip ID and embedded version before attaching
-`firmware-s3.bin` and `firmware-esp32.bin` to the release. A failed build or
-validation prevents the upload step. Re-running the workflow replaces assets
-with the same names.
+It checks out the exact release tag and always builds the main image. It builds
+Bluetooth only when `firmware/esp32/` or `firmware/lib/common/` differs from the
+previous stable release containing a Bluetooth asset. The first release builds
+both images. When Bluetooth is unchanged, CI copies the verified prior binary
+without changing its embedded version. Thus a main-only release does not ask
+current devices to update Bluetooth, while devices that skipped earlier
+releases can still fetch the latest Bluetooth image from the current release.
+
+CI labels each asset `version:<embedded-version>`. The updater uses each
+asset's label when comparing versions, falling back to the release tag for
+older unlabeled releases such as `v0.1.0`. The device prompt and web download
+buttons show the selected chip's own version.
+
+Before attaching anything, CI verifies each binary's chip ID, embedded version,
+size and appended image checksum. It also publishes `SHA256SUMS` covering the
+complete files, including reused Bluetooth firmware. For manual downloads:
+
+```sh
+sha256sum --check SHA256SUMS  # macOS: shasum -a 256 --check SHA256SUMS
+```
+
+The device requires a valid SHA-256 digest from GitHub's asset metadata,
+retrieved over verified HTTPS. It hashes the complete downloaded file while
+streaming and rejects any mismatch before marking the image ready for physical
+confirmation. Missing, malformed or non-SHA-256 asset digests fail the release
+check. Existing image validation and rollback run in addition to this check.
+A rerun of the workflow replaces assets with the same names.
 
 The workflow also supports **Actions → Release firmware → Run workflow** with
 an existing release tag, including a draft release. For immutable releases,
@@ -77,11 +99,13 @@ reported as errors, rather than claiming the device is up to date.
 
 `python3 tests/ota/run.py` runs sanitizer-enabled host tests against ESP-IDF's
 cJSON and mocked OTA transports, plus web renderer tests (requires a C compiler,
-Node.js, and PlatformIO's ESP-IDF package, or `IDF_PATH`). It covers version
+Node.js, OpenSSL development libraries via `pkg-config`, and PlatformIO's ESP-IDF
+package, or `IDF_PATH`). It covers version
 ordering, malformed/untrusted release metadata, partition bounds, concurrent
 updates, physical confirmation, wrong-chip images, partial transfers, task
 creation failure, daily scheduling, hourly retries, connectivity gates, dismissal,
-and web controls. Build the `s3` and `native` environments to
+web controls, independent Bluetooth versioning, release source-change detection,
+missing/malformed asset digests, corrupted downloads, and published checksums. Build the `s3` and `native` environments to
 check device integration and the portable UI. The native Settings check shows
 a sample available release and simulates its download/confirmation flow.
 

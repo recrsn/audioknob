@@ -3,6 +3,7 @@
 import os
 from pathlib import Path
 import subprocess
+import shlex
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,12 +26,15 @@ with tempfile.TemporaryDirectory(prefix='audioknob-ota-') as temp:
                'freertos/FreeRTOS.h', 'freertos/task.h']
     for header in headers:
         (stubs / header).write_text('#include "mock_sdk.h"\n')
+    (stubs / 'mbedtls').mkdir()
+    (stubs / 'mbedtls/sha256.h').write_text('#include "mock_sha.h"\n')
+    openssl = shlex.split(subprocess.check_output(['pkg-config', '--cflags', '--libs', 'openssl'], text=True))
     binary = str(Path(temp) / 'ota')
     subprocess.run([
         'cc', '-std=c11', '-D_POSIX_C_SOURCE=200809L', '-Wall', '-Wextra', '-Werror',
         '-fsanitize=address,undefined', '-I' + str(stubs), '-I' + str(NET),
         '-I' + str(Path(__file__).parent), str(NET / 'ota.c'),
-        str(Path(__file__).with_name('test_ota.c')), '-o', binary,
+        str(Path(__file__).with_name('test_ota.c')), *openssl, '-o', binary,
     ], check=True)
     subprocess.run([binary], check=True)
     for header in ['esp_timer.h', 'uart_link.h']:
@@ -46,3 +50,5 @@ with tempfile.TemporaryDirectory(prefix='audioknob-ota-') as temp:
     ], check=True)
     subprocess.run([binary], check=True)
 subprocess.run(['node', str(Path(__file__).with_name('test_web.js'))], check=True)
+
+subprocess.run(['python3', str(Path(__file__).with_name('test_release_ci.py'))], check=True)

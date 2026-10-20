@@ -475,8 +475,11 @@ function renderUpdate(s) {
   $("releases3").hidden = !r.s3;
   $("releasebt").hidden = !r.bluetooth;
   $("releases3").disabled = $("releasebt").disabled = locked || r.checking;
+  setText("releases3", `Download main ${r.s3Version || r.tag}`);
+  setText("releasebt", `Download Bluetooth ${r.bluetoothVersion || r.tag}`);
+  const available = [r.s3 && `Main ${r.s3Version || r.tag}`, r.bluetooth && `Bluetooth ${r.bluetoothVersion || r.tag}`].filter(Boolean).join(" · ");
   setText("releasehint", r.checking ? "Checking GitHub…" : r.error ? r.error :
-    r.s3 || r.bluetooth ? `Update available: ${r.tag}. Confirm on the device after downloading.` :
+    r.s3 || r.bluetooth ? `Update available: ${available}. Confirm on the device after downloading.` :
     r.checked ? "You're up to date. Checks automatically every day." : "Checks automatically every day.");
   // Back from the restart: the bootloader rolls back an image that never
   // got this page up.

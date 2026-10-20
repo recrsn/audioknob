@@ -15,6 +15,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "https_download.h"
+#include "mbedtls/sha256.h"
 
 // Internal RAM: flash writes from PSRAM go through a bounce buffer anyway.
 #define CHUNK 4096
@@ -146,7 +147,8 @@ static bool start_receiving(void) {
     return ok;
 }
 
-static bool receive_image(size_t size, ota_read_fn read, void *ctx, const ota_target_t *expected) {
+static bool receive_image(size_t size, ota_read_fn read, void *ctx, const ota_target_t *expected,
+                          const uint8_t expected_sha256[32]) {
     audio_source_suspend(true);
     if (size < HEADER_LEN) {
         return fail("Not a firmware image");
@@ -173,8 +175,17 @@ static bool receive_image(size_t size, ota_read_fn read, void *ctx, const ota_ta
         error = k_sinks[target].begin(size);
         sink = error ? NULL : &k_sinks[target];
     }
+    mbedtls_sha256_context sha;
+    mbedtls_sha256_init(&sha);
+    if (!error && expected_sha256 && mbedtls_sha256_starts(&sha, 0) != 0) {
+        error = "Couldn't start checksum verification";
+    }
     unsigned percent = 0;
     for (size_t done = 0; !error;) {
+        if (expected_sha256 && mbedtls_sha256_update(&sha, (const uint8_t *)buf, len) != 0) {
+            error = "Checksum verification failed";
+            break;
+        }
         if (!sink->write(buf, len)) {
             error = "Flash write failed";
             break;
@@ -193,6 +204,13 @@ static bool receive_image(size_t size, ota_read_fn read, void *ctx, const ota_ta
         }
     }
     free(buf);
+    if (!error && expected_sha256) {
+        uint8_t digest[32];
+        if (mbedtls_sha256_finish(&sha, digest) != 0 || memcmp(digest, expected_sha256, sizeof(digest))) {
+            error = "Release checksum mismatch";
+        }
+    }
+    mbedtls_sha256_free(&sha);
 
     if (error) {
         if (sink) {
@@ -211,13 +229,14 @@ static bool receive_image(size_t size, ota_read_fn read, void *ctx, const ota_ta
 }
 
 bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
-    return start_receiving() && receive_image(size, read, ctx, NULL);
+    return start_receiving() && receive_image(size, read, ctx, NULL, NULL);
 }
 
 typedef struct {
     char *url;
     size_t size;
     ota_target_t target;
+    uint8_t sha256[32];
 } download_t;
 
 static int read_download(void *ctx, char *buf, size_t len) {
@@ -235,7 +254,7 @@ static void download_task(void *arg) {
         if (length > 0 && (uint64_t)length != download->size) {
             fail("Release image size changed; check again");
         } else {
-            receive_image(download->size, read_download, client, &download->target);
+            receive_image(download->size, read_download, client, &download->target, download->sha256);
         }
         esp_http_client_cleanup(client);
     }
@@ -244,7 +263,7 @@ static void download_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-bool ota_download(const char *url, size_t size, ota_target_t target) {
+bool ota_download(const char *url, size_t size, ota_target_t target, const uint8_t sha256[32]) {
     download_t *download = calloc(1, sizeof(*download));
     if (!download) {
         return false;
@@ -252,6 +271,7 @@ bool ota_download(const char *url, size_t size, ota_target_t target) {
     download->url = strdup(url);
     download->size = size;
     download->target = target;
+    memcpy(download->sha256, sha256, sizeof(download->sha256));
     // Reserve before returning to the web task: uploads and on-device
     // confirmation cannot race the TLS handshake or background download.
     if (!download->url || !start_receiving()) {

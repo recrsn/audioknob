@@ -45,6 +45,35 @@ bool release_version_newer(const char *release, const char *running) {
     return false;
 }
 
+static int hex_digit(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+static bool asset_digest(const cJSON *digest, uint8_t out[32]) {
+    if (!cJSON_IsString(digest) || strlen(digest->valuestring) != 71 ||
+        strncmp(digest->valuestring, "sha256:", 7)) {
+        return false;
+    }
+    for (unsigned i = 0; i < 32; i++) {
+        int high = hex_digit(digest->valuestring[7 + i * 2]);
+        int low = hex_digit(digest->valuestring[8 + i * 2]);
+        if (high < 0 || low < 0) {
+            return false;
+        }
+        out[i] = (high << 4) | low;
+    }
+    return true;
+}
+
 bool release_manifest_parse(const char *text, const char *repo, release_manifest_t *out) {
     memset(out, 0, sizeof(*out));
     cJSON *json = cJSON_Parse(text);
@@ -80,10 +109,23 @@ bool release_manifest_parse(const char *text, const char *repo, release_manifest
                 strncmp(url->valuestring, prefix, strlen(prefix))) {
                 continue;
             }
+            if (!asset_digest(cJSON_GetObjectItemCaseSensitive(asset, "digest"), dest->sha256)) {
+                ok = false;
+                break;
+            }
+            cJSON *label = cJSON_GetObjectItemCaseSensitive(asset, "label");
+            const char *version = out->tag;
+            if (cJSON_IsString(label) && !strncmp(label->valuestring, "version:", 8)) {
+                version = label->valuestring + 8;
+                if (!version[0] || strlen(version) >= sizeof(dest->version)) {
+                    continue;
+                }
+            }
+            strcpy(dest->version, version);
             strcpy(dest->url, url->valuestring);
             dest->size = (size_t)size->valuedouble;
         }
-        ok = out->s3.size || out->bluetooth.size;
+        ok = ok && (out->s3.size || out->bluetooth.size);
     }
     cJSON_Delete(json);
     if (!ok) {
