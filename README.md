@@ -1,6 +1,6 @@
 # AudioKnob
 
-Firmware that turns the [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.waveshare.com/) into a desk speaker first and a desk companion second: a wireless audio front-end with a round touch display, a rotary knob, and a handful of small desk apps.
+Firmware that turns the [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.waveshare.com/esp32-s3-knob-touch-lcd-1.8.htm) into a desk speaker first and a desk companion second: a wireless audio front-end with a round touch display, a rotary knob, and a handful of small desk apps.
 
 <p align="center">
   <img src="docs/screenshots/home-now-playing.png" width="240" alt="Clock face with a resume card for the paused track">
