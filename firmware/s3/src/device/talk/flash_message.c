@@ -5,6 +5,7 @@
 #include "device_name.h"
 #include "esp_random.h"
 #include "esp_heap_caps.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/queue.h"
@@ -18,6 +19,7 @@
 #define OUTBOX_MAX 8
 #define QUEUE_MAX 8
 #define STORE_VERSION 2
+static const char *TAG = "flash_message";
 static SemaphoreHandle_t s_lock;
 static QueueHandle_t s_jobs;
 typedef struct {
@@ -157,47 +159,20 @@ bool flash_message_send(uint32_t peer, const char *text, char id[17]) {
     xSemaphoreGive(s_lock);
     return ok;
 }
-bool flash_message_ack(const char *id) {
+// The worker resolves the ID: it holds s_lock through flash writes, which the
+// UI and web callers must not wait on.
+static bool enqueue_by_id(const char *id, bool ack) {
     if (!valid_id(id))
         return false;
-    bool ok = false;
-    if (xSemaphoreTake(s_lock, 0) != pdTRUE)
-        return false;
-    for (int i = 0; i < s_inbox.count; i++) {
-        message_t *m = &s_inbox.items[i];
-        if (strcmp(m->id, id) || m->local || !m->peer)
-            continue;
-        if (m->acknowledged || m->pending) {
-            ok = true;
-            break;
-        }
-        job_t job = {.ack = true, .message = *m};
-        ok = xQueueSend(s_jobs, &job, 0) == pdTRUE;
-        if (ok) {
-            m->pending = 1;
-            m->failed = 0;
-        }
-        break;
-    }
-    xSemaphoreGive(s_lock);
-    return ok;
+    job_t job = {.ack = ack, .remove = !ack};
+    snprintf(job.message.id, sizeof(job.message.id), "%s", id);
+    return xQueueSend(s_jobs, &job, 0) == pdTRUE;
+}
+bool flash_message_ack(const char *id) {
+    return enqueue_by_id(id, true);
 }
 bool flash_message_delete(const char *id) {
-    if (!valid_id(id))
-        return false;
-    bool ok = false;
-    if (xSemaphoreTake(s_lock, 0) != pdTRUE)
-        return false;
-    for (int i = 0; i < s_inbox.count; i++)
-        if (!strcmp(s_inbox.items[i].id, id) && !s_inbox.items[i].pending) {
-            job_t job = {.remove = true, .message = s_inbox.items[i]};
-            ok = xQueueSend(s_jobs, &job, 0) == pdTRUE;
-            if (ok)
-                s_inbox.items[i].pending = 1;
-            break;
-        }
-    xSemaphoreGive(s_lock);
-    return ok;
+    return enqueue_by_id(id, false);
 }
 bool flash_message_add_voice(uint32_t peer, const char *sender, const char *id, uint32_t duration_ms, bool local) {
     if (!valid_id(id) || !sender || strlen(sender) > 32)
@@ -349,6 +324,26 @@ cJSON *flash_message_json(void) {
     xSemaphoreGive(s_lock);
     return root;
 }
+// Fills in the received item to acknowledge, once: repeat requests while one
+// is in flight or done are dropped.
+static bool claim_ack(message_t *out) {
+    bool ok = false;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < s_inbox.count; i++) {
+        message_t *m = &s_inbox.items[i];
+        if (strcmp(m->id, out->id))
+            continue;
+        ok = !m->local && m->peer && !m->acknowledged && !m->pending;
+        if (ok) {
+            m->pending = 1;
+            m->failed = 0;
+            *out = *m;
+        }
+        break;
+    }
+    xSemaphoreGive(s_lock);
+    return ok;
+}
 static void worker(void *arg) {
     (void)arg;
     job_t job;
@@ -365,10 +360,10 @@ static void worker(void *arg) {
                     memmove(&s_inbox.items[i], &s_inbox.items[i + 1], (s_inbox.count - i - 1) * sizeof(message_t));
                     memset(&s_inbox.items[--s_inbox.count], 0, sizeof(message_t));
                     if (!save_inbox()) {
+                        // Keep the item; its flags describe the acknowledgement, not this.
                         s_inbox = before;
-                        s_inbox.items[i].pending = 0;
-                        s_inbox.items[i].failed = 1;
-                    } else if (job.message.voice) {
+                        ESP_LOGW(TAG, "Couldn't delete %s", job.message.id);
+                    } else if (before.items[i].voice) {
                         char file[24];
                         snprintf(file, sizeof(file), "%s.ogg", job.message.id);
                         message_store_remove(file);
@@ -378,6 +373,8 @@ static void worker(void *arg) {
             xSemaphoreGive(s_lock);
             continue;
         }
+        if (job.ack && !claim_ack(&job.message))
+            continue;
         cJSON *json = cJSON_CreateObject();
         cJSON_AddStringToObject(json, "id", job.message.id);
         if (!job.ack) {

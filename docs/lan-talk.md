@@ -17,8 +17,8 @@ hardware checks below before a fast-forward to main.
   an inbox item; it does not play automatically. Notes stop at 60 seconds or the
   recording size limit. Recordings shorter than 200 ms are discarded.
 - **Inbox:** lists stored text messages and voice notes. Tap an item to read it or
-  play its audio. **Acknowledge** sends a separate receipt back to its sender.
-  Acknowledging is optional. Deleting removes the local copy. “Hold to record
+  play its audio. Opening a received item sends a receipt back to its sender
+  automatically; a failed receipt can be retried by tapping it. Deleting removes the local copy. “Hold to record
   note” saves a local recording without sending it.
 
 Sending is fire and forget: an API request returns after the send is queued,
@@ -38,7 +38,7 @@ from `GET /api/talk`.
 | `GET /api/talk` | Discovered `peers` (`ip`, `name`), state, current peer, volume |
 | `POST /api/messages` `action=send&peer=192.168.1.50&text=Tea%20is%20ready` | `202 {"id":"…","status":"queued"}`; text is 1–160 UTF-8 bytes |
 | `GET /api/messages` | Persistent `inbox` and `outbox`; each has `id`, `peer`, `sender`, `text`, `pending`, `delivered`, `failed`, `acknowledged`, `voice`, `local`, `durationMs` |
-| `POST /api/messages` `action=ack&id=…` | Queues a manual acknowledgement for a received item |
+| `POST /api/messages` `action=ack&id=…` | Queues the acknowledgement the device sends when an item is opened |
 | `POST /api/messages` `action=delete&id=…` | Queues removal of a local inbox item and its audio, if any |
 | `POST /api/voice` `action=record` | Begins a local recording and returns its ID with `202` |
 | `POST /api/voice` `action=record&peer=192.168.1.50` | Records, then queues a voice note for that peer |
@@ -51,7 +51,7 @@ from `GET /api/talk`.
 Talk states: 0 idle, 1 connecting, 2 sending, 3 receiving. Voice-note states:
 0 idle, 1 recording, 2 saving/loading, 3 playing. IDs are sixteen lowercase hex
 characters. Acknowledgement is distinct from delivery: `delivered` means the
-receiver saved the item; `acknowledged` means someone explicitly acknowledged it.
+receiver saved the item; `acknowledged` means it was opened on the receiver.
 
 ## Protocol and audio
 
@@ -85,7 +85,7 @@ arrive while a voice session is active:
 - `/messages/voice?id=<id>`, `audio/ogg`: a saved mono Opus note, one 20 ms Opus
   packet per Ogg page. Sender name comes from `X-AudioKnob-Name`.
 
-An RTSP 200 on a message means it was saved. It is not a manual acknowledgement.
+An RTSP 200 on a message means it was saved. It is not an acknowledgement.
 Repeated IDs from the same sender are idempotent. Text requests are bounded to
 1 KiB; voice notes to 300 KiB and 60 seconds. Ogg CRCs, page sequence, granules,
 mono Opus headers and packet durations are checked before a note is accepted.
@@ -135,7 +135,7 @@ receive and delete notes using a host Opus adapter. They do not prove ESP codec 
 power-loss behaviour or radio/WiFi performance on hardware.
 
 The native preview has sample peers and messages. `T` toggles incoming Talk;
-hold the centre button to simulate outgoing voice, and use Inbox to check manual
+hold the centre button to simulate outgoing voice, and use Inbox to check automatic
 acknowledgements. Native voice recording/playback is simulated.
 
 Before merging: install the branch on Ami-Desk; check first-use data mount and

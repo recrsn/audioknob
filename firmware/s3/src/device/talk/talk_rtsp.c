@@ -29,6 +29,12 @@ static void timeout(int fd) {
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 }
+// A message's reply comes only after the receiver has saved it to flash:
+// ~650 ms for text, longer for a voice note.
+static void reply_timeout(int fd, int seconds) {
+    struct timeval tv = {.tv_sec = seconds};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+}
 static bool send_body(int fd, const void *data, size_t remaining) {
     const char *body = data;
     while (remaining) {
@@ -151,6 +157,7 @@ bool talk_rtsp_message(uint32_t ip, const char *path, const char *json) {
     int fd = connect_peer(ip);
     if (fd < 0)
         return false;
+    reply_timeout(fd, 5);
     bool ok =
         exchange(fd, "SET_PARAMETER", path, 1, NULL, NULL, "application/json", json, strlen(json), NULL, NULL, 0, NULL);
     close(fd);
@@ -160,6 +167,7 @@ bool talk_rtsp_message_bytes(uint32_t ip, const char *path, const char *type, co
     int fd = connect_peer(ip);
     if (fd < 0)
         return false;
+    reply_timeout(fd, 20);
     bool ok = exchange(fd, "SET_PARAMETER", path, 1, NULL, NULL, type, data, length, NULL, NULL, 0, NULL);
     close(fd);
     return ok;

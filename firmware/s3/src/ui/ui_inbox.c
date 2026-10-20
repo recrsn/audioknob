@@ -42,12 +42,11 @@ static void render(void) {
     if (m) {
         ui_label_set_text(ib.sender, m->sender);
         ui_label_set_text(ib.text, m->text);
+        // Opening a message acknowledges it; only a failed receipt is tapped.
         ui_label_set_text(ib.ack, m->acknowledged ? "Acknowledged"
-                                  : m->pending    ? "Sending acknowledgement"
                                   : m->failed     ? "Retry acknowledgement"
-                                                  : "Acknowledge");
-        lv_obj_set_style_text_color(ib.ack,
-                                    lv_color_hex(m->acknowledged || m->pending ? UI_COLOR_TEXT_DIM : UI_TINT_TALK), 0);
+                                                  : "Sending acknowledgement");
+        lv_obj_set_style_text_color(ib.ack, lv_color_hex(m->failed ? UI_TINT_TALK : UI_COLOR_TEXT_DIM), 0);
     }
     for (int i = 0; i < UI_INBOX_MAX; i++) {
         ui_set_visible(ib.rows[i], i < ib.data->count);
@@ -60,14 +59,17 @@ static void render(void) {
 static void open_message(lv_event_t *e) {
     int index = (int)(intptr_t)lv_event_get_user_data(e);
     if (index < ib.data->count) {
-        snprintf(ib.selected, sizeof(ib.selected), "%s", ib.data->messages[index].id);
+        ui_message_t *m = &ib.data->messages[index];
+        snprintf(ib.selected, sizeof(ib.selected), "%s", m->id);
+        if (!m->local && !m->acknowledged && !m->pending && !m->failed && ib.on_ack)
+            ib.on_ack(m->id);
         render();
     }
 }
 static void acknowledge(lv_event_t *e) {
     (void)e;
     ui_message_t *m = selected();
-    if (m && !m->pending && !m->acknowledged && ib.on_ack)
+    if (m && m->failed && !m->pending && !m->acknowledged && ib.on_ack)
         ib.on_ack(m->id);
 }
 static void remove_message(lv_event_t *e) {
@@ -124,7 +126,7 @@ static bool status(char *buf, size_t len) {
     }
     int count = 0;
     for (int i = 0; i < ib.data->count; i++)
-        if (!ib.data->messages[i].acknowledged)
+        if (!ib.data->messages[i].acknowledged && !ib.data->messages[i].local)
             count++;
     if (!count)
         return false;
@@ -202,7 +204,7 @@ void inbox_page_build(lv_obj_t *screen) {
     lv_obj_set_width(ib.text, lv_pct(100));
     lv_label_set_long_mode(ib.text, LV_LABEL_LONG_MODE_WRAP);
     lv_obj_set_style_text_align(ib.text, LV_TEXT_ALIGN_CENTER, 0);
-    ib.ack = label(screen, UI_FONT_LABEL, UI_TINT_TALK, "Acknowledge");
+    ib.ack = label(screen, UI_FONT_LABEL, UI_COLOR_TEXT_DIM, "");
     lv_obj_align(ib.ack, LV_ALIGN_CENTER, 0, 88);
     clickable(ib.ack, acknowledge);
     ib.back = label(screen, UI_FONT_LABEL, UI_COLOR_TEXT_DIM, "Inbox");

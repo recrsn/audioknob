@@ -90,6 +90,9 @@ int main(int argc, char **argv) {
         wait_idle();
         flash_message_snapshot(&inbox);
         assert(inbox.messages[0].acknowledged && atomic_load(&acks) == 1);
+        assert(flash_message_ack("0123456789abcdef"));
+        wait_idle();
+        assert(atomic_load(&acks) == 1);
         char id[17];
         assert(flash_message_send(peer, "Reply", id));
         wait_idle();
