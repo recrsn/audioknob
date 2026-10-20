@@ -70,3 +70,25 @@ void xTaskNotifyGive(TaskHandle_t task);
 int64_t esp_timer_get_time(void);
 uint32_t uart_link_get_esp32_firmware(hello_t *out);
 bool esp_http_client_is_complete_data_received(esp_http_client_handle_t client);
+
+typedef int esp_err_t;
+#define HTTP_TRANSPORT_OVER_SSL 2
+#define HTTP_TRANSPORT_OVER_TCP 1
+typedef struct {
+    const char *url;
+    int timeout_ms;
+    int buffer_size_tx;
+    int (*crt_bundle_attach)(void *);
+    const char *user_agent;
+    bool disable_auto_redirect;
+} esp_http_client_config_t;
+int esp_crt_bundle_attach(void *);
+const char *esp_err_to_name(esp_err_t error);
+esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *config);
+int esp_http_client_set_header(esp_http_client_handle_t client, const char *name, const char *value);
+int esp_http_client_get_transport_type(esp_http_client_handle_t client);
+int esp_http_client_open(esp_http_client_handle_t client, int write_len);
+int64_t esp_http_client_fetch_headers(esp_http_client_handle_t client);
+int esp_http_client_get_status_code(esp_http_client_handle_t client);
+int esp_http_client_set_redirection(esp_http_client_handle_t client);
+int esp_http_client_close(esp_http_client_handle_t client);

@@ -49,6 +49,15 @@ with tempfile.TemporaryDirectory(prefix='audioknob-ota-') as temp:
         str(Path(__file__).with_name('test_github_release.c')), '-lm', '-o', binary,
     ], check=True)
     subprocess.run([binary], check=True)
+    (stubs / 'esp_crt_bundle.h').write_text('#include "mock_sdk.h"\n')
+    binary = str(Path(temp) / 'https_download')
+    subprocess.run([
+        'cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
+        '-I' + str(stubs), '-I' + str(NET), '-I' + str(Path(__file__).parent),
+        str(NET / 'https_download.c'), str(Path(__file__).with_name('test_https_download.c')),
+        '-o', binary,
+    ], check=True)
+    subprocess.run([binary], check=True)
 subprocess.run(['node', str(Path(__file__).with_name('test_web.js'))], check=True)
 
 subprocess.run(['python3', str(Path(__file__).with_name('test_release_ci.py'))], check=True)

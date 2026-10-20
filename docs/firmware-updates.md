@@ -105,7 +105,10 @@ ordering, malformed/untrusted release metadata, partition bounds, concurrent
 updates, physical confirmation, wrong-chip images, partial transfers, task
 creation failure, daily scheduling, hourly retries, connectivity gates, dismissal,
 web controls, independent Bluetooth versioning, release source-change detection,
-missing/malformed asset digests, corrupted downloads, and published checksums. Build the `s3` and `native` environments to
+missing/malformed asset digests, corrupted downloads, published checksums, and
+GitHub CDN redirects whose signed request lines exceed ESP-IDF's default
+512-byte transmit buffer. The release HTTP client reserves 2048 bytes for
+these request lines and logs the failing stage if a request cannot be opened. Build the `s3` and `native` environments to
 check device integration and the portable UI. The native Settings check shows
 a sample available release and simulates its download/confirmation flow.
 
