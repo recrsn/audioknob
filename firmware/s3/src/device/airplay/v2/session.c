@@ -295,6 +295,8 @@ static int setup_stream(ap2_conn_t *conn, const bplist_t *pl, bp_obj stream, bpw
         }
         s.rtp = rtp_start(key, true, &data_port, &control_port);
         if (!s.rtp) {
+            ESP_LOGE(TAG, "conn %d: can't start the realtime stream", conn->id);
+            ap2_log_heap();
             return 500;
         }
         bpw_dict_set(w, d, "type", bpw_uint(w, TYPE_REALTIME));
@@ -302,9 +304,12 @@ static int setup_stream(ap2_conn_t *conn, const bplist_t *pl, bp_obj stream, bpw
         ESP_LOGI(TAG, "conn %d: realtime stream", conn->id);
     } else if (type == TYPE_BUFFERED) {
         size_t buffer_size;
-        s.rtp = rtp_start(key, false, NULL, &control_port);
-        s.buffered = s.rtp ? buffered_start(key, &data_port, &buffer_size) : NULL;
-        if (!s.buffered) {
+        // Buffered first: its decoder needs the largest internal stack.
+        s.buffered = buffered_start(key, &data_port, &buffer_size);
+        s.rtp = s.buffered ? rtp_start(key, false, NULL, &control_port) : NULL;
+        if (!s.rtp) {
+            ESP_LOGE(TAG, "conn %d: can't start the buffered stream", conn->id);
+            ap2_log_heap();
             stop_streams();
             return 500;
         }

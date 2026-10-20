@@ -282,7 +282,11 @@ static void to_mdns(const txt_t *t, int n, mdns_txt_item_t *items) {
 // the latter with what AirPlay 1 senders look for too.
 static esp_err_t advertise_airplay(const char *name) {
     unsigned long f_lo = (unsigned long)(FEATURES & 0xFFFFFFFF), f_hi = (unsigned long)(FEATURES >> 32);
-    static txt_t airplay[16];
+    // mdns_service_add() copies the records, so they only live for the call.
+    txt_t *airplay = heap_caps_malloc(16 * sizeof(*airplay), MALLOC_CAP_SPIRAM);
+    if (!airplay) {
+        return ESP_ERR_NO_MEM;
+    }
     mdns_txt_item_t items[16];
 
     int n = 0;
@@ -302,12 +306,17 @@ static esp_err_t advertise_airplay(const char *name) {
     n = add_txt(airplay, n, "srcvers", "%s", AP2_SRCVERS);
     n = add_txt(airplay, n, "fv", "%s", AP2_FIRMWARE);
     to_mdns(airplay, n, items);
-    return mdns_service_add(name, "_airplay", "_tcp", AP2_RTSP_PORT, items, (size_t)n);
+    esp_err_t err = mdns_service_add(name, "_airplay", "_tcp", AP2_RTSP_PORT, items, (size_t)n);
+    heap_caps_free(airplay);
+    return err;
 }
 
 static esp_err_t advertise_raop(const char *name) {
     unsigned long f_lo = (unsigned long)(FEATURES & 0xFFFFFFFF), f_hi = (unsigned long)(FEATURES >> 32);
-    static txt_t raop[20];
+    txt_t *raop = heap_caps_malloc(20 * sizeof(*raop), MALLOC_CAP_SPIRAM);
+    if (!raop) {
+        return ESP_ERR_NO_MEM;
+    }
     mdns_txt_item_t items[20];
 
     int m = 0;
@@ -331,7 +340,9 @@ static esp_err_t advertise_raop(const char *name) {
     to_mdns(raop, m, items);
     char instance[NAME_MAX_LEN + 16];
     snprintf(instance, sizeof(instance), "%s@%s", s_device_hex, name);
-    return mdns_service_add(instance, "_raop", "_tcp", AP2_RTSP_PORT, items, (size_t)m);
+    esp_err_t err = mdns_service_add(instance, "_raop", "_tcp", AP2_RTSP_PORT, items, (size_t)m);
+    heap_caps_free(raop);
+    return err;
 }
 
 // AirPlay 2 senders find the receiver through _airplay, AirPlay 1 senders

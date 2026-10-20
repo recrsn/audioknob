@@ -7,6 +7,7 @@
 #include "audio_out.h"
 #include "audio_source.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -116,7 +117,8 @@ static const pattern_t k_patterns[] = {
 
 static const char *TAG = "alarm_sound";
 
-static float s_lut[LUT_SIZE + 1];
+// PSRAM: internal RAM is what AirPlay's buffered stream runs short of.
+static float *s_lut;
 static TaskHandle_t s_task;
 
 // Posted by the API: 0, or kind + 1, plus TARGET_ONCE and a generation
@@ -359,6 +361,8 @@ static void alarm_task(void *arg) {
 }
 
 void alarm_sound_init(void) {
+    s_lut = heap_caps_malloc((LUT_SIZE + 1) * sizeof(*s_lut), MALLOC_CAP_SPIRAM);
+    ESP_ERROR_CHECK(s_lut ? ESP_OK : ESP_ERR_NO_MEM);
     for (uint32_t i = 0; i <= LUT_SIZE; i++) {
         s_lut[i] = sinf(2.0f * (float)M_PI * i / LUT_SIZE);
     }

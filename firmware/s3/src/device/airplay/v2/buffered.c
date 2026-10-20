@@ -420,13 +420,14 @@ buffered_t *buffered_start(const uint8_t key[32], uint16_t *port, size_t *buffer
         destroy(b);
         return NULL;
     }
-    if (!ap2_task_start(reader_task, "ap2_buf_rx", READER_STACK, b, READER_PRIO, TASK_CORE, false)) {
+    // Largest internal stack first, while fragmentation still leaves a block for it.
+    if (!ap2_task_start(decoder_task, "ap2_buf_dec", DECODER_STACK, b, DECODER_PRIO, TASK_CORE, false)) {
         destroy(b);
         return NULL;
     }
-    if (!ap2_task_start(decoder_task, "ap2_buf_dec", DECODER_STACK, b, DECODER_PRIO, TASK_CORE, false)) {
+    if (!ap2_task_start(reader_task, "ap2_buf_rx", READER_STACK, b, READER_PRIO, TASK_CORE, false)) {
         b->stop = true;
-        xSemaphoreTake(b->reader_done, portMAX_DELAY);
+        xSemaphoreTake(b->decoder_done, portMAX_DELAY);
         destroy(b);
         return NULL;
     }

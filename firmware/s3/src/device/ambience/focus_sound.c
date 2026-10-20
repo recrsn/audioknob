@@ -2,6 +2,7 @@
 
 #include "audio_out.h"
 #include "audio_source.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -40,8 +41,9 @@ static ambience_kind_t s_kind;
 static float s_gain_target;
 static volatile float s_cpu_pct;
 
-static float s_buf[CHUNK_FRAMES * 2];
-static int16_t s_pcm[CHUNK_FRAMES * 2];
+// PSRAM: internal RAM is what AirPlay's buffered stream runs short of.
+static float *s_buf;
+static int16_t *s_pcm;
 
 typedef struct {
     bool running; // holding the DAC and writing
@@ -185,7 +187,9 @@ static void player_task(void *arg) {
 void focus_sound_init(void) {
     s_synth = ambience_synth_create(AUDIO_OUT_SAMPLE_RATE, esp_random());
     s_write_lock = xSemaphoreCreateMutex();
-    ESP_ERROR_CHECK(s_synth && s_write_lock ? ESP_OK : ESP_ERR_NO_MEM);
+    s_buf = heap_caps_malloc(CHUNK_FRAMES * 2 * sizeof(*s_buf), MALLOC_CAP_SPIRAM);
+    s_pcm = heap_caps_malloc(CHUNK_FRAMES * 2 * sizeof(*s_pcm), MALLOC_CAP_SPIRAM);
+    ESP_ERROR_CHECK(s_synth && s_write_lock && s_buf && s_pcm ? ESP_OK : ESP_ERR_NO_MEM);
     audio_source_set_local_preempted(on_preempted);
     BaseType_t ok = xTaskCreatePinnedToCore(player_task, "focus_sound", TASK_STACK, NULL, TASK_PRIO, &s_task,
                                             TASK_CORE);
