@@ -19,7 +19,7 @@ static uint32_t step_s(uint32_t s) {
 
 static void timer_changed(countdown_t *cd) {
     static const char *const hints[] = {
-        [COUNTDOWN_IDLE] = "Press to start",
+        [COUNTDOWN_IDLE] = "Tap play to start",
         [COUNTDOWN_RUNNING] = "Running",
         [COUNTDOWN_PAUSED] = "Paused",
         [COUNTDOWN_ALERT] = "Time's up",
