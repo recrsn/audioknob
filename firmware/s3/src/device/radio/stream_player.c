@@ -32,9 +32,10 @@
 #define DECODE_ERRORS_RESET 20
 #define POLL_TICKS pdMS_TO_TICKS(20)
 
-// Audio-path tasks keep internal stacks (TLS handshakes and the AAC decoder
-// are the deep ones). Decoding sits where AirPlay 2's AAC decoder does,
-// below its player; the two never run at once.
+// These tasks never write flash, so their stacks can live in PSRAM. Keep
+// the full stack depth for TLS/AAC without requiring two contiguous 8 KB
+// blocks of scarce internal RAM (also used by WiFi and microphone DMA).
+// Decoding sits where AirPlay 2's AAC decoder does, below its player.
 #define NET_STACK 8192
 #define NET_PRIO 5
 #define DEC_STACK 8192
@@ -56,6 +57,14 @@ typedef enum {
 } net_phase_t;
 
 static const char *TAG = "stream_player";
+
+static void log_memory_failure(const char *allocation) {
+    ESP_LOGE(TAG, "no memory for %s: internal free %u, largest %u; PSRAM free %u, largest %u", allocation,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+}
 
 static SemaphoreHandle_t s_lock;
 static SemaphoreHandle_t s_decode_done;
@@ -425,7 +434,7 @@ static void net_task(void *arg) {
         TaskHandle_t dec = NULL;
         s_decode_quit = false;
         if (ring && xTaskCreatePinnedToCoreWithCaps(decode_task, "radio_dec", DEC_STACK, ring, DEC_PRIO, &dec,
-                                                    TASK_CORE, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) == pdPASS) {
+                                                    TASK_CORE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS) {
             xSemaphoreTake(s_lock, portMAX_DELAY);
             s_ring = ring;
             xSemaphoreGive(s_lock);
@@ -437,7 +446,7 @@ static void net_task(void *arg) {
             s_ring = NULL;
             xSemaphoreGive(s_lock);
         } else {
-            ESP_LOGE(TAG, "no memory to start the stream");
+            log_memory_failure(ring ? "decoder task" : "stream ring");
             set_net_phase(NET_FAILED, "Out of memory");
             net_t idle = {.gen = s_gen};
             wait_for_change(&idle, UINT32_MAX);
@@ -493,9 +502,10 @@ void stream_player_play(const char *url) {
     changed_locked();
     if (!s_running) {
         if (xTaskCreatePinnedToCoreWithCaps(net_task, "radio_net", NET_STACK, NULL, NET_PRIO, &s_net_task, TASK_CORE,
-                                            MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) == pdPASS) {
+                                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS) {
             s_running = true;
         } else {
+            log_memory_failure("network task");
             s_net_phase = NET_FAILED;
             snprintf(s_status.error, sizeof(s_status.error), "Out of memory");
             changed_locked();

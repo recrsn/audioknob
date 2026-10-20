@@ -26,11 +26,12 @@ typedef struct {
     bool right_slot;
 } mic_config_t;
 
+// Initializes ownership only; I2S and DMA memory exist only during capture.
 void mic_init(void);
 
 // Claims the mic and starts its clock; NULL config uses +30 dB and ESP-SR
 // mild noise suppression. Raw capture bypasses all processing. False if busy
-// or the capture/processing buffers cannot be allocated.
+// or the capture/processing resources cannot be initialized.
 bool mic_start(const mic_config_t *config);
 void mic_stop(void);
 

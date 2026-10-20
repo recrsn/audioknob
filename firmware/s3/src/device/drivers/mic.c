@@ -32,11 +32,20 @@ static uint32_t s_process_blocks;
 void mic_init(void) {
     s_owner = xSemaphoreCreateMutex();
     ESP_ERROR_CHECK(s_owner ? ESP_OK : ESP_ERR_NO_MEM);
+}
+
+// Even a disabled I2S channel holds internal DMA memory. Allocate it only
+// for a capture and release it in mic_stop(), while s_owner is held.
+static bool create_channel(bool right) {
     // PDM RX exists only on I2S0 on the S3.
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
     chan_cfg.dma_desc_num = DMA_DESC_NUM;
     chan_cfg.dma_frame_num = DMA_FRAME_NUM;
-    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &s_rx_chan));
+    esp_err_t err = i2s_new_channel(&chan_cfg, NULL, &s_rx_chan);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "can't create PDM RX: %s", esp_err_to_name(err));
+        return false;
+    }
 
     i2s_pdm_rx_config_t cfg = {
         .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG(MIC_SAMPLE_RATE),
@@ -46,17 +55,18 @@ void mic_init(void) {
             .din = MIC_DATA_GPIO,
         },
     };
+    cfg.slot_cfg.slot_mask = right ? I2S_PDM_SLOT_RIGHT : I2S_PDM_SLOT_LEFT;
     // 128x oversampling: a 2.048 MHz clock, mid-range for the mic, where
     // the default 64x (1.024 MHz) sits at its floor.
     cfg.clk_cfg.dn_sample_mode = I2S_PDM_DSR_16S;
-    ESP_ERROR_CHECK(i2s_channel_init_pdm_rx_mode(s_rx_chan, &cfg));
-    ESP_LOGI(TAG, "PDM RX ready (CLK=%d DATA=%d)", MIC_CLK_GPIO, MIC_DATA_GPIO);
-}
-
-static void apply_slot(bool right) {
-    i2s_pdm_rx_slot_config_t slot = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO);
-    slot.slot_mask = right ? I2S_PDM_SLOT_RIGHT : I2S_PDM_SLOT_LEFT;
-    ESP_ERROR_CHECK(i2s_channel_reconfig_pdm_rx_slot(s_rx_chan, &slot));
+    err = i2s_channel_init_pdm_rx_mode(s_rx_chan, &cfg);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "can't initialize PDM RX: %s", esp_err_to_name(err));
+        i2s_del_channel(s_rx_chan);
+        s_rx_chan = NULL;
+        return false;
+    }
+    return true;
 }
 
 bool mic_start(const mic_config_t *config) {
@@ -66,18 +76,32 @@ bool mic_start(const mic_config_t *config) {
         return false;
     }
     s_raw = cfg->raw;
+    if (!create_channel(cfg->right_slot)) {
+        xSemaphoreGive(s_owner);
+        return false;
+    }
     if (!s_raw) {
         s_process = mic_process_create(cfg->gain_db, cfg->noise_level);
         if (!s_process) {
             ESP_LOGW(TAG, "no memory for microphone processing");
+            i2s_del_channel(s_rx_chan);
+            s_rx_chan = NULL;
             xSemaphoreGive(s_owner);
             return false;
         }
     }
-    apply_slot(cfg->right_slot);
     s_input_frames = s_output_pos = s_output_frames = 0;
     s_process_us = s_process_blocks = 0;
-    ESP_ERROR_CHECK(i2s_channel_enable(s_rx_chan));
+    esp_err_t err = i2s_channel_enable(s_rx_chan);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "can't start PDM RX: %s", esp_err_to_name(err));
+        mic_process_destroy(s_process);
+        s_process = NULL;
+        i2s_del_channel(s_rx_chan);
+        s_rx_chan = NULL;
+        xSemaphoreGive(s_owner);
+        return false;
+    }
     if (!s_raw) {
         // Let the PDM decimator settle before exposing the first audio block.
         for (int i = 0; i < 5; i++) {
@@ -95,6 +119,8 @@ bool mic_start(const mic_config_t *config) {
 
 void mic_stop(void) {
     i2s_channel_disable(s_rx_chan);
+    i2s_del_channel(s_rx_chan);
+    s_rx_chan = NULL;
     mic_process_destroy(s_process);
     s_process = NULL;
     if (s_process_blocks) {

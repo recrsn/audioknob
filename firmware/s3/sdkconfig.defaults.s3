@@ -13,6 +13,8 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_USE_MALLOC=y
+# Radio task stacks use PSRAM; both tasks only read flash.
+CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y
 # Keep WiFi/lwIP buffers out of internal RAM; the LCD/I2S DMA needs it.
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 
