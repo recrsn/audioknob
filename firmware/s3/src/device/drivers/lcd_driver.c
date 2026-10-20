@@ -77,6 +77,7 @@ static i2c_master_bus_handle_t s_i2c_bus;
 static uint8_t s_brightness = CONFIG_AK_BACKLIGHT_DEFAULT_PCT;
 static bool s_backlight_on;
 static bool s_starting = true;
+static bool s_show_ui;
 
 void lcd_driver_lvgl_lock(void) {
     xSemaphoreTake(s_lvgl_mutex, portMAX_DELAY);
@@ -243,6 +244,14 @@ static void lvgl_task(void *arg) {
         lv_obj_invalidate(lv_screen_active());
 #endif
         uint32_t idle_ms = lv_timer_handler();
+        if (s_show_ui) {
+            // Rendering needs this task's stack, not app_main()'s smaller
+            // stack. Startup flushes wait for DMA before we light the panel.
+            lv_refr_now(NULL);
+            s_starting = false;
+            s_show_ui = false;
+            lcd_driver_set_backlight_on(true);
+        }
         lcd_driver_lvgl_unlock();
         if (idle_ms < LVGL_TASK_MIN_DELAY_MS) {
             idle_ms = LVGL_TASK_MIN_DELAY_MS;
@@ -336,9 +345,7 @@ void lcd_driver_backlight_init(void) {
 
 void lcd_driver_show_ui(void) {
     lv_obj_invalidate(lv_screen_active());
-    lv_refr_now(NULL);
-    s_starting = false;
-    lcd_driver_set_backlight_on(true);
+    s_show_ui = true;
 }
 
 static i2c_master_bus_handle_t touch_i2c_bus_init(void) {

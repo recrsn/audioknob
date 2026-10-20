@@ -15,7 +15,8 @@ void lcd_driver_backlight_init(void);
 // LVGL. Must run before ui_init() or any other LVGL call.
 void lcd_driver_init(void);
 
-// Render and finish transferring the first UI frame, then light the screen.
+// Ask the LVGL task to render the first UI frame, then light the screen
+// after the transfer completes.
 // Call once after UI/settings initialization, with the LVGL lock held.
 void lcd_driver_show_ui(void);
 
