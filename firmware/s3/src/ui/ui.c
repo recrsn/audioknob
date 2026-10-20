@@ -92,6 +92,10 @@ typedef struct {
     lv_obj_t *ring;
     lv_obj_t *source_icon;
     lv_obj_t *source_label;
+    // The top pill shows the time and source, unless something else wants
+    // the band: then that app's glyph and status, and a tap opens it.
+    lv_obj_t *pill_glyph;
+    int pill_app;
 
     // Shown when state->connected is false, so there's nothing to show a
     // tile/track for yet. For Bluetooth, tapping the chip opens a pairing
@@ -173,18 +177,19 @@ typedef struct {
     lv_obj_t *weather_icon;
     lv_obj_t *weather_temp;
     lv_obj_t *weather_sky;
-    lv_obj_t *weather_range;
-    // A third line under the weather, per the Settings page's "Show air
-    // quality": per reading, a glyph tinted by severity, then the value.
-    lv_obj_t *weather_air_row;
-    lv_obj_t *weather_air_icon[2];
-    lv_obj_t *weather_air[2];
-    // One per app, shown while that app has something in progress.
+    // The top band: one thing asking for attention (Talk, unread messages,
+    // air quality), a tap away from its page.
+    lv_obj_t *band;
+    lv_obj_t *band_glyph;
+    lv_obj_t *band_label;
+    int band_app;
+    // One per app, shown while that app has something in progress; Talk
+    // and the inbox show in the band instead.
     lv_obj_t *chips[UI_APP_COUNT];
     lv_obj_t *chip_labels[UI_APP_COUNT];
 
-    // What's playing, under the clock while a source is connected: the
-    // clock's way back to it, in place of the audio chip.
+    // What's playing under the clock, a paused track to resume, or that the
+    // device is ready to play: the clock's way back to the audio.
     struct {
         lv_obj_t *card;
         lv_obj_t *thumb;
@@ -208,6 +213,7 @@ typedef struct {
 typedef struct {
     bool wireless_connected;
     bool wireless_playing;
+    bool wireless_has_track;
 #ifdef AK_USB_AUDIO
     bool usb_playing;
 #endif
@@ -270,6 +276,8 @@ static void (*s_source_handler)(ui_source_t);
 // screen does; cleared by a home swipe or the next stream start.
 static bool s_pinned;
 static ui_source_t s_current_source = UI_SOURCE_AIRPLAY;
+// The time as the clock shows it, for the now-playing pill; empty unsynced.
+static char s_time[8];
 
 void ui_set_source_handler(void (*handler)(ui_source_t source)) {
     s_source_handler = handler;
@@ -286,6 +294,7 @@ static void transport_click_cb(lv_event_t *e) {
 }
 
 static void audio_chip_refresh(void);
+static void wireless_pill_refresh(bool waiting);
 
 // Avoids re-loading (and restarting screen-load animations for) a screen
 // that's already active, since ui_update_*() calls this on every state push.
@@ -365,8 +374,9 @@ static void launcher_open(int entry) {
 }
 
 // After playback stops, a source that's still connected keeps its screen up
-// this long before going home.
-#define AUDIO_LINGER_MS (300 * 1000)
+// this long before going home, where the clock's card resumes it. Long enough
+// to ride out the gap between tracks and a quick pause.
+#define AUDIO_LINGER_MS (10 * 1000)
 
 typedef struct {
     bool was_playing;
@@ -680,9 +690,9 @@ static void np_play_cb(lv_event_t *e) {
     }
 }
 
-// The clock face's top complication, heading its column: what's playing,
-// or with nothing connected, that the device is ready to. Its button
-// plays/pauses without leaving the clock.
+// The clock face's bottom complication, closing its column: what's playing
+// or paused, or with nothing connected, that the device is ready to. Its
+// button plays/pauses without leaving the clock.
 static void np_card_build(lv_obj_t *col) {
     lv_obj_t *card = lv_obj_create(col);
     lv_obj_remove_style_all(card);
@@ -690,7 +700,7 @@ static void np_card_build(lv_obj_t *col) {
     lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(card, np_card_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_set_size(card, NP_CARD_W, NP_CARD_H);
-    lv_obj_set_style_margin_bottom(card, FACE_COMP_GAP, 0);
+    lv_obj_set_style_margin_top(card, FACE_COMP_GAP, 0);
     lv_obj_set_style_pad_all(card, NP_CARD_PAD, 0);
     lv_obj_set_style_pad_column(card, UI_SPACE_S, 0);
     lv_obj_set_style_radius(card, UI_RADIUS_PILL, 0);
@@ -763,57 +773,33 @@ static void np_card_build(lv_obj_t *col) {
     lv_obj_add_event_cb(btn, np_play_cb, LV_EVENT_CLICKED, NULL);
 }
 
-// The clock face's bottom complication, two quiet lines -- conditions
-// glyph, temperature and sky, then the day's range -- opening the weather
-// page on tap.
+// Under the time, one quiet line -- conditions glyph, temperature and sky --
+// opening the weather page on tap.
 static void weather_complication_build(lv_obj_t *col) {
-    lv_obj_t *comp = lv_obj_create(col);
-    lv_obj_remove_style_all(comp);
-    lv_obj_remove_flag(comp, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_size(comp, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(comp, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(comp, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *comp = flex_row_create(col, UI_SPACE_S, 0);
     lv_obj_set_style_margin_top(comp, FACE_COMP_GAP, 0);
     lv_obj_add_flag(comp, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_ext_click_area(comp, UI_TOUCH_EXT);
     lv_obj_add_event_cb(comp, clock_weather_cb, LV_EVENT_CLICKED, NULL);
     idle_screen.weather = comp;
 
-    lv_obj_t *now = flex_row_create(comp, UI_SPACE_S, 0);
-    lv_obj_remove_flag(now, LV_OBJ_FLAG_CLICKABLE);
-    idle_screen.weather_icon = lv_label_create(now);
+    idle_screen.weather_icon = lv_label_create(comp);
     lv_obj_set_style_text_font(idle_screen.weather_icon, UI_FONT_ICON_SM, 0);
     lv_obj_set_style_text_color(idle_screen.weather_icon, lv_color_hex(UI_TINT_WEATHER), 0);
     lv_label_set_text(idle_screen.weather_icon, ICON_CLOUD);
-    idle_screen.weather_temp = lv_label_create(now);
+    idle_screen.weather_temp = lv_label_create(comp);
     lv_obj_set_style_text_font(idle_screen.weather_temp, UI_FONT_TITLE, 0);
     lv_obj_set_style_text_color(idle_screen.weather_temp, lv_color_hex(UI_COLOR_TEXT), 0);
-    idle_screen.weather_sky = lv_label_create(now);
+    idle_screen.weather_sky = lv_label_create(comp);
     lv_obj_set_style_text_font(idle_screen.weather_sky, UI_FONT_BODY, 0);
     lv_obj_set_style_text_color(idle_screen.weather_sky, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_set_style_text_opa(idle_screen.weather_sky, UI_OPA_TEXT_MUTED, 0);
+}
 
-    idle_screen.weather_range = lv_label_create(comp);
-    lv_obj_set_style_text_font(idle_screen.weather_range, UI_FONT_CAPTION, 0);
-    lv_obj_set_style_text_color(idle_screen.weather_range, lv_color_hex(UI_COLOR_TEXT_DIM), 0);
-
-    // On the screen rather than in the column, so showing it never moves
-    // the clock; it follows the complication by hand.
-    lv_obj_t *air = flex_row_create(lv_obj_get_screen(col), UI_SPACE_S, 0);
-    lv_obj_add_flag(air, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_ext_click_area(air, UI_TOUCH_EXT);
-    lv_obj_add_event_cb(air, clock_weather_cb, LV_EVENT_CLICKED, NULL);
-    idle_screen.weather_air_row = air;
-    static const char *const k_air_icons[2] = {ICON_AIR, ICON_UV};
-    for (int i = 0; i < 2; i++) {
-        lv_obj_t *icon = lv_label_create(air);
-        lv_obj_set_style_text_font(icon, UI_FONT_ICON_SM, 0);
-        lv_obj_set_style_margin_left(icon, i ? UI_SPACE_XS : 0, 0);
-        lv_label_set_text(icon, k_air_icons[i]);
-        idle_screen.weather_air_icon[i] = icon;
-        idle_screen.weather_air[i] = lv_label_create(air);
-        lv_obj_set_style_text_font(idle_screen.weather_air[i], UI_FONT_LABEL, 0);
-        lv_obj_set_style_text_color(idle_screen.weather_air[i], lv_color_hex(UI_COLOR_TEXT), 0);
+static void band_cb(lv_event_t *e) {
+    (void)e;
+    if (idle_screen.band_app >= 0) {
+        open_app((ui_app_t)idle_screen.band_app);
     }
 }
 
@@ -835,7 +821,6 @@ static void idle_screen_build(void) {
     touch_pad(col, UI_TOUCH_EXT);
     lv_obj_center(col);
 
-    np_card_build(col);
     idle_screen.date_label = glance_label_create(col, UI_FONT_TITLE, UI_OPA_TEXT_SOFT);
 
     // Content-wide so the time stays centered; AM/PM hangs off its right
@@ -853,6 +838,13 @@ static void idle_screen_build(void) {
     idle_screen.ampm_label = ampm;
 
     weather_complication_build(col);
+    np_card_build(col);
+
+    idle_screen.band_label = clock_pill_create(idle_screen.screen, ICON_INBOX, lv_color_hex(UI_TINT_TALK), band_cb, NULL);
+    idle_screen.band = lv_obj_get_parent(idle_screen.band_label);
+    idle_screen.band_glyph = lv_obj_get_child(idle_screen.band, 0);
+    chip_align_top(idle_screen.band);
+    lv_obj_add_flag(idle_screen.band, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *chips = flex_row_create(idle_screen.screen, CLOCK_CHIP_GAP, 0);
     lv_obj_remove_flag(chips, LV_OBJ_FLAG_CLICKABLE);
@@ -880,39 +872,80 @@ static void ampm_place(void) {
                     -(UI_FONT_CLOCK->base_line - UI_FONT_TITLE->base_line));
 }
 
-// Air quality and UV on their own line under the weather when they matter (or
-// always, per settings), each a glyph in its severity's color and the reading.
-static void weather_air_refresh(bool have_weather) {
+// What the top band shows: one item, by priority.
+typedef struct {
+    int app;
+    const char *icon;
+    lv_color_t tint;
+    char text[24];
+} band_item_t;
+
+static bool band_app_item(ui_app_t app, band_item_t *out) {
+    if (!ui_tools_status(app, out->text, sizeof(out->text))) {
+        return false;
+    }
+    ui_app_info_t info = ui_tools_info(app);
+    out->app = app;
+    out->icon = info.icon;
+    out->tint = info.tint;
+    return true;
+}
+
+// Air quality and UV, when they matter (or always, per settings); a glyph in
+// the worse reading's color.
+static bool band_air_item(band_item_t *out) {
     ui_air_reading_t r[2];
     ui_air_readings(&r[0], &r[1]);
     uint8_t mode = ui_settings_current()->air_show;
-    bool show[2];
+    static const char *const names[2] = {"AQI", "UV"};
+    static const char *const icons[2] = {ICON_AIR, ICON_UV};
+    int shown = 0;
+    size_t n = 0;
+    out->text[0] = '\0';
     for (int i = 0; i < 2; i++) {
-        show[i] = have_weather && r[i].known && (mode == UI_AIR_SHOW_ALWAYS || (mode == UI_AIR_SHOW_HIGH && r[i].high));
-        ui_set_visible(idle_screen.weather_air_icon[i], show[i]);
-        ui_set_visible(idle_screen.weather_air[i], show[i]);
-        if (!show[i]) {
+        if (!r[i].known || !(mode == UI_AIR_SHOW_ALWAYS || (mode == UI_AIR_SHOW_HIGH && r[i].high))) {
             continue;
         }
-        char buf[8];
-        snprintf(buf, sizeof(buf), "%d", r[i].value);
-        ui_label_set_text(idle_screen.weather_air[i], buf);
-        lv_obj_set_style_text_color(idle_screen.weather_air_icon[i],
-                                    lv_color_hex(r[i].high ? r[i].color : UI_TINT_WEATHER), 0);
+        n += snprintf(out->text + n, sizeof(out->text) - n, "%s%s %d", shown ? " \xC2\xB7 " : "", names[i],
+                      r[i].value);
+        if (!shown || r[i].high) {
+            out->icon = icons[i];
+            out->tint = lv_color_hex(r[i].high ? r[i].color : UI_TINT_WEATHER);
+        }
+        shown++;
     }
-    lv_obj_t *row = idle_screen.weather_air_row;
-    ui_set_visible(row, show[0] || show[1]);
-    if (show[0] || show[1]) {
-        lv_obj_update_layout(idle_screen.weather);
-        lv_obj_align_to(row, idle_screen.weather, LV_ALIGN_OUT_BOTTOM_MID, 0, UI_SPACE_XS);
+    out->app = UI_APP_WEATHER;
+    return shown > 0;
+}
+
+// Talk, then unread messages; air quality only on the clock, where the
+// audio doesn't need the band.
+static bool band_item(bool with_air, band_item_t *out) {
+    return band_app_item(UI_APP_TALK, out) || band_app_item(UI_APP_INBOX, out) || (with_air && band_air_item(out));
+}
+
+static bool band_owns(ui_app_t app) {
+    return app == UI_APP_TALK || app == UI_APP_INBOX;
+}
+
+static void band_refresh(void) {
+    band_item_t item;
+    bool show = band_item(true, &item);
+    ui_set_visible(idle_screen.band, show);
+    if (!show) {
+        return;
     }
+    idle_screen.band_app = item.app;
+    ui_label_set_text(idle_screen.band_glyph, item.icon);
+    lv_obj_set_style_text_color(idle_screen.band_glyph, item.tint, 0);
+    ui_label_set_text(idle_screen.band_label, item.text);
 }
 
 // Polled: what's in progress changes every second, the weather every 15 min.
 static void idle_screen_refresh(void) {
     char buf[16];
     for (int i = 0; i < UI_APP_COUNT; i++) {
-        bool busy = ui_tools_status((ui_app_t)i, buf, sizeof(buf));
+        bool busy = !band_owns((ui_app_t)i) && ui_tools_status((ui_app_t)i, buf, sizeof(buf));
         ui_set_visible(idle_screen.chips[i], busy);
         if (busy) {
             ui_label_set_text(idle_screen.chip_labels[i], buf);
@@ -926,11 +959,8 @@ static void idle_screen_refresh(void) {
         snprintf(buf, sizeof(buf), "%d\xC2\xB0", wx.temp);
         ui_label_set_text(idle_screen.weather_temp, buf);
         ui_label_set_text(idle_screen.weather_sky, wx.sky);
-        char range[24];
-        snprintf(range, sizeof(range), "H %d\xC2\xB0  L %d\xC2\xB0", wx.high, wx.low);
-        ui_label_set_text(idle_screen.weather_range, range);
     }
-    weather_air_refresh(have_weather);
+    band_refresh();
     ampm_place();
 }
 
@@ -949,7 +979,9 @@ static void wireless_tint_cb(uint32_t tint) {
 }
 
 static void source_chip_cb(lv_event_t *e) {
-    if (s_current_source == UI_SOURCE_RADIO) {
+    if (wireless_screen.pill_app >= 0) {
+        open_app((ui_app_t)wireless_screen.pill_app);
+    } else if (s_current_source == UI_SOURCE_RADIO) {
         open_app(UI_APP_RADIO);
     } else {
         open_switch_cb(e);
@@ -966,6 +998,10 @@ static void wireless_screen_build(void) {
     // the mock's flex column re-centers around whichever block is showing.
     lv_obj_t *row = status_pill_create(wireless_screen.screen, source_chip_cb);
     wireless_screen.source_icon = icon_create(row, &icon_airplay, STATUS_ICON_SIZE, lv_color_hex(UI_COLOR_TEXT));
+    wireless_screen.pill_glyph = lv_label_create(row);
+    lv_obj_set_style_text_font(wireless_screen.pill_glyph, UI_FONT_ICON_SM, 0);
+    lv_obj_add_flag(wireless_screen.pill_glyph, LV_OBJ_FLAG_HIDDEN);
+    wireless_screen.pill_app = -1;
     wireless_screen.source_label = status_label_create(row);
 
     // -- waiting-for-connection state (mock's .wait-icon / np-meta) --
@@ -1341,8 +1377,8 @@ static void np_card_refresh(lv_obj_t *target) {
     np_card_tint(tint);
     ui_set_visible(idle_screen.np.idle_icon, false);
 
-    // Connected but not playing: which device, quietly.
-    if (!playing) {
+    // Connected with nothing to resume: which device, quietly.
+    if (!playing && (usb || !s_audio.wireless_has_track)) {
         np_card_set_quiet(true);
         np_card_source_icon(tint, false);
         ui_set_visible(idle_screen.np.art, false);
@@ -1368,8 +1404,8 @@ static void np_card_refresh(lv_obj_t *target) {
 
     const char *subtitle = usb ? "" : s_audio.wireless_subtitle;
     ui_label_set_text(idle_screen.np.title, usb ? "USB Audio" : s_audio.wireless_text);
-    ui_label_set_text(idle_screen.np.subtitle, subtitle[0] ? subtitle : "Playing");
-    ui_label_set_text(idle_screen.np.play, LV_SYMBOL_PAUSE);
+    ui_label_set_text(idle_screen.np.subtitle, subtitle[0] ? subtitle : playing ? "Playing" : "Paused");
+    ui_label_set_text(idle_screen.np.play, playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY);
 }
 
 // Runs on every state push; each setter below skips no-op changes.
@@ -1574,6 +1610,10 @@ static void nav_tick_cb(lv_timer_t *t) {
         idle_screen_refresh();
         return;
     }
+    if (active == wireless_screen.screen) {
+        wireless_pill_refresh(!s_audio.wireless_connected);
+        return;
+    }
     // A page left alone goes home, unless it's showing progress the user
     // may be watching; the clock's chips lead back to it either way.
     int app = ui_tools_app_of(active);
@@ -1690,6 +1730,32 @@ static void format_subtitle(const ui_track_info_t *track, char *out, size_t len)
     }
 }
 
+// Connected, the pill gives way to Talk, messages or a running tool; else
+// it's the time and the source. Waiting, it names the source alone.
+static void wireless_pill_refresh(bool waiting) {
+    band_item_t item;
+    bool other = !waiting && band_item(false, &item);
+    for (int i = 0; !waiting && !other && i < UI_APP_COUNT; i++) {
+        other = !band_owns((ui_app_t)i) && band_app_item((ui_app_t)i, &item);
+    }
+    wireless_screen.pill_app = other ? item.app : -1;
+    ui_set_visible(wireless_screen.source_icon, !other);
+    ui_set_visible(wireless_screen.pill_glyph, other);
+    if (other) {
+        ui_label_set_text(wireless_screen.pill_glyph, item.icon);
+        lv_obj_set_style_text_color(wireless_screen.pill_glyph, item.tint, 0);
+        ui_label_set_text(wireless_screen.source_label, item.text);
+        return;
+    }
+    const char *label = k_sources[s_current_source].label;
+    char buf[32];
+    if (!waiting && s_time[0]) {
+        snprintf(buf, sizeof(buf), "%s \xC2\xB7 %s", s_time, label);
+        label = buf;
+    }
+    ui_label_set_text(wireless_screen.source_label, label);
+}
+
 void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *track) {
     static surface_state_t surface;
     ui_source_t source = source_of(state->source);
@@ -1699,7 +1765,6 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     ring_set_volume(wireless_screen.ring, state->volume);
     lv_image_set_src(wireless_screen.source_icon, k_sources[source].icon);
     lv_obj_set_style_image_recolor(wireless_screen.source_icon, tint, 0);
-    ui_label_set_text(wireless_screen.source_label, k_sources[source].label);
     // A station has no art; its tile carries the radio glyph instead.
     const lv_image_dsc_t *tile = source == UI_SOURCE_RADIO ? &icon_radio : &icon_music_note;
     if (lv_image_get_src(wireless_screen.tile_icon) != tile) {
@@ -1708,6 +1773,7 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
 
     // Unconnected, there's no tile/track to show yet, nor a volume.
     bool waiting = !state->connected;
+    wireless_pill_refresh(waiting);
     uint32_t art_tint = track && track->art && ui_settings_current()->art_colors ? track->art_tint : 0;
     ui_now_playing_bg_set_tint(&wireless_screen.bg, art_tint ? art_tint : k_sources[source].tint,
                                !waiting && lv_screen_active() == wireless_screen.screen);
@@ -1756,6 +1822,7 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
 
     s_audio.wireless_connected = state->connected;
     s_audio.wireless_playing = state->playing;
+    s_audio.wireless_has_track = has_track;
     s_audio.wireless_source = source;
     snprintf(s_audio.wireless_peer, sizeof(s_audio.wireless_peer), "%s", peer);
     snprintf(s_audio.wireless_text, sizeof(s_audio.wireless_text), "%s", has_track ? track->title : idle_title);
@@ -1781,6 +1848,7 @@ void ui_update_usb(uint8_t volume, bool muted, bool playing) {
 
 void ui_update_clock(bool synced, const struct tm *local_time) {
     if (!synced || !local_time) {
+        s_time[0] = '\0';
         ui_label_set_text(idle_screen.time_label, "--:--");
         ui_set_visible(idle_screen.ampm_label, false);
         ui_label_set_text(idle_screen.date_label, "Waiting for time sync");
@@ -1792,6 +1860,7 @@ void ui_update_clock(bool synced, const struct tm *local_time) {
     char buf[32];
     snprintf(buf, sizeof(buf), h24 ? "%02d:%02d" : "%d:%02d", hour, local_time->tm_min);
     ui_label_set_text(idle_screen.time_label, buf);
+    snprintf(s_time, sizeof(s_time), "%s", buf);
     // The clock font has digits and ':' only, so AM/PM is its own label.
     ui_set_visible(idle_screen.ampm_label, !h24);
     if (!h24) {
