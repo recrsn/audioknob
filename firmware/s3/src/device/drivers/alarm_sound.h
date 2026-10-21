@@ -25,7 +25,11 @@ void alarm_sound_init(void);
 void alarm_sound_configure(alarm_sound_voice_t voice, uint8_t volume_pct);
 
 // Repeats until alarm_sound_stop(); a new kind replaces a ringing one. Never
-// blocks.
+// waits for queue space or playback. Commands briefly serialize on a mutex;
+// pending replacements coalesce, dropping the oldest if the 8-slot queue fills.
+// The system-sound worker and its playback LUT exist only while needed.
+// Allocation failure logs a warning and cancels pending requests; a later call
+// can retry.
 void alarm_sound_start(alarm_sound_kind_t kind);
 void alarm_sound_stop(void);
 

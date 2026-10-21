@@ -180,6 +180,9 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         apply_timezone();
         push();
         return;
+    case UI_SETTING_DETECT_LOCATION:
+        online_detect_location();
+        return;
     case UI_SETTING_CHECK_UPDATES:
         github_release_check();
         break;

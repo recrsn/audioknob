@@ -14,6 +14,7 @@
 #include "freertos/task.h"
 #include "freertos/idf_additions.h"
 #include "pcm.h"
+#include "lwip/sockets.h"
 #include "simple_dec/esp_audio_simple_dec.h"
 
 // ~30 s at 128 kbps; what the network gets ahead by is capped by the
@@ -75,6 +76,8 @@ static bool s_dec_playing;
 static bool s_running; // the network task exists
 static TaskHandle_t s_net_task;
 static stream_ring_t *s_ring;
+// Protected by s_lock; only the network task closes/unpublishes it.
+static int s_socket = -1;
 // Read without the lock by the tasks.
 static volatile bool s_want;
 static volatile uint32_t s_gen;
@@ -276,6 +279,12 @@ static void decode_task(void *arg) {
     }
     bool waiting = true;
     while (d && !s_decode_quit) {
+        // During a station switch there is no output backpressure. Let the
+        // network task replace the old epoch instead of decoding discarded data.
+        if (s_out_epoch == NO_EPOCH) {
+            vTaskDelay(POLL_TICKS);
+            continue;
+        }
         if (waiting) {
             if (stream_ring_level(d->ring) < prebuffer_bytes(d)) {
                 vTaskDelay(POLL_TICKS);
@@ -331,39 +340,54 @@ typedef struct {
 
 static bool should_stop(void *ctx) {
     const net_t *net = ctx;
-    return !s_want || s_gen != net->gen;
+    return !s_want || s_decode_quit || s_gen != net->gen;
 }
 
 static void on_audio(void *ctx, const stream_info_t *info) {
     net_t *net = ctx;
-    net->audio_since = esp_timer_get_time();
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_net_phase = NET_STREAMING;
-    s_status.error[0] = '\0';
-    s_status.format = info->format;
-    s_status.bitrate_kbps = (uint16_t)info->bitrate_kbps;
-    snprintf(s_status.name, sizeof(s_status.name), "%s", info->name);
-    changed_locked();
-    xSemaphoreGive(s_lock);
-    // A reconnect to the same format carries on in the same epoch, so what's
-    // buffered keeps playing.
-    if (info->format != net->epoch_format) {
-        net->epoch_format = info->format;
-        uint32_t epoch = stream_ring_reset(net->ring, info->format);
-        if (!should_stop(net)) {
-            s_out_epoch = epoch;
+    if (!should_stop(net)) {
+        net->audio_since = esp_timer_get_time();
+        s_net_phase = NET_STREAMING;
+        s_status.error[0] = '\0';
+        s_status.format = info->format;
+        s_status.bitrate_kbps = (uint16_t)info->bitrate_kbps;
+        snprintf(s_status.name, sizeof(s_status.name), "%s", info->name);
+        // Same-format reconnects preserve buffered audio and its epoch.
+        if (info->format != net->epoch_format) {
+            net->epoch_format = info->format;
+            s_out_epoch = stream_ring_reset(net->ring, info->format);
         }
+        changed_locked();
     }
+    xSemaphoreGive(s_lock);
 }
 
 static void on_title(void *ctx, const char *title) {
-    (void)ctx;
+    net_t *net = ctx;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (strcmp(s_status.title, title)) {
+    if (!should_stop(net) && strcmp(s_status.title, title)) {
         snprintf(s_status.title, sizeof(s_status.title), "%s", title);
         ESP_LOGI(TAG, "title: %s", title);
         changed_locked();
     }
+    xSemaphoreGive(s_lock);
+}
+
+// Publishing and unpublishing use the same lock as shutdown. The HTTP
+// client remains owned by this task; no cross-task TLS free/close occurs.
+static bool on_connected(void *ctx, int socket) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool accept = !should_stop(ctx);
+    if (accept) s_socket = socket;
+    xSemaphoreGive(s_lock);
+    return accept;
+}
+
+static void on_disconnected(void *ctx) {
+    (void)ctx;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_socket = -1;
     xSemaphoreGive(s_lock);
 }
 
@@ -382,7 +406,8 @@ static void wait_for_change(net_t *net, uint32_t ms) {
 
 static void stream_session(stream_ring_t *ring) {
     net_t net = {.ring = ring, .gen = s_gen - 1};
-    const stream_net_ops_t ops = {.ctx = &net, .should_stop = should_stop, .on_audio = on_audio, .on_title = on_title};
+    const stream_net_ops_t ops = {.ctx = &net, .should_stop = should_stop, .on_audio = on_audio, .on_title = on_title,
+                                 .on_connected = on_connected, .on_disconnected = on_disconnected};
     char url[STREAM_URL_MAX], error[64];
     uint32_t backoff = BACKOFF_MIN_MS;
 
@@ -392,7 +417,7 @@ static void stream_session(stream_ring_t *ring) {
         uint32_t gen = s_gen;
         snprintf(url, sizeof(url), "%s", s_status.url);
         xSemaphoreGive(s_lock);
-        if (!want) {
+        if (!want || s_decode_quit) {
             return;
         }
         if (gen != net.gen) {
@@ -430,9 +455,19 @@ static void stream_session(stream_ring_t *ring) {
 static void net_task(void *arg) {
     (void)arg;
     for (;;) {
+        // A stop/play may arrive before this task starts, or while the old
+        // session is closing. Only reset cancellation for a fresh lifecycle.
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        if (!s_want) {
+            s_running = false;
+            s_net_task = NULL;
+            xSemaphoreGive(s_lock);
+            break;
+        }
+        s_decode_quit = false;
+        xSemaphoreGive(s_lock);
         stream_ring_t *ring = stream_ring_create(RING_BYTES);
         TaskHandle_t dec = NULL;
-        s_decode_quit = false;
         if (ring && xTaskCreatePinnedToCoreWithCaps(decode_task, "radio_dec", DEC_STACK, ring, DEC_PRIO, &dec,
                                                     TASK_CORE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS) {
             xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -478,6 +513,10 @@ void stream_player_init(void) {
 }
 
 static void kick_locked(void) {
+    if (s_socket >= 0) {
+        // Wake recv/TLS reads without freeing their owner task's HTTP client.
+        shutdown(s_socket, SHUT_RDWR);
+    }
     if (s_net_task) {
         xTaskNotifyGive(s_net_task);
     }
@@ -519,6 +558,7 @@ void stream_player_play(const char *url) {
 void stream_player_stop(void) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_out_epoch = NO_EPOCH;
+    s_decode_quit = true;
     if (s_want) {
         s_want = false;
         s_gen++;
@@ -528,6 +568,18 @@ void stream_player_stop(void) {
         kick_locked();
     }
     xSemaphoreGive(s_lock);
+}
+
+bool stream_player_wait_stopped(uint32_t timeout_ms) {
+    int64_t deadline = esp_timer_get_time() + (int64_t)timeout_ms * 1000;
+    for (;;) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        bool stopped = !s_running;
+        xSemaphoreGive(s_lock);
+        if (stopped) return true;
+        if (esp_timer_get_time() >= deadline) return false;
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
 }
 
 void stream_player_set_volume(uint8_t volume_pct) {

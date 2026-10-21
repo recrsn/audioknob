@@ -457,11 +457,16 @@ static void copy_utf8(char *out, size_t len, const char *in) {
 }
 
 // A place the page found with Open-Meteo's geocoder (city, lat, lon, tz),
-// or auto=1 to go back to the IP-detected one.
+// auto=1 to reuse the saved detected location, or detect=1 to refresh it.
 static esp_err_t location_handler(httpd_req_t *req) {
     char form[FORM_MAX + 1], text[96];
     if (!read_post(req, form, sizeof(form))) {
         return ESP_OK;
+    }
+    web_form_value(form, "detect", text, sizeof(text));
+    if (!strcmp(text, "1")) {
+        settings_ui_change(UI_SETTING_DETECT_LOCATION, 0, NULL);
+        return send_ok(req);
     }
     web_form_value(form, "auto", text, sizeof(text));
     if (!strcmp(text, "1")) {

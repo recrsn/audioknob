@@ -105,6 +105,9 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         s_settings.location_auto = true;
         snprintf(s_settings.location, sizeof(s_settings.location), "Sample");
         break;
+    case UI_SETTING_DETECT_LOCATION:
+        printf("settings: detect location (no-op on native)\n");
+        break;
     case UI_SETTING_FORGET_WIFI:
         printf("settings: forget WiFi (no-op on native)\n");
         break;

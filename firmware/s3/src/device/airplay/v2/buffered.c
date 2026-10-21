@@ -14,6 +14,7 @@
 #include "ap2.h"
 #include "decoder.h"
 #include "esp_heap_caps.h"
+#include "esp_freertos_hooks.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -45,6 +46,82 @@
 #define DECODER_STACK 8192
 #define DECODER_PRIO 7
 #define TASK_CORE 0
+
+// Investigation counters: no per-packet logging, sleeps or priority changes.
+// Summaries are emitted only when the decoder exits, to preserve scheduling.
+typedef struct {
+    uint32_t blocks, decoded, late, flushed, waits, decode_errors;
+    uint64_t decode_us;
+    int64_t max_decode_us, max_read_us, max_idle_gap_us, last_idle_us;
+    uint32_t max_decode_seq;
+    unsigned max_packet, max_buffered;
+} decode_diag_t;
+
+static volatile int64_t s_idle0_last_us;
+static bool s_diag_registered;
+static bool diag_idle0(void) {
+    s_idle0_last_us = esp_timer_get_time();
+    return true;
+}
+
+#define ALLOC_FAILURES 8
+typedef struct {
+    uint32_t ms, caps;
+    size_t size, free, largest;
+    const char *function;
+    char task[16];
+} alloc_failure_t;
+static alloc_failure_t s_alloc_failures[ALLOC_FAILURES];
+static unsigned s_alloc_count;
+static portMUX_TYPE s_alloc_lock = portMUX_INITIALIZER_UNLOCKED;
+
+// The heap invokes this after a failed attempt, outside its allocation lock.
+// Avoid logging or allocating on this path; dump the fixed ring at stream end.
+static void diag_alloc_failed(size_t size, uint32_t caps, const char *function) {
+    alloc_failure_t event = {
+        .ms = (uint32_t)(esp_timer_get_time() / 1000), .caps = caps, .size = size,
+        .free = heap_caps_get_free_size(caps), .largest = heap_caps_get_largest_free_block(caps),
+        .function = function,
+    };
+    const char *name = xPortInIsrContext() ? "ISR" : pcTaskGetName(NULL);
+    for (unsigned i = 0; i + 1 < sizeof(event.task) && name[i]; ++i) event.task[i] = name[i];
+    portENTER_CRITICAL(&s_alloc_lock);
+    s_alloc_failures[s_alloc_count++ % ALLOC_FAILURES] = event;
+    portEXIT_CRITICAL(&s_alloc_lock);
+}
+
+static void diag_poll(decode_diag_t *d) {
+    int64_t now = esp_timer_get_time();
+    // Decoder and idle hook both run on core 0, so this 64-bit read cannot
+    // be interrupted by the lower-priority writer.
+    int64_t idle = s_idle0_last_us;
+    if (idle < d->last_idle_us) idle = d->last_idle_us;
+    int64_t gap = now - idle;
+    if (gap > d->max_idle_gap_us) d->max_idle_gap_us = gap;
+}
+
+static void diag_dump(const decode_diag_t *d) {
+    ESP_LOGI("ap2_diag", "blocks=%lu decoded=%lu late=%lu flushed=%lu waits=%lu errors=%lu decode_total_us=%llu max_decode_us=%lld seq=%lu max_read_us=%lld max_idle_gap_us=%lld max_packet=%u max_buffered=%u",
+             (unsigned long)d->blocks, (unsigned long)d->decoded, (unsigned long)d->late,
+             (unsigned long)d->flushed, (unsigned long)d->waits, (unsigned long)d->decode_errors,
+             (unsigned long long)d->decode_us, (long long)d->max_decode_us,
+             (unsigned long)d->max_decode_seq, (long long)d->max_read_us,
+             (long long)d->max_idle_gap_us, d->max_packet, d->max_buffered);
+    alloc_failure_t events[ALLOC_FAILURES];
+    portENTER_CRITICAL(&s_alloc_lock);
+    unsigned count = s_alloc_count;
+    memcpy(events, s_alloc_failures, sizeof(events));
+    portEXIT_CRITICAL(&s_alloc_lock);
+    ESP_LOGI("ap2_diag", "allocation failures since stream start=%u (last %u retained)", count, ALLOC_FAILURES);
+    unsigned first = count > ALLOC_FAILURES ? count - ALLOC_FAILURES : 0;
+    for (unsigned i = first; i < count; ++i) {
+        const alloc_failure_t *e = &events[i % ALLOC_FAILURES];
+        ESP_LOGI("ap2_diag", "alloc_fail at_ms=%lu task=%s function=%s size=%u caps=0x%lx free=%u largest=%u",
+                 (unsigned long)e->ms, e->task, e->function, (unsigned)e->size,
+                 (unsigned long)e->caps, (unsigned)e->free, (unsigned)e->largest);
+    }
+    ap2_log_heap();
+}
 
 typedef struct {
     bool in_use, active;
@@ -205,6 +282,7 @@ static bool apply_flushes(buffered_t *b, const block_t *blk) {
 
 typedef struct {
     decoder_t *dec;
+    decode_diag_t diag;
     uint8_t *plain;  // decrypted payload, after DECODER_AAC_HEADROOM bytes
     int16_t *pcm;
     int played;  // blocks played since play (re)started
@@ -276,7 +354,16 @@ static void play_block(buffered_t *b, play_state_t *ps, const block_t *blk, int6
         return;
     }
 
+    int64_t started = esp_timer_get_time();
     int frames = decoder_decode(ps->dec, plain, (size_t)plain_len, ps->pcm, DECODER_MAX_FRAMES);
+    int64_t elapsed = esp_timer_get_time() - started;
+    ps->diag.decode_us += elapsed;
+    if (elapsed > ps->diag.max_decode_us) {
+        ps->diag.max_decode_us = elapsed;
+        ps->diag.max_decode_seq = blk->seq;
+    }
+    ps->diag.decoded++;
+    if (frames <= 0) ps->diag.decode_errors++;
     if (frames <= 0) {
         return;
     }
@@ -320,11 +407,15 @@ static void decoder_task(void *arg) {
     };
     block_t blk = {.packet = heap_caps_malloc(BLOCK_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)};
     bool need_block = true;
+    ps.diag.last_idle_us = esp_timer_get_time();
 
     if (!ps.dec || !ps.plain || !ps.pcm || !blk.packet) {
         ESP_LOGE(TAG, "out of memory");
     } else {
         while (!b->stop) {
+            diag_poll(&ps.diag);
+            unsigned queued = xStreamBufferBytesAvailable(b->stream);
+            if (queued > ps.diag.max_buffered) ps.diag.max_buffered = queued;
             bool enabled = session_play_enabled();
             if (enabled && !ps.play_enabled) {
                 need_block = true;
@@ -334,12 +425,18 @@ static void decoder_task(void *arg) {
             ps.play_enabled = enabled;
 
             if (need_block) {
+                int64_t read_start = esp_timer_get_time();
                 if (!next_block(b, &blk)) {
                     break;
                 }
+                int64_t read_us = esp_timer_get_time() - read_start;
+                if (read_us > ps.diag.max_read_us) ps.diag.max_read_us = read_us;
+                ps.diag.blocks++;
+                if (blk.len > ps.diag.max_packet) ps.diag.max_packet = blk.len;
                 need_block = false;
             }
             if (apply_flushes(b, &blk)) {
+                ps.diag.flushed++;
                 need_block = true;
                 continue;
             }
@@ -347,21 +444,27 @@ static void decoder_task(void *arg) {
             uint32_t epoch = session_epoch();
             int64_t playtime_us;
             if (!session_playtime_us(blk.timestamp, &playtime_us)) {
+                ps.diag.waits++;
                 vTaskDelay(pdMS_TO_TICKS(WAIT_MS));
                 continue;
             }
             int64_t lead = playtime_us - esp_timer_get_time();
             if (!ps.play_enabled || lead >= LEAD_US) {
+                ps.diag.waits++;
                 vTaskDelay(pdMS_TO_TICKS(WAIT_MS));
                 continue;
             }
             if (lead >= 0) {
                 play_block(b, &ps, &blk, playtime_us, epoch);
+            } else {
+                ps.diag.late++;
             }
             need_block = true;
         }
     }
 
+    diag_poll(&ps.diag);
+    diag_dump(&ps.diag);
     decoder_close(ps.dec);
     heap_caps_free(ps.plain);
     heap_caps_free(ps.pcm);
@@ -397,6 +500,14 @@ static void destroy(buffered_t *b) {
 }
 
 buffered_t *buffered_start(const uint8_t key[32], uint16_t *port, size_t *buffer_size) {
+    if (!s_diag_registered) {
+        ESP_ERROR_CHECK(esp_register_freertos_idle_hook_for_cpu(diag_idle0, TASK_CORE));
+        ESP_ERROR_CHECK(heap_caps_register_failed_alloc_callback(diag_alloc_failed));
+        s_diag_registered = true;
+    }
+    portENTER_CRITICAL(&s_alloc_lock);
+    s_alloc_count = 0;
+    portEXIT_CRITICAL(&s_alloc_lock);
     buffered_t *b = heap_caps_calloc(1, sizeof(*b), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if (!b) {
         return NULL;

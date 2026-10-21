@@ -6,13 +6,15 @@ const vm = require("node:vm");
 const html = fs.readFileSync(path.join(__dirname, "../../firmware/s3/src/device/net/web/index.html"), "utf8");
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 new vm.Script(script); // Check the entire embedded page's syntax.
-const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]));
+const allIds = [...html.matchAll(/\bid="([^"]+)"/g)].map(m => m[1]);
+const ids = new Set(allIds);
+assert.equal(ids.size, allIds.length, "duplicate DOM ids");
 const elements = {};
 const context = {
   uploading: false, installing: null, wentOffline: false,
   $: id => {
     assert(ids.has(id), `missing DOM element ${id}`);
-    return elements[id] ||= {};
+    return elements[id] ||= {setAttribute: (name, value) => { elements[id][name] = value; }};
   },
   setText: (id, value) => { context.$(id).textContent = value; },
   setBar: value => { context.bar = value; },
@@ -20,16 +22,17 @@ const context = {
   UPDATE_HINT: "Choose a firmware.bin",
 };
 vm.createContext(context);
-vm.runInContext(script.slice(script.indexOf("function renderUpdate("), script.indexOf("async function poll(")), context);
+vm.runInContext(script.slice(script.indexOf("function when("), script.indexOf("async function poll(")), context);
 const state = {
   version: "1.0.0",
-  release: {checking: false, checked: true, s3: true, bluetooth: true, tag: "v1.2.3", error: ""},
+  release: {checking: false, checked: true, lastCheck: 1780000000, nextCheck: 0, s3: true, bluetooth: true, tag: "v1.2.3", error: ""},
   update: {state: "idle", target: "s3", progress: 0, version: "", error: ""},
 };
 state.release.s3Version = "v1.2.3";
 state.release.bluetoothVersion = "v1.0.0";
 context.renderUpdate(state);
-assert.match(elements.releasehint.textContent, /Update available: Main v1.2.3/);
+assert.equal(elements.reltitle.textContent, "Update available");
+assert.match(elements.relsub.textContent, /Main v1.2.3/);
 assert.equal(elements.releases3.hidden, false);
 assert.equal(elements.releasebt.textContent, "Download Bluetooth v1.0.0");
 assert.equal(elements.releasebt.hidden, false);
@@ -38,7 +41,7 @@ state.update.state = "ready";
 state.update.version = "1.2.3";
 context.renderUpdate(state);
 for (const id of ["checkupd", "releases3", "releasebt", "updbtn"]) assert.equal(elements[id].disabled, true);
-assert.match(elements.updhint.textContent, /confirm on the device/);
+assert.match(elements.updhint.textContent, /confirm on the device/i);
 state.update.state = "receiving";
 state.update.progress = 42;
 context.renderUpdate(state);
@@ -46,17 +49,23 @@ assert.equal(context.bar, 42);
 state.update.state = "idle";
 state.release.checking = true;
 context.renderUpdate(state);
-assert.match(elements.releasehint.textContent, /Checking GitHub/);
+assert.match(elements.reltitle.textContent, /Checking for updates/);
 assert.equal(elements.checkupd.disabled, true);
-state.release = {checking: false, checked: true, s3: false, bluetooth: false, tag: "v1.0.0", error: ""};
+state.release = {checking: false, checked: true, lastCheck: 1780000000, nextCheck: 0, s3: false, bluetooth: false, tag: "v1.0.0", error: ""};
 context.renderUpdate(state);
-assert.match(elements.releasehint.textContent, /up to date/);
+assert.match(elements.reltitle.textContent, /up to date/i);
 assert.equal(elements.releases3.hidden, true);
 state.release.error = "GitHub rate limit; try again later";
 context.renderUpdate(state);
-assert.equal(elements.releasehint.textContent, state.release.error);
+assert.match(elements.relsub.textContent, /GitHub rate limit; try again later/);
 context.uploading = true;
 context.renderUpdate(state);
 assert.equal(elements.checkupd.disabled, true);
 assert.equal(elements.updbtn.disabled, false); // Upload handler owns this button while uploading.
-console.log("Web update availability, progress, errors and action locking passed");
+state.release = {checking: false, checked: true, s3: false, bluetooth: false, lastCheck: 1780000000, nextCheck: 0};
+context.uploading = false;
+context.renderUpdate(state);
+assert.match(elements.releasehint.textContent, /Last checked/);
+assert.match(elements.releasehint.textContent, /Choose Check for Updates/);
+assert.doesNotMatch(elements.releasehint.textContent, /1970|next check/);
+console.log("Web update availability, progress, errors, timestamps and action locking passed");

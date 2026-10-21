@@ -5,12 +5,21 @@ for local application `.bin` files and also offers **Check for updates** and
 separate download buttons for the main and Bluetooth chips. The device itself
 has **Settings → About → Check for updates**.
 
-The S3 checks the latest stable GitHub release after WiFi and clock sync are
-ready, then every 24 hours while running. Failed automatic checks retry after
-an hour; offline checks wait for connectivity. Each boot starts a fresh check.
-Manual checks run immediately when online, or explain that WiFi/clock sync is
-still needed. Checks wait while an image is receiving, awaiting confirmation,
-or installing. There is no automatic download or installation.
+The S3 checks the latest stable GitHub release once after WiFi and clock sync
+are ready at startup, and when manually requested. Offline manual requests
+coalesce and remain queued until readiness. There is no daily polling or hourly
+release retry: a finished error stays visible until the next manual check or
+boot. Checks wait while an image is receiving, awaiting confirmation, or
+installing, with a 60-second deferral while the worker blocks. There is no
+automatic download or installation.
+
+Discovery, reserved downloads, location, weather and location persistence share
+one worker with a
+static internal stack and task control block, reused between jobs. A timer
+dispatches ready jobs without performing network or flash work itself. The
+manifest, notice and last-check timestamp remain available between jobs.
+`nextCheck` remains in the JSON API as zero (no periodic deadline); the page
+shows the last check and offers Check Now.
 
 A newer release wakes the display with an **Update available** screen. Press
 ✓ or the knob to download; Cancel or a long press dismisses it. The same
@@ -103,7 +112,7 @@ Node.js, OpenSSL development libraries via `pkg-config`, and PlatformIO's ESP-ID
 package, or `IDF_PATH`). It covers version
 ordering, malformed/untrusted release metadata, partition bounds, concurrent
 updates, physical confirmation, wrong-chip images, partial transfers, task
-creation failure, daily scheduling, hourly retries, connectivity gates, dismissal,
+creation failure, startup/manual scheduling, readiness and OTA gates, dismissal,
 web controls, independent Bluetooth versioning, release source-change detection,
 missing/malformed asset digests, corrupted downloads, published checksums, and
 GitHub CDN redirects whose signed request lines exceed ESP-IDF's default
@@ -113,5 +122,5 @@ check device integration and the portable UI. The native Settings check shows
 a sample available release and simulates its download/confirmation flow.
 
 Hardware checks still required: a real GitHub download through its CDN,
-on-device confirmation/decline, daily checks over a 24-hour run, Bluetooth
+on-device confirmation/decline, startup/manual checks and retained notices, Bluetooth
 relay, and rollback after a failed boot.

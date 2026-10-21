@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "audio_out.h"
@@ -11,6 +12,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 
 // The synthesis runs inside audio_out's mix hook, so it rides on whatever
 // writes the DAC: the AirPlay player while it plays (ducked under the
@@ -42,6 +44,10 @@
 // keeping at least TOPUP_MIN_US queued.
 #define TOPUP_FRAMES 240
 #define TOPUP_MIN_US 16000
+// Four DMA buffers cover the watermark from empty, including cursor rounding.
+// Bound the work even if a competing writer keeps the observed depth low:
+// this task must return to its command queue and completion checks.
+#define TOPUP_MAX_CHUNKS 4
 #define TASK_PERIOD_MS 4
 #define TASK_STACK 3072
 #define TASK_PRIO  10
@@ -119,7 +125,16 @@ static const char *TAG = "alarm_sound";
 
 // PSRAM: internal RAM is what AirPlay's buffered stream runs short of.
 static float *s_lut;
+// One on-demand system-sound worker. The existing alarm API remains the
+// producer interface; future notification kinds can use the same dispatcher.
+// All current commands replace the previous target, rather than concatenate
+// alarms. A full queue discards its oldest command, so stop is never lost.
+#define COMMAND_CAPACITY 8
+static SemaphoreHandle_t s_control;
 static TaskHandle_t s_task;
+static uint32_t s_commands[COMMAND_CAPACITY];
+static unsigned s_head, s_count;
+static uint32_t s_requested; // latest accepted intent (also gates previews)
 
 // Posted by the API: 0, or kind + 1, plus TARGET_ONCE and a generation
 // for a preview.
@@ -128,10 +143,10 @@ static uint32_t s_preview_gen;
 static volatile alarm_sound_voice_t s_voice = ALARM_SOUND_CHIME;
 static volatile float s_gain_target;
 
-// Set by the hook when what it last saw has finished and AirPlay is back
-// at full level; s_done_target is that target.
-static volatile bool s_done;
-static volatile uint32_t s_done_target;
+// Published by the mix hook once release and restoration of stream gain finish.
+// UINT32_MAX is not a valid command (its kind byte is invalid). A single
+// token avoids pairing a stale done flag with a newer hook target.
+static uint32_t s_done_target = UINT32_MAX;
 
 // Hook state, under audio_out's lock.
 static struct {
@@ -299,14 +314,15 @@ static void mix(int16_t *pcm, size_t frames) {
     } else {
         cull_voices();
     }
-    s_done_target = h.seen;
-    s_done = finished && h.duck >= 1.0f;
+    __atomic_store_n(&s_done_target, finished && h.duck >= 1.0f ? h.seen : UINT32_MAX,
+                     __ATOMIC_RELEASE);
 }
 
 static void topup(void) {
     static const int16_t silence[TOPUP_FRAMES * 2];
     int64_t now;
-    while (!audio_source_suspended() && audio_out_queued_us(&now) < TOPUP_MIN_US) {
+    for (unsigned n = 0; n < TOPUP_MAX_CHUNKS && !audio_source_suspended() &&
+                         audio_out_queued_us(&now) < TOPUP_MIN_US; n++) {
         audio_out_write(silence, TOPUP_FRAMES);
     }
 }
@@ -315,45 +331,84 @@ static void begin(void) {
     memset(&h, 0, sizeof(h));
     h.duck = 1.0f;
     h.gain = s_gain_target;
-    s_done = false;
+    __atomic_store_n(&s_done_target, UINT32_MAX, __ATOMIC_RELEASE);
     audio_source_hold_s3(true);
     audio_out_set_mix(mix);
 }
 
-// Unhooking takes audio_out's lock, so no mix() is running past it. A
-// finished preview's target is cleared unless a new request replaced it.
+// Unhooking takes audio_out's lock, so the hook cannot outlive its LUT.
 static void end(void) {
     audio_out_set_mix(NULL);
     audio_source_hold_s3(false);
-    uint32_t done = s_done_target;
-    __atomic_compare_exchange_n(&s_target, &done, 0, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+    __atomic_store_n(&s_target, 0, __ATOMIC_RELEASE);
 }
 
-static void alarm_task(void *arg) {
+static void system_sound_task(void *arg) {
     (void)arg;
     bool active = false;
     for (;;) {
+        xSemaphoreTake(s_control, portMAX_DELAY);
+        // Drain in order. Existing alarm/preview commands all supersede the
+        // previous target; only the final intent needs to reach the mix hook.
+        uint32_t target = __atomic_load_n(&s_target, __ATOMIC_ACQUIRE);
+        while (s_count) {
+            target = s_commands[s_head];
+            s_head = (s_head + 1) % COMMAND_CAPACITY;
+            s_count--;
+        }
+        __atomic_store_n(&s_target, target, __ATOMIC_RELEASE);
+        if (!active && !target) {
+            free(s_lut);
+            s_lut = NULL;
+            s_requested = 0;
+            ESP_LOGI(TAG, "system sound worker stopped");
+            // Enqueue and retirement use the same mutex. After this point a
+            // producer creates a successor; this task touches no shared state.
+            s_task = NULL;
+            xSemaphoreGive(s_control);
+            vTaskDelete(NULL);
+            return;
+        }
+        xSemaphoreGive(s_control);
+
         if (!active) {
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-            if (!__atomic_load_n(&s_target, __ATOMIC_ACQUIRE)) {
-                continue;
+            if (!s_lut) {
+                s_lut = heap_caps_malloc((LUT_SIZE + 1) * sizeof(*s_lut), MALLOC_CAP_SPIRAM);
+                if (!s_lut) {
+                    ESP_LOGW(TAG, "cannot allocate system sound LUT");
+                    xSemaphoreTake(s_control, portMAX_DELAY);
+                    s_count = 0;
+                    s_requested = 0;
+                    __atomic_store_n(&s_target, 0, __ATOMIC_RELEASE);
+                    xSemaphoreGive(s_control);
+                    continue;
+                }
+                for (uint32_t i = 0; i <= LUT_SIZE; i++) {
+                    s_lut[i] = sinf(2.0f * (float)M_PI * i / LUT_SIZE);
+                }
             }
             begin();
             active = true;
         }
         if (audio_source_suspended()) {
-            __atomic_store_n(&s_target, 0, __ATOMIC_RELEASE);
+            xSemaphoreTake(s_control, portMAX_DELAY);
+            s_count = 0;
+            s_requested = 0;
+            xSemaphoreGive(s_control);
             end();
             active = false;
             continue;
         }
         topup();
-        if (s_done) {
+        if (__atomic_load_n(&s_done_target, __ATOMIC_ACQUIRE) ==
+            __atomic_load_n(&s_target, __ATOMIC_ACQUIRE)) {
             end();
             active = false;
-            if (__atomic_load_n(&s_target, __ATOMIC_ACQUIRE)) {
-                xTaskNotifyGive(s_task);
+            xSemaphoreTake(s_control, portMAX_DELAY);
+            if (!s_count) {
+                s_requested = 0;
             }
+            xSemaphoreGive(s_control);
             continue;
         }
         vTaskDelay(pdMS_TO_TICKS(TASK_PERIOD_MS));
@@ -361,13 +416,8 @@ static void alarm_task(void *arg) {
 }
 
 void alarm_sound_init(void) {
-    s_lut = heap_caps_malloc((LUT_SIZE + 1) * sizeof(*s_lut), MALLOC_CAP_SPIRAM);
-    ESP_ERROR_CHECK(s_lut ? ESP_OK : ESP_ERR_NO_MEM);
-    for (uint32_t i = 0; i <= LUT_SIZE; i++) {
-        s_lut[i] = sinf(2.0f * (float)M_PI * i / LUT_SIZE);
-    }
-    BaseType_t ok = xTaskCreatePinnedToCore(alarm_task, "alarm_sound", TASK_STACK, NULL, TASK_PRIO, &s_task, TASK_CORE);
-    ESP_ERROR_CHECK(ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+    s_control = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(s_control ? ESP_OK : ESP_ERR_NO_MEM);
 }
 
 void alarm_sound_configure(alarm_sound_voice_t voice, uint8_t volume_pct) {
@@ -376,17 +426,40 @@ void alarm_sound_configure(alarm_sound_voice_t voice, uint8_t volume_pct) {
     s_gain_target = v * v * v;
 }
 
-static void post(uint32_t target) {
+// Caller holds s_control. Posting never waits for queue space or playback.
+static void post_locked(uint32_t target) {
     if (audio_source_suspended()) {
         target = 0;
     }
-    __atomic_store_n(&s_target, target, __ATOMIC_RELEASE);
-    if (s_task) {
-        xTaskNotifyGive(s_task);
+    s_requested = target;
+    if (!s_task && !target) {
+        return;
+    }
+    if (s_count == COMMAND_CAPACITY) {
+        s_head = (s_head + 1) % COMMAND_CAPACITY;
+        s_count--;
+    }
+    s_commands[(s_head + s_count) % COMMAND_CAPACITY] = target;
+    s_count++;
+    if (!s_task && xTaskCreatePinnedToCore(system_sound_task, "system_sound", TASK_STACK, NULL,
+                                         TASK_PRIO, &s_task, TASK_CORE) != pdPASS) {
+        s_task = NULL;
+        s_count = 0;
+        s_requested = 0;
+        ESP_LOGW(TAG, "cannot create system sound worker");
     }
 }
 
+static void post(uint32_t target) {
+    xSemaphoreTake(s_control, portMAX_DELAY);
+    post_locked(target);
+    xSemaphoreGive(s_control);
+}
+
 void alarm_sound_start(alarm_sound_kind_t kind) {
+    if ((unsigned)kind >= sizeof(k_patterns) / sizeof(k_patterns[0])) {
+        return;
+    }
     ESP_LOGI(TAG, "ringing (%d)", kind);
     post((uint32_t)kind + 1);
 }
@@ -396,10 +469,13 @@ void alarm_sound_stop(void) {
 }
 
 void alarm_sound_preview(alarm_sound_kind_t kind) {
-    uint32_t cur = __atomic_load_n(&s_target, __ATOMIC_ACQUIRE);
-    if (cur && !(cur & TARGET_ONCE)) {
+    if ((unsigned)kind >= sizeof(k_patterns) / sizeof(k_patterns[0])) {
         return;
     }
-    s_preview_gen++;
-    post(((uint32_t)kind + 1) | TARGET_ONCE | (s_preview_gen << TARGET_GEN_SHIFT));
+    xSemaphoreTake(s_control, portMAX_DELAY);
+    if (!s_requested || (s_requested & TARGET_ONCE)) {
+        s_preview_gen++;
+        post_locked(((uint32_t)kind + 1) | TARGET_ONCE | (s_preview_gen << TARGET_GEN_SHIFT));
+    }
+    xSemaphoreGive(s_control);
 }

@@ -137,28 +137,22 @@ static ota_status_t state(void) {
     ota_get_status(&status);
     return status;
 }
-static void run_worker(void) {
-    assert(worker);
-    worker(worker_arg);
-    worker = NULL;
-}
-
 int main(void) {
     prepare(CONFIG_IDF_FIRMWARE_CHIP_ID);
     assert(ota_receive(sizeof(image), read_image, NULL));
     assert(state().state == OTA_READY && state().target == OTA_TARGET_S3 && suspended);
     assert(erases == 1 && writes == 2 && state().progress == 100);
     assert(!ota_receive(sizeof(image), read_image, NULL));
-    assert(!ota_download("https://github.com/fw.bin", sizeof(image), OTA_TARGET_S3, expected_digest));
+    assert(!ota_download_reserve(OTA_TARGET_S3));
     assert(state().state == OTA_READY);
     ota_decline();
     assert(!suspended && state().state == OTA_DECLINED);
 
     prepare(ESP_CHIP_ID_ESP32);
-    assert(ota_download("https://github.com/fw.bin", sizeof(image), OTA_TARGET_S3, expected_digest));
+    assert(ota_download_reserve(OTA_TARGET_S3));
     assert(state().state == OTA_RECEIVING);
     assert(!ota_receive(sizeof(image), read_image, NULL));
-    run_worker();
+    ota_download("https://github.com/fw.bin", sizeof(image), OTA_TARGET_S3, expected_digest);
     assert(state().state == OTA_FAILED && strstr(state().error, "wrong chip"));
     assert(erases == 1 && !suspended); // Wrong-chip release never erases flash.
 
@@ -171,32 +165,34 @@ int main(void) {
     assert(erases == 1 && !suspended);
 
     prepare(CONFIG_IDF_FIRMWARE_CHIP_ID);
-    assert(ota_download("https://github.com/fw.bin", sizeof(image) + 1, OTA_TARGET_S3, expected_digest));
-    run_worker();
+    assert(ota_download_reserve(OTA_TARGET_S3));
+    ota_download("https://github.com/fw.bin", sizeof(image) + 1, OTA_TARGET_S3, expected_digest);
+    assert(!worker); // Downloads reuse the caller, without a new task.
     assert(state().state == OTA_FAILED && strstr(state().error, "size changed"));
     assert(erases == 1);
-    create_task = false;
-    assert(!ota_download("https://github.com/fw.bin", sizeof(image), OTA_TARGET_S3, expected_digest));
-    assert(state().state == OTA_FAILED && !suspended);
-    create_task = true;
 
     prepare(ESP_CHIP_ID_ESP32);
-    assert(ota_download("https://github.com/fw.bin", sizeof(image), OTA_TARGET_ESP32, expected_digest));
-    run_worker();
+    assert(ota_download_reserve(OTA_TARGET_ESP32));
+    ota_download("https://github.com/fw.bin", sizeof(image), OTA_TARGET_ESP32, expected_digest);
+    assert(!worker); // Downloads reuse the caller, without a new task.
     assert(state().state == OTA_READY && state().target == OTA_TARGET_ESP32);
     assert(erases == 2 && writes == 4);
     ota_decline();
     prepare(CONFIG_IDF_FIRMWARE_CHIP_ID);
     image[400] ^= 1; // Same length and valid header, but different release bytes.
-    assert(ota_download("https://github.com/fw.bin", sizeof(image), OTA_TARGET_S3, expected_digest));
-    run_worker();
+    assert(ota_download_reserve(OTA_TARGET_S3));
+    ota_download("https://github.com/fw.bin", sizeof(image), OTA_TARGET_S3, expected_digest);
+    assert(!worker); // Downloads reuse the caller, without a new task.
     assert(state().state == OTA_FAILED && strstr(state().error, "checksum mismatch"));
     assert(!suspended);
     // The correct full-file digest is accepted for both image types.
     prepare(CONFIG_IDF_FIRMWARE_CHIP_ID);
-    assert(ota_download("https://github.com/fw.bin", sizeof(image), OTA_TARGET_S3, expected_digest));
-    run_worker();
+    assert(ota_download_reserve(OTA_TARGET_S3));
+    ota_download("https://github.com/fw.bin", sizeof(image), OTA_TARGET_S3, expected_digest);
+    assert(!worker); // Downloads reuse the caller, without a new task.
     assert(state().state == OTA_READY);
-    ota_decline();
+    create_task=false; ota_install();
+    assert(state().state==OTA_FAILED && !suspended);
+    create_task=true;
     puts("OTA reservation, confirmation, target validation and transfer failures passed");
 }

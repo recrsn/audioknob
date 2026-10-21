@@ -14,6 +14,8 @@
 #include "freertos/task.h"
 #include "mdns.h"
 #include "raop.h"
+#include "radio.h"
+#include "stream_player.h"
 
 #define CTRL_NET_UP BIT0
 #define CTRL_VOLUME BIT1
@@ -28,6 +30,8 @@
 #define CTRL_TASK_PRIO 3
 
 // Below everything audio: a large PNG cover takes seconds to decode.
+// Covers decode from memory and never access NVS/partitions/files, so the
+// retained artwork stack can use PSRAM instead of internal audio/DMA memory.
 #define ART_STACK_SIZE 6144
 #define ART_TASK_PRIO 1
 
@@ -151,6 +155,17 @@ static bool on_raop_event(const raop_event_t *event) {
         post_artwork(NULL, 0);
         break;
 
+    case RAOP_EVENT_PREPARE:
+        if (audio_source_suspended()) return false;
+        // Pairing/idle sessions leave radio playing. Actual audio SETUP must
+        // release its TLS and decoder before adding another stream's buffers.
+        if (audio_source_active() == AUDIO_SOURCE_RADIO) radio_stop();
+        if (!stream_player_wait_stopped(1000)) {
+            ESP_LOGW(TAG, "radio teardown timed out; refusing overlapping stream");
+            return false;
+        }
+        break;
+
     case RAOP_EVENT_PLAY:
         if (!audio_source_claim(AUDIO_SOURCE_AIRPLAY)) {
             airplay_preempt();
@@ -228,8 +243,18 @@ static void start_receiver(void) {
     }
 }
 
+// ESP-IDF reports stack high-water marks in bytes. Keep the original
+// reservation while measuring startup/key parsing and live DACP traffic.
+// Later samples also include this logger's own stack use (conservative).
+static void ctrl_stack_log(const char *stage) {
+    unsigned free_bytes = (unsigned)uxTaskGetStackHighWaterMark(NULL);
+    ESP_LOGI(TAG, "airplay_ctrl stack: stage=%s reserved=%u min_free=%u peak_used=%u bytes",
+             stage, (unsigned)CTRL_STACK_SIZE, free_bytes, (unsigned)CTRL_STACK_SIZE - free_bytes);
+}
+
 static void ctrl_task(void *arg) {
     (void)arg;
+    ctrl_stack_log("task_start");
     for (;;) {
         uint32_t bits = 0;
         xTaskNotifyWait(0, UINT32_MAX, &bits, portMAX_DELAY);
@@ -240,38 +265,51 @@ static void ctrl_task(void *arg) {
             ESP_ERROR_CHECK(mdns_init());
             advertise_name(name);
             s_net_up = true;
+            ctrl_stack_log("mdns_start");
         }
         if (!s_net_up) {
             continue;
         }
         if (bits & CTRL_RENAME) {
             advertise_name(name);
+            ctrl_stack_log("advertise_rename");
         }
         if (!s_raop) {
             start_receiver();
+            ctrl_stack_log("receiver_create");
             continue;
         }
 
         if (bits & CTRL_RENAME) {
             raop_set_name(s_raop, name);
+            ctrl_stack_log("receiver_rename");
         }
 
-        if ((bits & CTRL_PAUSE) && !raop_remote_command(s_raop, "pause")) {
-            // No way to ask the sender to stop: drop it rather than leave it
-            // streaming into a DAC it no longer owns.
-            raop_abort(s_raop);
+        if (bits & CTRL_PAUSE) {
+            bool paused = raop_remote_command(s_raop, "pause");
+            ctrl_stack_log("remote_pause");
+            if (!paused) {
+                // No way to ask the sender to stop: drop it rather than leave it
+                // streaming into a DAC it no longer owns.
+                raop_abort(s_raop);
+                ctrl_stack_log("receiver_abort");
+            }
         }
         if (bits & CTRL_PLAY_PAUSE) {
             raop_remote_command(s_raop, "playpause");
+            ctrl_stack_log("remote_playpause");
         }
         if (bits & CTRL_NEXT) {
             raop_remote_command(s_raop, "nextitem");
+            ctrl_stack_log("remote_nextitem");
         }
         if (bits & CTRL_PREV) {
             raop_remote_command(s_raop, "previtem");
+            ctrl_stack_log("remote_previtem");
         }
         if (bits & CTRL_VOLUME) {
             raop_remote_volume(s_raop, s_pending_volume / 100.0f);
+            ctrl_stack_log("remote_volume");
         }
     }
 }
@@ -284,8 +322,9 @@ void airplay_init(void) {
 
     BaseType_t ok =
         xTaskCreatePinnedToCore(ctrl_task, "airplay_ctrl", CTRL_STACK_SIZE, NULL, CTRL_TASK_PRIO, &s_ctrl_task, 0);
-    BaseType_t art_ok = xTaskCreatePinnedToCore(art_task, "airplay_art", ART_STACK_SIZE, NULL, ART_TASK_PRIO,
-                                                &s_art_task, tskNO_AFFINITY);
+    BaseType_t art_ok = xTaskCreatePinnedToCoreWithCaps(art_task, "airplay_art", ART_STACK_SIZE, NULL, ART_TASK_PRIO,
+                                                        &s_art_task, tskNO_AFFINITY,
+                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     ESP_ERROR_CHECK(s_lock && s_art && ok == pdPASS && art_ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }
 

@@ -393,11 +393,13 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
     <div class="card">
       <div class="row"><span>Set automatically</span><label class="sw"><input type="checkbox" id="locAuto" aria-label="Set location automatically"><i></i></label></div>
       <div class="row"><span>Location</span><span class="val" id="loc"></span></div>
+      <button class="row action" id="locdetect" hidden>Detect again</button>
       <div class="row col" id="locmanual" hidden>
         <form class="inline" id="locform"><input type="text" id="locq" placeholder="Search for a city" autocomplete="off"><button class="btn">Search</button></form>
         <div class="results" id="locresults"></div>
       </div>
     </div>
+    <p class="foot">The detected location is saved until you request detection again.</p>
   </div>
 </section>
 
@@ -813,13 +815,7 @@ function render(s) {
   $("clock24").checked = s.clock24;
   setSeg("fahrenheit", s.fahrenheit);
   setSeg("airShow", s.airShow);
-  // Switching location off only opens the search: the device stays automatic
-  // until a city is picked.
-  if (!s.locationAuto) locManual = false;
-  const locAuto = s.locationAuto && !locManual;
-  $("locAuto").checked = locAuto;
-  $("locmanual").hidden = locAuto;
-  setText("loc", s.location || (s.locationAuto ? "Detecting…" : "—"));
+  renderLocation(s);
   $("tzAuto").checked = s.tzAuto;
   $("tzautorow").hidden = !s.tzAuto;
   $("tzmanual").hidden = s.tzAuto;
@@ -884,7 +880,7 @@ function renderRelease(s, available) {
   $("relicon").setAttribute("d", REL_ICONS[kind] || REL_ICONS.busy);
   setText("reltitle", title);
   setText("relsub", sub);
-  const times = r.lastCheck ? `Last checked ${when(r.lastCheck)}; next check ${when(r.nextCheck)}.`
+  const times = r.lastCheck ? `Last checked ${when(r.lastCheck)}. Choose Check for Updates to check again.`
                             : "Checks start once Wi-Fi and the clock are ready.";
   setText("releasehint", (available ? "After downloading, confirm the install on the device. " : "") + times);
 }
@@ -927,6 +923,17 @@ function renderUpdate(s) {
   const restarting = u.state === "installing" && u.progress >= 100;
   setBar(busy ? (restarting ? undefined : u.progress) : null);
   $("updbtn").disabled = locked;
+}
+
+function renderLocation(s) {
+  // Switching location off only opens the search: the device stays automatic
+  // until a city is picked.
+  if (!s.locationAuto) locManual = false;
+  const locAuto = s.locationAuto && !locManual;
+  $("locAuto").checked = locAuto;
+  $("locmanual").hidden = locAuto;
+  setText("loc", s.location || (s.locationAuto ? "Detecting…" : "—"));
+  $("locdetect").hidden = !locAuto;
 }
 
 async function poll() {
@@ -1044,6 +1051,10 @@ $("locAuto").onchange = e => {
   }
   render(state);
   if (locManual) $("locq").focus();
+};
+
+$("locdetect").onclick = async () => {
+  if (await post("/api/location", {detect: 1})) toast("Location detection requested");
 };
 
 async function addStation(name, url) {

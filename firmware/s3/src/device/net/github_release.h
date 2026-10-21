@@ -18,7 +18,7 @@ typedef struct {
     bool checked;
     // Unix seconds; 0 until the first check finishes.
     int64_t last_check;
-    int64_t next_check;
+    int64_t next_check; // 0: no scheduled polling; retained for API compatibility
     bool s3_available;
     bool bluetooth_available;
     release_notice_t notice;
@@ -29,8 +29,8 @@ typedef struct {
     char error[96];
 } github_release_status_t;
 
-// Start once after networking is initialized. Checks after WiFi/time are
-// ready, then daily; transient failures retry hourly. Manual checks wake it.
+// Register one startup check after WiFi and clock readiness. No daily polling.
+// Manual checks use the same retained worker; results remain available between jobs.
 void github_release_start(void);
 bool github_release_check(void);
 void github_release_get_status(github_release_status_t *out);

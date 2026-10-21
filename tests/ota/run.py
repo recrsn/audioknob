@@ -23,7 +23,7 @@ with tempfile.TemporaryDirectory(prefix='audioknob-ota-') as temp:
     (stubs / 'freertos').mkdir(parents=True)
     headers = ['audio_source.h', 'esp_app_desc.h', 'esp_app_format.h', 'esp_heap_caps.h',
                'esp_log.h', 'esp_ota_ops.h', 'esp_system.h', 'esp_http_client.h',
-               'freertos/FreeRTOS.h', 'freertos/task.h']
+               'freertos/FreeRTOS.h', 'freertos/task.h', 'freertos/semphr.h']
     for header in headers:
         (stubs / header).write_text('#include "mock_sdk.h"\n')
     (stubs / 'mbedtls').mkdir()
@@ -55,6 +55,14 @@ with tempfile.TemporaryDirectory(prefix='audioknob-ota-') as temp:
         'cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
         '-I' + str(stubs), '-I' + str(NET), '-I' + str(Path(__file__).parent),
         str(NET / 'https_download.c'), str(Path(__file__).with_name('test_https_download.c')),
+        '-o', binary,
+    ], check=True)
+    subprocess.run([binary], check=True)
+    binary = str(Path(temp) / 'http_get')
+    subprocess.run([
+        'cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
+        '-I' + str(stubs), '-I' + str(NET), '-I' + str(Path(__file__).parent),
+        str(NET / 'http_get.c'), str(Path(__file__).with_name('test_http_get.c')),
         '-o', binary,
     ], check=True)
     subprocess.run([binary], check=True)

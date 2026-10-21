@@ -3,8 +3,10 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #define HTTP_TIMEOUT_MS 10000
+#define RESPONSE_TIMEOUT_US (30LL * 1000000)
 
 static const char *TAG = "http_get";
 
@@ -25,9 +27,10 @@ int http_get(const char *url, char *buf, size_t cap) {
     if (esp_http_client_open(client, 0) == ESP_OK) {
         esp_http_client_fetch_headers(client);
         int status = esp_http_client_get_status_code(client);
+        int64_t deadline = esp_timer_get_time() + RESPONSE_TIMEOUT_US;
         int total = 0;
         int n;
-        while (total < (int)cap - 1 && (n = esp_http_client_read(client, buf + total, cap - 1 - total)) > 0) {
+        while (esp_timer_get_time() < deadline && total < (int)cap - 1 && (n = esp_http_client_read(client, buf + total, cap - 1 - total)) > 0) {
             total += n;
         }
         if (status != 200) {
