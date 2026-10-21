@@ -2,12 +2,12 @@
 
 | Path | Origin | License |
 |------|--------|---------|
-| `firmware/s3/src/device/airplay/shared/`, `firmware/s3/src/device/airplay/v1/` | RAOP receiver by Philippe (philippe_44) | MIT |
+| `firmware/s3/src/airplay/shared/` | RAOP receiver by Philippe (philippe_44) | MIT |
 | `firmware/s3/lib/pair_ap/` | pair_ap by Espen Jürgensen | MIT (see `firmware/s3/lib/pair_ap/LICENSE`) |
 | `firmware/s3/src/ui/assets/font_inter_*.c` | Inter typeface | SIL OFL 1.1 |
 | `firmware/s3/src/ui/assets/font_icons_*.c` | Material Symbols | Apache-2.0 |
 
-The AirPlay 1 RSA key in `firmware/s3/src/device/airplay/shared/raop_setup.c` is the publicly
+The AirPlay 1 RSA key in `firmware/s3/src/airplay/shared/raop_setup.c` is the publicly
 known AirPort Express key used by open-source receivers; it is not a secret
 of this project.
 

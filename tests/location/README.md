@@ -1,7 +1,7 @@
 Run `python3 tests/location/run.py` from the repository root. Requires a C compiler
 with AddressSanitizer/UndefinedBehaviorSanitizer and Node.js.
 
-The C harness executes the real `online.c` jobs through `network_jobs.c`, using a deterministic FreeRTOS
+The C harness executes the real `online/online.c` jobs through `net/network_jobs.c`, using a deterministic FreeRTOS
 clock, scripted geolocation/weather responses and transactional in-memory NVS.
 It checks cached automatic and manual locations across simulated reboots, no
 automatic refresh over 24 hours, missing-location backoff (30 seconds through

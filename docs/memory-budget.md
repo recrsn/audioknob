@@ -231,7 +231,7 @@ settings were unchanged and no new firmware was flashed for this comparison.
 
 ## Shared network worker with reusable static storage
 
-`online` and `release_check` no longer own persistent tasks. `network_jobs.c`
+`online` and `release_check` no longer own persistent tasks. `net/network_jobs.c`
 holds five fixed slots (location, weather/air quality, release discovery,
 location persistence and reserved OTA downloads), one pending invocation per kind plus the currently
 running callback. A submission keeps the earliest deadline; repeated requests

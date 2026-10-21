@@ -69,8 +69,8 @@ build has been stress-tested. 2 KiB is below measured usage.
 One nonfatal CPU 0 idle watchdog warning occurred near buffered-stream startup,
 while `ap2_buf_dec` was running. Symbolization of the captured backtrace points
 through `unpack_idx_esc` → AAC Huffman/decode functions →
-`esp_aac_dec_decode` → `decoder_decode` (`shared/decoder.c:170`) →
-`play_block` / `decoder_task` (`v2/buffered.c:279,359`). Playback and controls
+`esp_aac_dec_decode` → `decoder_decode` (`airplay/shared/decoder.c:170`) →
+`play_block` / `decoder_task` (`airplay/receiver/buffered.c:279,359`). Playback and controls
 continued afterward; this was not an `airplay_ctrl` stack overflow. Startup
 also logged timestamp gaps and late-packet trimming. The cause of decoder CPU
 starvation has not been fixed or established by this control-stack test.

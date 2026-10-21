@@ -1,17 +1,16 @@
 #pragma once
 
-// Private to the app pages: ui/apps/tools.c (shared widgets, the countdown
-// engine, page registry) and one file per page (ui/apps/radio.c, ui/apps/weather.c, ui/apps/lights/page.c,
-// ui/apps/countdown/timer.c, ui/apps/countdown/tomato.c, ui/apps/ambience.c, ui/apps/stopwatch.c, ui/apps/settings/settings.c). ui.c only sees
-// ui_tools_*() in ui/internal.h.
+// Private to the app pages: tools.c (shared widgets, the page registry) and
+// one page per app under ui/apps/; the countdown the timer and tomato share
+// is in countdown/. The rest of ui/ only sees ui_tools_*() in ui/internal.h.
 
 #include <stddef.h>
 
 #include "ui/assets/fonts.h"
+#include "ui/apps/countdown/countdown.h"
 #include "ui/internal.h"
 
 #define TOOL_HINT_Y          44
-#define COUNTDOWN_RING_RANGE 1000
 
 lv_obj_t *tool_ring_create(lv_obj_t *parent, lv_color_t tint, int32_t range);
 // A thick closed ring from 12 o'clock over a ticked face, for the time
@@ -65,45 +64,6 @@ void tool_list_center(lv_obj_t *list, int index, lv_anim_enable_t anim);
 // middle, so the knob carries on from what's on screen.
 int tool_list_in_view(lv_obj_t *list, int selected, int count);
 
-typedef enum {
-    COUNTDOWN_IDLE,
-    COUNTDOWN_RUNNING,
-    COUNTDOWN_PAUSED,
-    COUNTDOWN_ALERT,
-} countdown_state_t;
-
-// A countdown that rings when it reaches zero. Time is kept as an lv_tick
-// deadline rather than counted refreshes, so a stalled LVGL task delays the
-// redraw but never the time itself.
-typedef struct countdown countdown_t;
-struct countdown {
-    lv_obj_t *screen;
-    lv_obj_t *ring;
-    lv_obj_t *time_label;
-    countdown_state_t state;
-    uint32_t total_ms;     // what a reset returns to; the ring's full scale
-    uint32_t remaining_ms; // authoritative unless running
-    uint32_t end_tick;     // authoritative while running
-    uint32_t alert_tick;
-    ui_alert_t alert; // what its ringing reports
-    // Page hooks. changed() runs after every refresh (every tick while
-    // running), so it must be cheap and idempotent. expired()/dismissed()
-    // are optional and bracket the alert.
-    void (*changed)(countdown_t *cd);
-    void (*expired)(countdown_t *cd);
-    void (*dismissed)(countdown_t *cd);
-};
-
-uint32_t countdown_remaining_ms(const countdown_t *cd);
-// Only takes effect on the remaining time while idle.
-void countdown_set_total(countdown_t *cd, uint32_t ms);
-// Idle/paused -> running -> paused; a ringing countdown is dismissed.
-void countdown_toggle(countdown_t *cd);
-// Back to idle at total_ms, dismissing a ringing alert.
-void countdown_reset(countdown_t *cd);
-void countdown_refresh(countdown_t *cd);
-const char *countdown_play_symbol(const countdown_t *cd);
-
 typedef struct {
     const char *name; // as the launcher shows it
     const char *icon; // an icons_48/icons_20 glyph
@@ -120,6 +80,8 @@ typedef struct {
 } tool_page_desc_t;
 
 void tool_page_register(lv_obj_t *screen, const tool_page_desc_t *desc);
+// Reports a countdown on `screen` ringing, or UI_ALERT_NONE once dismissed.
+void tool_alert(lv_obj_t *screen, ui_alert_t alert);
 
 void inbox_page_build(lv_obj_t *screen);
 void talk_page_build(lv_obj_t *screen);

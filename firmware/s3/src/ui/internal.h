@@ -1,7 +1,7 @@
 #pragma once
 
-// Shared between ui.c (screens, navigation), the app pages (ui/apps/tools.c and
-// the ui_<app>.c files) and ui_wallpaper.c. Not part of the public UI API.
+// Shared across ui/: the shell, the screens and the app pages (ui/apps/).
+// Not part of the public UI API.
 
 #include <stdbool.h>
 #include <stddef.h>
