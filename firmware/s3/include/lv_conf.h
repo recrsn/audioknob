@@ -37,8 +37,9 @@
 #ifdef AK_NATIVE
     #define LV_USE_STDLIB_MALLOC LV_STDLIB_CLIB
 #else
-    /* src/device/drivers/lv_mem_esp.c: everything in PSRAM. */
-    #define LV_USE_STDLIB_MALLOC LV_STDLIB_CUSTOM
+    /* The built-in TLSF pool, allocated from PSRAM below: plain malloc
+     * would put LVGL's small allocations in internal RAM first. */
+    #define LV_USE_STDLIB_MALLOC LV_STDLIB_BUILTIN
 #endif
 
 /** String functions source
@@ -61,12 +62,16 @@
 
 #if LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN
 /** Size of the pool `lv_malloc()` allocates from. Needs to be at least 2kB (2048). */
-#define LV_MEM_SIZE 65536
+#define LV_MEM_SIZE (384 * 1024)
 
 /** Place the pool at a fixed address instead of allocating it as a normal array.
  *  0: unused.
  */
 #define LV_MEM_ADR 0x0
+
+/* The pool lives in PSRAM; as a static array it would take internal RAM. */
+#define LV_MEM_POOL_INCLUDE "esp_heap_caps.h"
+#define LV_MEM_POOL_ALLOC(size) heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)
 
 #endif /*LV_USE_STDLIB_MALLOC == LV_STDLIB_BUILTIN*/
 
