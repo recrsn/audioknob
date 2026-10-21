@@ -34,6 +34,14 @@ CONFIG_LWIP_DHCP_GET_NTP_SRV=y
 # the default 6-slot UDP queue drops audio, which snowballs into resend storms.
 CONFIG_LWIP_UDP_RECVMBOX_SIZE=64
 
+# Lossless buffered AirPlay (~1.5-2 Mbit/s) outruns the default 4-MSS window
+# on a cold start or skip. Received frames are copied out of the WiFi driver's
+# internal-RAM buffers into lwIP's PSRAM heap, so a 32 KB window queues in
+# PSRAM: internal RAM's low point went from ~5 KB to ~13 KB with it.
+CONFIG_LWIP_L2_TO_L3_COPY=y
+CONFIG_LWIP_TCP_WND_DEFAULT=32768
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
+
 # Internal RAM is for what needs speed (DMA, task stacks); the rest goes to
 # PSRAM. AirPlay's RSA handshake (once per session) and mDNS data don't.
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y

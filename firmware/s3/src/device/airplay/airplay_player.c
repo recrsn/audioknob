@@ -16,7 +16,6 @@
 #define SLOT_FRAMES 352  // one AirPlay packet
 // ~3.2 s: RAOP's maximum 2.4 s latency plus network jitter.
 #define SLOT_COUNT 400
-#define FRAME_US ((SLOT_FRAMES * 1000000LL) / AUDIO_OUT_SAMPLE_RATE)
 
 // A frame this far off schedule means a real disturbance (stall, sender
 // clock jump), corrected at once: late frames are dropped until back on
@@ -43,9 +42,10 @@
 // Feed-forward: the DAC clock's offset from the sender's is near constant
 // (the S3 has no audio PLL, so 44.1 kHz is only approximated), so learn it
 // from the net trims and spread the same correction evenly, leaving the
-// servo only the residual. Learned per boot, across streams.
-#define FF_MIN_FRAMES (10 * AUDIO_OUT_SAMPLE_RATE)
-#define FF_MAX_FRAMES (600 * AUDIO_OUT_SAMPLE_RATE)
+// servo only the residual. Learned per boot, across streams, and per rate:
+// 44.1 and 48 kHz come from different clock dividers.
+#define FF_MIN_S 10
+#define FF_MAX_S 600
 
 #define PLAYER_STACK_SIZE 4096
 #define PLAYER_TASK_PRIO 15
@@ -57,9 +57,16 @@
 
 typedef struct {
     int64_t playtime_us;
+    uint32_t rate;
     uint16_t frames;
-    int16_t pcm[SLOT_FRAMES * 2];
+    int32_t pcm[SLOT_FRAMES * 2];
 } slot_t;
+
+typedef struct {
+    uint32_t rate;
+    // Net samples added (+) or removed (-) per sample played, and its basis.
+    int64_t net, frames;
+} ff_t;
 
 typedef struct {
     bool running;
@@ -84,12 +91,10 @@ static TaskHandle_t s_task;
 static volatile bool s_flushed;
 static volatile int32_t s_gain_target = GAIN_UNITY;
 static int32_t s_gain = GAIN_UNITY;
-// Net samples added (+) or removed (-) per sample played, and its basis.
-static int64_t s_ff_net, s_ff_frames;
+static ff_t s_ff[] = {{.rate = 44100}, {.rate = 48000}};
 
 // One spare frame for a stretch trim.
-static int16_t s_out[(SLOT_FRAMES + 1) * 2];
-static const int16_t s_silence[SLOT_FRAMES * 2];
+static int32_t s_out[(SLOT_FRAMES + 1) * 2];
 
 // Caller holds s_lock.
 static void pop_locked(int n) {
@@ -100,11 +105,20 @@ static void pop_locked(int n) {
     s_count -= n;
 }
 
+static int64_t frames_to_us(int64_t frames, uint32_t rate) {
+    return frames * 1000000 / rate;
+}
+
+static ff_t *ff_for(uint32_t rate) {
+    return &s_ff[rate == s_ff[0].rate ? 0 : 1];
+}
+
 static void write_silence_us(int64_t us) {
-    size_t frames = (size_t)(us * AUDIO_OUT_SAMPLE_RATE / 1000000);
+    size_t frames = (size_t)(us * audio_out_rate() / 1000000);
+    memset(s_out, 0, sizeof(s_out));
     while (frames > 0) {
         size_t chunk = frames < SLOT_FRAMES ? frames : SLOT_FRAMES;
-        audio_out_write(s_silence, chunk);
+        audio_out_write(s_out, chunk);
         frames -= chunk;
     }
 }
@@ -119,11 +133,11 @@ static int64_t lead_us(int64_t playtime_us) {
 
 // The quietest point is where dropping or repeating a sample leaves the
 // smallest step in the waveform.
-static size_t quietest_frame(const int16_t *pcm, size_t frames) {
+static size_t quietest_frame(const int32_t *pcm, size_t frames) {
     size_t best = frames - 1;
-    int32_t best_mag = INT32_MAX;
+    int64_t best_mag = INT64_MAX;
     for (size_t i = 0; i < frames; i++) {
-        int32_t mag = abs(pcm[i * 2]) + abs(pcm[i * 2 + 1]);
+        int64_t mag = llabs((int64_t)pcm[i * 2]) + llabs((int64_t)pcm[i * 2 + 1]);
         if (mag < best_mag) {
             best_mag = mag;
             best = i;
@@ -133,19 +147,19 @@ static size_t quietest_frame(const int16_t *pcm, size_t frames) {
 }
 
 // Copies pcm into s_out, one frame shorter (adjust < 0) or longer (> 0).
-static size_t copy_trimmed(const int16_t *pcm, size_t frames, int adjust) {
+static size_t copy_trimmed(const int32_t *pcm, size_t frames, int adjust) {
     if (adjust == 0) {
-        memcpy(s_out, pcm, frames * 2 * sizeof(int16_t));
+        memcpy(s_out, pcm, frames * 2 * sizeof(int32_t));
         return frames;
     }
     size_t at = quietest_frame(pcm, frames);
     if (adjust < 0) {
-        memcpy(s_out, pcm, at * 2 * sizeof(int16_t));
-        memcpy(s_out + at * 2, pcm + (at + 1) * 2, (frames - at - 1) * 2 * sizeof(int16_t));
+        memcpy(s_out, pcm, at * 2 * sizeof(int32_t));
+        memcpy(s_out + at * 2, pcm + (at + 1) * 2, (frames - at - 1) * 2 * sizeof(int32_t));
         return frames - 1;
     }
-    memcpy(s_out, pcm, (at + 1) * 2 * sizeof(int16_t));
-    memcpy(s_out + (at + 1) * 2, pcm + at * 2, (frames - at) * 2 * sizeof(int16_t));
+    memcpy(s_out, pcm, (at + 1) * 2 * sizeof(int32_t));
+    memcpy(s_out + (at + 1) * 2, pcm + at * 2, (frames - at) * 2 * sizeof(int32_t));
     return frames + 1;
 }
 
@@ -156,16 +170,16 @@ static void apply_gain(size_t frames) {
             int32_t step = (target - s_gain) / GAIN_RAMP_DIV;
             s_gain += step ? step : (target > s_gain ? 1 : -1);
         }
-        s_out[i * 2] = (int16_t)((s_out[i * 2] * s_gain) >> 15);
-        s_out[i * 2 + 1] = (int16_t)((s_out[i * 2 + 1] * s_gain) >> 15);
+        s_out[i * 2] = (int32_t)(((int64_t)s_out[i * 2] * s_gain) >> 15);
+        s_out[i * 2 + 1] = (int32_t)(((int64_t)s_out[i * 2 + 1] * s_gain) >> 15);
     }
 }
 
-static int feed_forward(sync_t *sync, size_t frames) {
-    if (s_ff_frames < FF_MIN_FRAMES) {
+static int feed_forward(sync_t *sync, const ff_t *ff, size_t frames) {
+    if (ff->frames < (int64_t)FF_MIN_S * ff->rate) {
         return 0;
     }
-    sync->ff_acc += (float)s_ff_net / (float)s_ff_frames * (float)frames;
+    sync->ff_acc += (float)ff->net / (float)ff->frames * (float)frames;
     if (sync->ff_acc >= 1.0f) {
         sync->ff_acc -= 1.0f;
         return 1;
@@ -177,19 +191,19 @@ static int feed_forward(sync_t *sync, size_t frames) {
     return 0;
 }
 
-static void ff_record(int adjust, size_t frames) {
-    s_ff_net += adjust;
-    s_ff_frames += frames;
-    if (s_ff_frames > FF_MAX_FRAMES) {
+static void ff_record(ff_t *ff, int adjust, size_t frames) {
+    ff->net += adjust;
+    ff->frames += frames;
+    if (ff->frames > (int64_t)FF_MAX_S * ff->rate) {
         // Age old history so a changed rate (another sender) is relearned.
-        s_ff_net /= 2;
-        s_ff_frames /= 2;
+        ff->net /= 2;
+        ff->frames /= 2;
     }
 }
 
 // Returns the one-sample adjustment the servo wants for the frame about to
 // play, given its current lead.
-static int servo_update(sync_t *sync, int64_t lead) {
+static int servo_update(sync_t *sync, const ff_t *ff, int64_t lead) {
     if (sync->cal_frames < CAL_SETTLE_FRAMES + CAL_FRAMES) {
         if (sync->cal_frames++ >= CAL_SETTLE_FRAMES) {
             sync->cal_sum_us += lead;
@@ -218,7 +232,7 @@ static int servo_update(sync_t *sync, int64_t lead) {
     } else if (sync->servo_on && mag < SERVO_DISENGAGE_US) {
         sync->servo_on = false;
         ESP_LOGI(TAG, "in sync (%lu trims so far, clock %+ld ppm, underruns %lu)", (unsigned long)sync->trims,
-                 s_ff_frames ? (long)(s_ff_net * 1000000 / s_ff_frames) : 0L, (unsigned long)audio_out_underruns());
+                 ff->frames ? (long)(ff->net * 1000000 / ff->frames) : 0L, (unsigned long)audio_out_underruns());
     }
 
     if (!sync->servo_on || ++sync->servo_phase < TRIM_INTERVAL) {
@@ -233,10 +247,25 @@ static int servo_update(sync_t *sync, int64_t lead) {
 // Caller holds s_lock; releases it.
 static void play_head_locked(sync_t *sync) {
     const slot_t *slot = &s_slots[s_head];
+    const int64_t frame_us = frames_to_us(slot->frames, slot->rate);
+
+    if (slot->rate != audio_out_rate()) {
+        // Reclocking waits for the old rate's audio to play out, then the
+        // stream re-aligns at the new one like a fresh start.
+        uint32_t rate = slot->rate;
+        xSemaphoreGive(s_lock);
+        audio_out_set_rate(rate);
+        sync->running = false;
+        if (audio_out_rate() != rate) {
+            // The clock refused it: drop the audio rather than retry forever.
+            airplay_player_flush();
+        }
+        return;
+    }
     int64_t lead = lead_us(slot->playtime_us);
 
     if (!sync->running) {
-        if (lead < -FRAME_US / 2) {
+        if (lead < -frame_us / 2) {
             pop_locked(1);
             xSemaphoreGive(s_lock);
             return;
@@ -259,7 +288,7 @@ static void play_head_locked(sync_t *sync) {
         return;
     }
 
-    int64_t late_limit = sync->draining ? -FRAME_US / 2 : -GATE_US;
+    int64_t late_limit = sync->draining ? -frame_us / 2 : -GATE_US;
     if (lead < late_limit) {
         // Drop until back on schedule, not merely back inside the gate, or
         // the session would sit at -GATE_US for good.
@@ -283,11 +312,12 @@ static void play_head_locked(sync_t *sync) {
         return;
     }
 
-    int adjust = servo_update(sync, lead);
+    ff_t *ff = ff_for(slot->rate);
+    int adjust = servo_update(sync, ff, lead);
     if (sync->cal_frames >= CAL_SETTLE_FRAMES + CAL_FRAMES) {
-        adjust += feed_forward(sync, slot->frames);
+        adjust += feed_forward(sync, ff, slot->frames);
         adjust = adjust > 1 ? 1 : (adjust < -1 ? -1 : adjust);
-        ff_record(adjust, slot->frames);
+        ff_record(ff, adjust, slot->frames);
     }
     size_t frames = copy_trimmed(slot->pcm, slot->frames, adjust);
     pop_locked(1);
@@ -331,7 +361,7 @@ void airplay_player_init(void) {
     ESP_ERROR_CHECK(ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }
 
-void airplay_player_push(const int16_t *pcm, size_t frames, int64_t playtime_us) {
+void airplay_player_push(const int32_t *pcm, size_t frames, int64_t playtime_us, uint32_t rate) {
     size_t offset = 0;
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -349,9 +379,14 @@ void airplay_player_push(const int16_t *pcm, size_t frames, int64_t playtime_us)
 
         size_t chunk = frames - offset < SLOT_FRAMES ? frames - offset : SLOT_FRAMES;
         slot_t *slot = &s_slots[(s_head + s_count) % SLOT_COUNT];
-        slot->playtime_us = playtime_us + (int64_t)offset * 1000000 / AUDIO_OUT_SAMPLE_RATE;
+        slot->playtime_us = playtime_us + frames_to_us((int64_t)offset, rate);
+        slot->rate = rate;
         slot->frames = chunk;
-        memcpy(slot->pcm, pcm + offset * 2, chunk * 2 * sizeof(int16_t));
+        if (pcm) {
+            memcpy(slot->pcm, pcm + offset * 2, chunk * 2 * sizeof(int32_t));
+        } else {
+            memset(slot->pcm, 0, chunk * 2 * sizeof(int32_t));
+        }
         s_count++;
         offset += chunk;
     }

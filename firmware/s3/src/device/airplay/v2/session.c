@@ -24,6 +24,7 @@
 #include "lwip/inet.h"
 #include "ptp.h"
 #include "rtp.h"
+#include "rtp_timeline.h"
 
 #define TYPE_REALTIME 96
 #define TYPE_BUFFERED 103
@@ -47,12 +48,14 @@ static struct {
     portMUX_TYPE anchor_lock;
     bool anchor_valid;
     uint64_t anchor_clock;
-    uint32_t anchor_rtp;
+    rtp_timeline_t timeline;  // RTP time from the anchor's timestamp
     int64_t anchor_ns;
     uint32_t anchor_epoch;
+    // Of the audio last timed: buffered streams change it between blocks.
+    volatile uint32_t rate;
 
     volatile bool play_enabled;
-} s = {.anchor_lock = portMUX_INITIALIZER_UNLOCKED};
+} s = {.anchor_lock = portMUX_INITIALIZER_UNLOCKED, .rate = AP2_RATE};
 
 void session_init(void) {
     s.lock = xSemaphoreCreateRecursiveMutex();
@@ -70,7 +73,7 @@ void session_init(void) {
 void session_set_anchor(uint64_t clock_id, uint32_t rtp, int64_t master_ns) {
     portENTER_CRITICAL(&s.anchor_lock);
     bool had = s.anchor_valid && s.anchor_clock == clock_id;
-    int64_t predicted_ns = s.anchor_ns + (int64_t)(int32_t)(rtp - s.anchor_rtp) * 1000000000LL / AP2_RATE;
+    int64_t predicted_ns = had ? s.anchor_ns + rtp_frames_to_ns(rtp_timeline_frames(&s.timeline, rtp), s.rate) : 0;
     portEXIT_CRITICAL(&s.anchor_lock);
     if (had && llabs(master_ns - predicted_ns) > ANCHOR_SHIFT_LOG_NS) {
         ESP_LOGW(TAG, "re-anchor moves the timeline %+.1f ms", (double)(master_ns - predicted_ns) / 1e6);
@@ -79,7 +82,7 @@ void session_set_anchor(uint64_t clock_id, uint32_t rtp, int64_t master_ns) {
     portENTER_CRITICAL(&s.anchor_lock);
     s.anchor_valid = true;
     s.anchor_clock = clock_id;
-    s.anchor_rtp = rtp;
+    rtp_timeline_reset(&s.timeline, rtp);
     s.anchor_ns = master_ns;
     portEXIT_CRITICAL(&s.anchor_lock);
 }
@@ -90,7 +93,7 @@ void session_clear_anchor(void) {
     portEXIT_CRITICAL(&s.anchor_lock);
 }
 
-bool session_playtime_us(uint32_t rtp, int64_t *playtime_us) {
+bool session_playtime_us(uint32_t rtp, uint32_t rate, int64_t *playtime_us) {
     ptp_clock_t clk;
     if (!ptp_clock(&clk) || ptp_local_ns() - clk.mastership_start_ns < MASTERSHIP_SETTLED_NS) {
         return false;
@@ -106,7 +109,7 @@ bool session_playtime_us(uint32_t rtp, int64_t *playtime_us) {
         s.anchor_ns -= clk.clock_change_ns;
         s.anchor_clock = clk.clock_id;
     }
-    uint32_t anchor_rtp = s.anchor_rtp;
+    int64_t frames = valid ? rtp_timeline_frames(&s.timeline, rtp) : 0;
     int64_t anchor_ns = s.anchor_ns;
     portEXIT_CRITICAL(&s.anchor_lock);
 
@@ -117,8 +120,8 @@ bool session_playtime_us(uint32_t rtp, int64_t *playtime_us) {
         ESP_LOGI(TAG, "anchor moves from clock %016llx to %016llx", (unsigned long long)old_clock,
                  (unsigned long long)clk.clock_id);
     }
-    int64_t frames = (int32_t)(rtp - anchor_rtp);
-    int64_t master_ns = anchor_ns + frames * 1000000000LL / AP2_RATE;
+    int64_t master_ns = anchor_ns + rtp_frames_to_ns(frames, rate);
+    s.rate = rate;
     *playtime_us = (master_ns - clk.offset_ns) / 1000;
     return true;
 }
@@ -134,14 +137,14 @@ uint32_t session_epoch(void) {
     return e;
 }
 
-void session_pcm(const int16_t *pcm, size_t frames, int64_t playtime_us, uint32_t epoch) {
+void session_pcm(const int32_t *pcm, size_t frames, int64_t playtime_us, uint32_t rate, uint32_t epoch) {
     xSemaphoreTake(s.pcm_lock, portMAX_DELAY);
     if (epoch == s.epoch) {
         if (!s.play_announced) {
             s.play_announced = true;
             ap2_emit_type(RAOP_EVENT_PLAY);
         }
-        ap2_push_pcm(pcm, frames, playtime_us);
+        ap2_push_pcm(pcm, frames, playtime_us, rate);
     }
     xSemaphoreGive(s.pcm_lock);
 }
@@ -175,6 +178,7 @@ static void stop_streams(void) {
     }
     s.type = 0;
     s.play_enabled = false;
+    ap2_set_format(NULL);
     session_clear_anchor();
     flush_output();
 }
@@ -293,6 +297,7 @@ static int setup_stream(ap2_conn_t *conn, const bplist_t *pl, bp_obj stream, bpw
             return 500;
         }
         bpw_dict_set(w, d, "type", bpw_uint(w, TYPE_REALTIME));
+        ap2_set_format("ALAC 16-bit 44.1 kHz");
         bpw_dict_set(w, d, "dataPort", bpw_uint(w, data_port));
         ESP_LOGI(TAG, "conn %d: realtime stream", conn->id);
     } else if (type == TYPE_BUFFERED) {
@@ -510,6 +515,9 @@ bool session_ap1_setup(ap2_conn_t *conn, uint16_t control_port, uint16_t timing_
     stop_streams();
     s.rtp = rtp_start_ap1(&params, ports);
     bool ok = s.rtp != NULL;
+    if (ok) {
+        ap2_set_format("AirPlay 1");
+    }
     xSemaphoreGiveRecursive(s.lock);
     if (!ok) {
         ap2_log_heap();
@@ -567,7 +575,7 @@ bool session_feedback(bpw_t *w, bpw_obj *root) {
     }
     bpw_obj stream = bpw_dict(w);
     bpw_dict_set(w, stream, "type", bpw_uint(w, (uint64_t)type));
-    bpw_dict_set(w, stream, "sr", bpw_real(w, AP2_RATE));
+    bpw_dict_set(w, stream, "sr", bpw_real(w, s.rate));
     bpw_obj streams = bpw_array(w);
     bpw_array_add(w, streams, stream);
     *root = bpw_dict(w);

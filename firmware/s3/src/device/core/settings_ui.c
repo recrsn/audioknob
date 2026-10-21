@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "airplay.h"
 #include "alarm_sound.h"
 #include "device_name.h"
 #include "esp_app_desc.h"
@@ -77,6 +78,7 @@ static void apply_timer_sound(void) {
 // A change plays what the timer will sound like now.
 static void preview_timer_sound(void) {
     apply_timer_sound();
+    airplay_set_lossless(s_settings.airplay_lossless);
     if (s_settings.timer_sound != UI_TIMER_SOUND_OFF) {
         alarm_sound_preview(ALARM_SOUND_TIMER);
     }
@@ -90,6 +92,7 @@ static void fill(ui_settings_t *out) {
         .fahrenheit = s_settings.fahrenheit,
         .haptics = s_settings.haptics,
         .art_colors = s_settings.art_colors,
+        .airplay_lossless = s_settings.airplay_lossless,
         .timer_sound = s_settings.timer_sound,
         .timer_volume = s_settings.timer_volume,
         .bluetooth = s_settings.bluetooth,
@@ -144,6 +147,10 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         break;
     case UI_SETTING_ART_COLORS:
         s_settings.art_colors = value;
+        break;
+    case UI_SETTING_AIRPLAY_LOSSLESS:
+        s_settings.airplay_lossless = value;
+        airplay_set_lossless(value);
         break;
     case UI_SETTING_TIMER_SOUND:
         s_settings.timer_sound = (uint8_t)value;

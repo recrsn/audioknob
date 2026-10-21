@@ -48,7 +48,7 @@ static volatile float s_cpu_pct;
 
 // PSRAM: internal RAM is what AirPlay's buffered stream runs short of.
 static float *s_buf;
-static int16_t *s_pcm;
+static int32_t *s_pcm;
 
 typedef struct {
     bool running; // holding the DAC and writing
@@ -99,17 +99,18 @@ static void render_chunk(player_t *p, float fade_target, float step, float gain_
             p->fade = p->fade - step < fade_target ? fade_target : p->fade - step;
         }
         p->gain += (gain_target - p->gain) * GAIN_COEF;
-        float g = p->fade * p->fade * p->gain * 32767.0f;
+        float g = p->fade * p->fade * p->gain * 2147483520.0f;
         for (int ch = 0; ch < 2; ch++) {
             float x = s_buf[2 * i + ch] * g;
-            x = x > 32767.0f ? 32767.0f : x < -32767.0f ? -32767.0f : x;
-            s_pcm[2 * i + ch] = (int16_t)x;
+            x = x > 2147483520.0f ? 2147483520.0f : x < -2147483520.0f ? -2147483520.0f : x;
+            s_pcm[2 * i + ch] = (int32_t)x;
         }
     }
     int64_t t1 = esp_timer_get_time();
     p->busy_us += t1 - t0;
     p->chunks++;
     log_stats(p, t1);
+    audio_out_set_rate(AUDIO_OUT_SAMPLE_RATE);
     audio_out_write(s_pcm, CHUNK_FRAMES);
 }
 

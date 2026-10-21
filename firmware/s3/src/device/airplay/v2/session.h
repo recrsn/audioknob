@@ -50,12 +50,12 @@ bool session_media_command(mr_command_t command);
 bool session_volume(float volume);
 
 // The esp_timer time (us) at which this RTP frame should reach the DAC.
-bool session_playtime_us(uint32_t rtp, int64_t *playtime_us);
+bool session_playtime_us(uint32_t rtp, uint32_t rate, int64_t *playtime_us);
 
 // Audio producers read the epoch before timing a packet and hand it back
 // with the PCM; audio from before a flush or pause is then dropped.
 uint32_t session_epoch(void);
-void session_pcm(const int16_t *pcm, size_t frames, int64_t playtime_us, uint32_t epoch);
+void session_pcm(const int32_t *pcm, size_t frames, int64_t playtime_us, uint32_t rate, uint32_t epoch);
 void session_set_anchor(uint64_t clock_id, uint32_t rtp, int64_t master_ns);
 void session_clear_anchor(void);
 bool session_play_enabled(void);

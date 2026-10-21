@@ -221,8 +221,10 @@ static bool write_audio(session_t *s, size_t frames) {
     pcm_apply_gain(s->output, frames, &s->gain, pcm_gain_for_volume(volume));
     xSemaphoreTake(s_write_lock, portMAX_DELAY);
     bool ok = !cancelled();
-    if (ok)
-        audio_out_write(s->output, frames);
+    if (ok) {
+        audio_out_set_rate(AUDIO_OUT_SAMPLE_RATE);
+        audio_out_write16(s->output, frames);
+    }
     xSemaphoreGive(s_write_lock);
     return ok;
 }
@@ -230,7 +232,7 @@ static void incoming_chime(session_t *s) {
     // 20 ms, quiet arrival tone, on the same exclusive path as the voice.
     for (size_t i = 0; i < 882; i++) {
         float envelope = sinf((float)i * 3.14159265f / 882);
-        int16_t v = (int16_t)(2200 * envelope * sinf((float)i * 2 * 3.14159265f * 880 / 44100));
+        int16_t v = (int16_t)(2200 * envelope * sinf((float)i * 2 * 3.14159265f * 880 / AUDIO_OUT_SAMPLE_RATE));
         s->output[2 * i] = s->output[2 * i + 1] = v;
     }
     write_audio(s, 882);

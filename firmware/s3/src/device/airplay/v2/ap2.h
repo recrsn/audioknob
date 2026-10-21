@@ -34,6 +34,11 @@ const char *ap2_fex(void);  // features, base64, no padding
 uint64_t ap2_features(void);
 void ap2_name(char *out, size_t len);
 
+// Whether to offer 24-bit/48 kHz ALAC buffered streams.
+bool ap2_lossless(void);
+// What the running stream carries, for display: a string literal, or NULL.
+void ap2_set_format(const char *format);
+
 // Last volume the sender set, in dB.
 float ap2_volume_db(void);
 void ap2_set_volume_db(float db);
@@ -42,7 +47,7 @@ const uint8_t *ap2_mac(void);
 
 bool ap2_emit(const raop_event_t *event);
 void ap2_emit_type(raop_event_type_t type);
-void ap2_push_pcm(const int16_t *pcm, size_t frames, int64_t playtime_us);
+void ap2_push_pcm(const int32_t *pcm, size_t frames, int64_t playtime_us, uint32_t rate);
 
 // A bounded-wait recv() on a socket with SO_RCVTIMEO set that retries
 // timeouts until stop is raised. Returns what recv() did otherwise.

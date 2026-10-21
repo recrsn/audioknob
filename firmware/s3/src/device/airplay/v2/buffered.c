@@ -31,21 +31,49 @@
 #define RECV_CHUNK 4096
 #define MAX_DEFERRED_FLUSHES 25
 
+// A buffered block's SSRC is its encoding, which the sender may change
+// between blocks (lossy to lossless at a track change); values after
+// shairport-sync's player.h.
 #define SSRC_NONE 0
+#define SSRC_ALAC_48000_S24_2 0x15000000
 #define SSRC_AAC_44100_F24_2 0x16000000
+#define SSRC_AAC_48000_F24_2 0x17000000
 #define AAC_FRAMES 1024
+#define ALAC_FRAMES 352
 
 // Decode a block once it is due within this long, as shairport-sync's
 // default 0.75 s decoded-buffer target plus its 0.1 s margin.
 #define LEAD_US 850000
 #define WAIT_MS 20
 #define POLL_MS 100
+// After a play or skip the reader receives and the decoder decodes back to
+// back, and an ALAC 24-bit burst can take all of core 0: when the idle task
+// (task watchdog) hasn't run for this long, each sleeps a tick until it has.
+#define IDLE_STARVED_US 20000
 
 #define READER_STACK 3072
-#define READER_PRIO 8
+// Below the decoder: with a wide TCP window a burst never leaves the reader
+// waiting on the socket, and a reader above it starved the decoder into
+// late blocks. A full window just pauses the sender.
+#define READER_PRIO 6
 #define DECODER_STACK 8192
+// Core 0, with WiFi and the reader: on core 1 below LVGL (7) the now-playing
+// screen left an ALAC decoder most blocks late, and above it the UI would wait.
 #define DECODER_PRIO 7
-#define TASK_CORE 0
+#define DECODER_CORE 0
+#define READER_CORE 0
+
+// Decode time per encoding, as wall time: a block preempted counts
+// the preemption too, so the minimum and median are the codec's own cost.
+#define FORMATS 3
+#define COST_BUCKET_US 100
+#define COST_BUCKETS 80
+typedef struct {
+    uint32_t count, over_budget;
+    uint64_t total_us;
+    int64_t min_us;
+    uint16_t hist[COST_BUCKETS];  // the last bucket holds everything slower
+} format_cost_t;
 
 // Investigation counters: no per-packet logging, sleeps or priority changes.
 // Summaries are emitted only when the decoder exits, to preserve scheduling.
@@ -55,13 +83,22 @@ typedef struct {
     int64_t max_decode_us, max_read_us, max_idle_gap_us, last_idle_us;
     uint32_t max_decode_seq;
     unsigned max_packet, max_buffered;
+    format_cost_t cost[FORMATS];
 } decode_diag_t;
 
-static volatile int64_t s_idle0_last_us;
+static volatile int64_t s_idle_last_us;
 static bool s_diag_registered;
-static bool diag_idle0(void) {
-    s_idle0_last_us = esp_timer_get_time();
+static bool diag_idle(void) {
+    s_idle_last_us = esp_timer_get_time();
     return true;
+}
+
+// One yield frees the CPU only for the other busy task; the reader and
+// decoder each sleeping until the idle task has run lands them asleep at once.
+static void yield_to_idle(void) {
+    if (esp_timer_get_time() - s_idle_last_us >= IDLE_STARVED_US) {
+        vTaskDelay(1);
+    }
 }
 
 #define ALLOC_FAILURES 8
@@ -92,9 +129,9 @@ static void diag_alloc_failed(size_t size, uint32_t caps, const char *function) 
 
 static void diag_poll(decode_diag_t *d) {
     int64_t now = esp_timer_get_time();
-    // Decoder and idle hook both run on core 0, so this 64-bit read cannot
+    // Decoder and idle hook both run on DECODER_CORE, so this 64-bit read cannot
     // be interrupted by the lower-priority writer.
-    int64_t idle = s_idle0_last_us;
+    int64_t idle = s_idle_last_us;
     if (idle < d->last_idle_us) idle = d->last_idle_us;
     int64_t gap = now - idle;
     if (gap > d->max_idle_gap_us) d->max_idle_gap_us = gap;
@@ -107,6 +144,21 @@ static void diag_dump(const decode_diag_t *d) {
              (unsigned long long)d->decode_us, (long long)d->max_decode_us,
              (unsigned long)d->max_decode_seq, (long long)d->max_read_us,
              (long long)d->max_idle_gap_us, d->max_packet, d->max_buffered);
+    static const char *const names[FORMATS] = {"AAC 44.1 kHz", "AAC 48 kHz", "ALAC 24-bit 48 kHz"};
+    for (int f = 0; f < FORMATS; ++f) {
+        const format_cost_t *c = &d->cost[f];
+        if (!c->count) continue;
+        int p50 = -1, p90 = -1;
+        uint32_t seen = 0;
+        for (int i = 0; i < COST_BUCKETS && p90 < 0; ++i) {
+            seen += c->hist[i];
+            if (p50 < 0 && seen * 2 >= c->count) p50 = i;
+            if (seen * 10 >= c->count * 9) p90 = i;
+        }
+        ESP_LOGI("ap2_diag", "%s: %lu blocks, decode mean %llu us, min %lld us, p50 <%d us, p90 <%d us, %lu over real time",
+                 names[f], (unsigned long)c->count, (unsigned long long)(c->total_us / c->count), (long long)c->min_us,
+                 (p50 + 1) * COST_BUCKET_US, (p90 + 1) * COST_BUCKET_US, (unsigned long)c->over_budget);
+    }
     alloc_failure_t events[ALLOC_FAILURES];
     portENTER_CRITICAL(&s_alloc_lock);
     unsigned count = s_alloc_count;
@@ -186,6 +238,7 @@ static void reader_task(void *arg) {
     }
 
     while (chunk && !b->stop) {
+        yield_to_idle();
         int n = ap2_recv(b->data_fd, chunk, RECV_CHUNK, &b->stop);
         if (n <= 0) {
             break;
@@ -282,12 +335,15 @@ static bool apply_flushes(buffered_t *b, const block_t *blk) {
 
 typedef struct {
     decoder_t *dec;
+    uint32_t dec_ssrc;  // what dec decodes
+    uint32_t rate, block_frames;
     decode_diag_t diag;
     uint8_t *plain;  // decrypted payload, after DECODER_AAC_HEADROOM bytes
-    int16_t *pcm;
+    int32_t *pcm;
     int played;  // blocks played since play (re)started
     uint32_t expected_timestamp;
     bool play_enabled;
+    uint32_t late_run;  // late blocks in a row
 } play_state_t;
 
 static bool next_block(buffered_t *b, block_t *blk) {
@@ -315,7 +371,8 @@ static bool next_block(buffered_t *b, block_t *blk) {
         blk->seq = be32(blk->packet) & 0x7FFFFF;
         blk->timestamp = be32(blk->packet + 4);
         blk->ssrc = be32(blk->packet + 8);
-        if (blk->ssrc == SSRC_AAC_44100_F24_2) {
+        if (blk->ssrc == SSRC_AAC_44100_F24_2 || blk->ssrc == SSRC_AAC_48000_F24_2 ||
+            blk->ssrc == SSRC_ALAC_48000_S24_2) {
             return true;
         }
         if (blk->ssrc != SSRC_NONE) {
@@ -330,17 +387,50 @@ static bool next_block(buffered_t *b, block_t *blk) {
 // are a new start and the player re-aligns to them.
 #define MAX_FILL_FRAMES (4 * AAC_FRAMES)
 
-static const int16_t s_silence[AAC_FRAMES * 2];
+static int64_t frames_us(int64_t frames, uint32_t rate) {
+    return frames * 1000000 / rate;
+}
 
-static int64_t frames_us(int64_t frames) {
-    return frames * 1000000 / AP2_RATE;
+static const char *ssrc_name(uint32_t ssrc) {
+    switch (ssrc) {
+    case SSRC_ALAC_48000_S24_2:
+        return "ALAC 24-bit 48 kHz";
+    case SSRC_AAC_48000_F24_2:
+        return "AAC 48 kHz";
+    default:
+        return "AAC 44.1 kHz";
+    }
+}
+
+// Opens the decoder for this block's encoding if it isn't the one open.
+// A new encoding is a new start: its timestamps don't continue the old
+// one's, and the player reclocks the DAC if the rate changed.
+static bool select_decoder(play_state_t *ps, const block_t *blk) {
+    if (ps->dec && ps->dec_ssrc == blk->ssrc) {
+        return true;
+    }
+    if (ps->dec_ssrc != SSRC_NONE) {
+        ESP_LOGI(TAG, "block %lu: %s -> %s at timestamp %lu", (unsigned long)blk->seq, ssrc_name(ps->dec_ssrc),
+                 ssrc_name(blk->ssrc), (unsigned long)blk->timestamp);
+    } else {
+        ESP_LOGI(TAG, "%s", ssrc_name(blk->ssrc));
+    }
+    decoder_close(ps->dec);
+    bool alac = blk->ssrc == SSRC_ALAC_48000_S24_2;
+    ps->rate = blk->ssrc == SSRC_AAC_44100_F24_2 ? AP2_RATE : 48000;
+    ps->block_frames = alac ? ALAC_FRAMES : AAC_FRAMES;
+    ps->dec = alac ? decoder_open_alac_s24_48k() : decoder_open_aac(ps->rate);
+    ps->dec_ssrc = ps->dec ? blk->ssrc : SSRC_NONE;
+    ap2_set_format(ps->dec ? ssrc_name(blk->ssrc) : NULL);
+    ps->played = 0;
+    return ps->dec != NULL;
 }
 
 // Deciphers, decodes and queues one block for playback.
 static void play_block(buffered_t *b, play_state_t *ps, const block_t *blk, int64_t playtime_us, uint32_t epoch) {
     int32_t gap = ps->played ? (int32_t)(blk->timestamp - ps->expected_timestamp) : 0;
     // Superseded by blocks already queued.
-    if (gap <= -AAC_FRAMES) {
+    if (gap <= -(int32_t)ps->block_frames) {
         return;
     }
 
@@ -363,6 +453,15 @@ static void play_block(buffered_t *b, play_state_t *ps, const block_t *blk, int6
         ps->diag.max_decode_seq = blk->seq;
     }
     ps->diag.decoded++;
+    format_cost_t *cost = &ps->diag.cost[ps->dec_ssrc == SSRC_ALAC_48000_S24_2 ? 2
+                                        : ps->dec_ssrc == SSRC_AAC_48000_F24_2 ? 1
+                                                                               : 0];
+    if (!cost->count || elapsed < cost->min_us) cost->min_us = elapsed;
+    cost->count++;
+    cost->total_us += elapsed;
+    if (elapsed > frames_us(ps->block_frames, ps->rate)) cost->over_budget++;
+    int64_t bucket = elapsed / COST_BUCKET_US;
+    cost->hist[bucket < COST_BUCKETS ? bucket : COST_BUCKETS - 1]++;
     if (frames <= 0) ps->diag.decode_errors++;
     if (frames <= 0) {
         return;
@@ -371,10 +470,10 @@ static void play_block(buffered_t *b, play_state_t *ps, const block_t *blk, int6
         ESP_LOGI(TAG, "block %lu: timestamp %s by %ld frames", (unsigned long)blk->seq, gap > 0 ? "gap" : "overlap",
                  (long)(gap > 0 ? gap : -gap));
     }
-    // The decoder's first frame after a start or a discontinuity is priming
-    // noise, as shairport-sync found.
-    if (ps->played == 0 || gap != 0) {
-        memset(ps->pcm, 0, (size_t)frames * 2 * sizeof(int16_t));
+    // AAC's first frame after a start or a discontinuity is priming noise,
+    // as shairport-sync found.
+    if (ps->dec_ssrc != SSRC_ALAC_48000_S24_2 && (ps->played == 0 || gap != 0)) {
+        memset(ps->pcm, 0, (size_t)frames * 2 * sizeof(int32_t));
     }
 
     int skip = 0;
@@ -385,15 +484,10 @@ static void play_block(buffered_t *b, play_state_t *ps, const block_t *blk, int6
             return;
         }
     } else if (gap > 0 && gap <= MAX_FILL_FRAMES) {
-        int64_t at = playtime_us - frames_us(gap);
-        for (int32_t left = gap; left > 0;) {
-            int32_t n = left < AAC_FRAMES ? left : AAC_FRAMES;
-            session_pcm(s_silence, (size_t)n, at, epoch);
-            at += frames_us(n);
-            left -= n;
-        }
+        session_pcm(NULL, (size_t)gap, playtime_us - frames_us(gap, ps->rate), ps->rate, epoch);
     }
-    session_pcm(ps->pcm + skip * 2, (size_t)(frames - skip), playtime_us + frames_us(skip), epoch);
+    session_pcm(ps->pcm + skip * 2, (size_t)(frames - skip), playtime_us + frames_us(skip, ps->rate), ps->rate,
+                epoch);
     ps->played++;
     ps->expected_timestamp = blk->timestamp + (uint32_t)frames;
 }
@@ -401,15 +495,14 @@ static void play_block(buffered_t *b, play_state_t *ps, const block_t *blk, int6
 static void decoder_task(void *arg) {
     buffered_t *b = arg;
     play_state_t ps = {
-        .dec = decoder_open_aac(),
         .plain = heap_caps_malloc(BLOCK_MAX + DECODER_AAC_HEADROOM, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
-        .pcm = heap_caps_malloc(DECODER_MAX_FRAMES * 2 * sizeof(int16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
+        .pcm = heap_caps_malloc(DECODER_MAX_FRAMES * 2 * sizeof(int32_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT),
     };
     block_t blk = {.packet = heap_caps_malloc(BLOCK_MAX, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)};
     bool need_block = true;
     ps.diag.last_idle_us = esp_timer_get_time();
 
-    if (!ps.dec || !ps.plain || !ps.pcm || !blk.packet) {
+    if (!ps.plain || !ps.pcm || !blk.packet) {
         ESP_LOGE(TAG, "out of memory");
     } else {
         while (!b->stop) {
@@ -441,9 +534,14 @@ static void decoder_task(void *arg) {
                 continue;
             }
 
+            if (!select_decoder(&ps, &blk)) {
+                ps.diag.decode_errors++;
+                need_block = true;
+                continue;
+            }
             uint32_t epoch = session_epoch();
             int64_t playtime_us;
-            if (!session_playtime_us(blk.timestamp, &playtime_us)) {
+            if (!session_playtime_us(blk.timestamp, ps.rate, &playtime_us)) {
                 ps.diag.waits++;
                 vTaskDelay(pdMS_TO_TICKS(WAIT_MS));
                 continue;
@@ -456,10 +554,16 @@ static void decoder_task(void *arg) {
             }
             if (lead >= 0) {
                 play_block(b, &ps, &blk, playtime_us, epoch);
+                ps.late_run = 0;
             } else {
                 ps.diag.late++;
+                if (ps.late_run++ == 0) {
+                    ESP_LOGI(TAG, "block %lu: %lld ms late, %u bytes queued", (unsigned long)blk.seq,
+                             (long long)(-lead / 1000), (unsigned)xStreamBufferBytesAvailable(b->stream));
+                }
             }
             need_block = true;
+            yield_to_idle();
         }
     }
 
@@ -501,7 +605,7 @@ static void destroy(buffered_t *b) {
 
 buffered_t *buffered_start(const uint8_t key[32], uint16_t *port, size_t *buffer_size) {
     if (!s_diag_registered) {
-        ESP_ERROR_CHECK(esp_register_freertos_idle_hook_for_cpu(diag_idle0, TASK_CORE));
+        ESP_ERROR_CHECK(esp_register_freertos_idle_hook_for_cpu(diag_idle, DECODER_CORE));
         ESP_ERROR_CHECK(heap_caps_register_failed_alloc_callback(diag_alloc_failed));
         s_diag_registered = true;
     }
@@ -533,11 +637,11 @@ buffered_t *buffered_start(const uint8_t key[32], uint16_t *port, size_t *buffer
     }
     // PSRAM stack: internal RAM runs out during a buffered stream, and the
     // decoder never writes flash. Measured: same average decode time.
-    if (!ap2_task_start(decoder_task, "ap2_buf_dec", DECODER_STACK, b, DECODER_PRIO, TASK_CORE, true)) {
+    if (!ap2_task_start(decoder_task, "ap2_buf_dec", DECODER_STACK, b, DECODER_PRIO, DECODER_CORE, true)) {
         destroy(b);
         return NULL;
     }
-    if (!ap2_task_start(reader_task, "ap2_buf_rx", READER_STACK, b, READER_PRIO, TASK_CORE, false)) {
+    if (!ap2_task_start(reader_task, "ap2_buf_rx", READER_STACK, b, READER_PRIO, READER_CORE, false)) {
         b->stop = true;
         xSemaphoreTake(b->decoder_done, portMAX_DELAY);
         destroy(b);

@@ -159,8 +159,8 @@ void ap2_emit_type(raop_event_type_t type) {
     s_ctx.event_cb(&event);
 }
 
-void ap2_push_pcm(const int16_t *pcm, size_t frames, int64_t playtime_us) {
-    s_ctx.pcm_cb(pcm, frames, playtime_us);
+void ap2_push_pcm(const int32_t *pcm, size_t frames, int64_t playtime_us, uint32_t rate) {
+    s_ctx.pcm_cb(pcm, frames, playtime_us, rate);
 }
 
 float ap2_volume_db(void) {
@@ -400,6 +400,26 @@ void raop_set_name(raop_ctx_t *ctx, const char *name) {
     snprintf(instance, sizeof(instance), "%s@%s", s_device_hex, name);
     mdns_service_instance_name_set("_airplay", "_tcp", name);
     mdns_service_instance_name_set("_raop", "_tcp", instance);
+}
+
+static volatile bool s_lossless = true;
+
+void raop_set_lossless(bool on) {
+    s_lossless = on;
+}
+
+bool ap2_lossless(void) {
+    return s_lossless;
+}
+
+static const char *volatile s_format;
+
+void ap2_set_format(const char *format) {
+    s_format = format;
+}
+
+const char *raop_stream_format(void) {
+    return s_format;
 }
 
 void raop_abort(raop_ctx_t *ctx) {

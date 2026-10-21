@@ -61,6 +61,7 @@ typedef enum {
     ROW_TIMEZONE,
     ROW_UNITS,
     ROW_AIR,
+    ROW_LOSSLESS,
     ROW_BLUETOOTH,
     ROW_BT_PAIR,
     ROW_BT_FORGET,
@@ -97,6 +98,7 @@ static const struct {
     [ROW_TIMEZONE] = {"Timezone", KIND_VALUE},
     [ROW_UNITS] = {"Units", KIND_VALUE},
     [ROW_AIR] = {"Show air quality", KIND_VALUE},
+    [ROW_LOSSLESS] = {"Lossless AirPlay", KIND_SWITCH},
     [ROW_BLUETOOTH] = {"Bluetooth", KIND_SWITCH},
     [ROW_BT_PAIR] = {"Pair a device", KIND_VALUE},
     [ROW_BT_FORGET] = {"Forget devices", KIND_VALUE},
@@ -132,6 +134,7 @@ static const struct {
     {NULL, ROW_UNITS},
     {NULL, ROW_AIR},
     HEADER("AUDIO"),
+    {NULL, ROW_LOSSLESS},
     {NULL, ROW_BLUETOOTH},
     {NULL, ROW_BT_PAIR},
     {NULL, ROW_BT_FORGET},
@@ -154,6 +157,7 @@ static ui_settings_t s_settings = {
     .clock_24h = true,
     .haptics = true,
     .art_colors = true,
+    .airplay_lossless = true,
     .timer_sound = UI_TIMER_SOUND_CHIME,
     .timer_volume = 60,
     .bluetooth = true,
@@ -259,6 +263,8 @@ static bool switch_on(int row) {
         return s->haptics;
     case ROW_ART_COLORS:
         return s->art_colors;
+    case ROW_LOSSLESS:
+        return s->airplay_lossless;
     case ROW_BLUETOOTH:
         return s->bluetooth;
     case ROW_LOCATION:
@@ -648,6 +654,9 @@ static void activate(void) {
         break;
     case ROW_ART_COLORS:
         emit(UI_SETTING_ART_COLORS, !s->art_colors, NULL);
+        break;
+    case ROW_LOSSLESS:
+        emit(UI_SETTING_AIRPLAY_LOSSLESS, !s->airplay_lossless, NULL);
         break;
     case ROW_BLUETOOTH:
         emit(UI_SETTING_BLUETOOTH, !s->bluetooth, NULL);

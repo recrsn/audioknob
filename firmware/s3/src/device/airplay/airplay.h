@@ -34,6 +34,14 @@ void airplay_get_client_name(char *out, size_t len);
 // until the network is up (the receiver then starts with the new name).
 void airplay_rename(void);
 
+// Whether senders are offered 24-bit/48 kHz ALAC (Apple Music lossless) as
+// well as AAC. Safe before airplay_network_up(); senders see it from their
+// next connection.
+void airplay_set_lossless(bool on);
+
+// The stream's encoding ("ALAC 24-bit 48 kHz"), or NULL when none plays.
+const char *airplay_stream_format(void);
+
 // Local controls. Non-blocking: DACP requests go out on the control task.
 void airplay_adjust_volume(int steps);
 void airplay_toggle_play_pause(void);

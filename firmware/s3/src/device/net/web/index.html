@@ -88,6 +88,7 @@ h1{font-size:34px;font-weight:700;margin:0;padding:52px 4px 12px}
 #src.airplay{background:rgba(78,161,255,.16);color:var(--ap)}
 #src.bluetooth{background:rgba(91,124,255,.18);color:#8ea4ff}
 #src.radio{background:rgba(244,114,182,.16);color:var(--radio)}
+#fmt{margin-left:8px;font-size:11px;color:var(--dim)}
 #title{font-size:17px;font-weight:600;margin-top:6px}
 #artist,#album{color:var(--dim);font-size:15px}
 #title,#artist,#album{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -218,7 +219,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
     <div class="top">
       <div id="art">♪</div>
       <div class="meta">
-        <span id="src">Idle</span>
+        <div><span id="src">Idle</span><span id="fmt"></span></div>
         <div id="title">Nothing playing</div>
         <div id="artist"></div>
         <div id="album"></div>
@@ -242,6 +243,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
   <nav aria-label="Settings">
   <div class="group card">
     <a class="row link" href="#wifi"><i class="ic" style="--c:#0a84ff"><svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8 3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4 2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg></i><span>Wi-Fi</span><span class="val" id="v-wifi"></span><span class="chev"></span></a>
+    <a class="row link" href="#airplay"><i class="ic" style="--c:#8e8e93"><svg viewBox="0 0 24 24"><path d="M6 22h12l-6-6-6 6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg></i><span>AirPlay</span><span class="val" id="v-airplay"></span><span class="chev"></span></a>
     <a class="row link" href="#bluetooth"><i class="ic" style="--c:#0a84ff"><svg viewBox="0 0 24 24"><path d="M17.71 7.71 12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29zM13 5.83l1.88 1.88L13 9.59V5.83zm1.88 10.46L13 18.17v-3.76l1.88 1.88z"/></svg></i><span>Bluetooth</span><span class="val" id="v-bt"></span><span class="chev"></span></a>
   </div>
   <div class="group card">
@@ -270,6 +272,16 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
   <div class="group">
     <div class="card"><button class="row action danger" id="forget">Forget This Network…</button></div>
     <p class="foot">Restarts the device in setup mode.</p>
+  </div>
+</section>
+
+<section class="page" id="p-airplay">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>AirPlay</h2></div>
+  <div class="group">
+    <div class="card">
+      <div class="row"><span>Lossless</span><label class="sw"><input type="checkbox" id="airplayLossless" aria-label="Lossless"><i></i></label></div>
+    </div>
+    <p class="foot">Lets Apple Music stream lossless, 24-bit at 48 kHz, instead of AAC. Applies from the next time a device connects.</p>
   </div>
 </section>
 
@@ -531,6 +543,7 @@ function renderNowPlaying(np) {
   const active = np.connected || np.playing;
   $("src").className = active ? np.source : "";
   setText("src", !active ? "Idle" : {airplay: "AirPlay", bluetooth: "Bluetooth", radio: "Radio"}[np.source]);
+  setText("fmt", active && np.format || "");
   setText("title", np.title || (active ? (np.playing ? "Playing" : "Paused") : "Nothing playing"));
   setText("artist", np.artist || "");
   setText("album", np.album || "");
@@ -809,6 +822,8 @@ function render(s) {
   if (!busy.has($("ambienceVolume"))) $("ambienceVolume").value = s.ambienceVolume;
   setText("ambval", s.ambienceVolume + "%");
   $("haptics").checked = s.haptics;
+  $("airplayLossless").checked = s.airplayLossless;
+  setText("v-airplay", s.airplayLossless ? "Lossless" : "AAC");
   setSeg("timerSound", s.timerSound);
   if (!busy.has($("timerVolume"))) $("timerVolume").value = s.timerVolume;
   setText("timervolval", s.timerVolume + "%");
@@ -990,6 +1005,7 @@ $("focusSound").onchange = e => set("focusSound", e.target.value);
 holdable($("ambienceVolume"), v => set("ambienceVolume", v), 80);
 $("ambienceVolume").addEventListener("input", e => setText("ambval", e.target.value + "%"));
 $("haptics").onchange = e => set("haptics", +e.target.checked);
+$("airplayLossless").onchange = e => set("airplayLossless", +e.target.checked);
 // Each value sent plays a sample on the device, so the slider waits longer.
 holdable($("timerVolume"), v => set("timerVolume", v), 300);
 $("timerVolume").addEventListener("input", e => setText("timervolval", e.target.value + "%"));

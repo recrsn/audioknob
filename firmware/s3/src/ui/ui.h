@@ -272,6 +272,7 @@ typedef struct {
     bool fahrenheit;
     bool haptics;
     bool art_colors;   // now-playing screens take the cover art's colour
+    bool airplay_lossless; // senders may stream 24-bit/48 kHz ALAC
     uint8_t timer_sound;  // UI_TIMER_SOUND_*
     uint8_t timer_volume; // UI_TIMER_VOLUME_MIN-100 %
     bool bluetooth;
@@ -322,6 +323,7 @@ typedef enum {
     UI_SETTING_TIMER_SOUND,  // value: UI_TIMER_SOUND_*
     UI_SETTING_TIMER_VOLUME, // value: UI_TIMER_VOLUME_MIN-100
     UI_SETTING_DETECT_LOCATION, // explicitly refresh the saved automatic location
+    UI_SETTING_AIRPLAY_LOSSLESS, // value: 0/1
 } ui_setting_t;
 
 typedef enum {

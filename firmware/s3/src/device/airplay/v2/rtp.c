@@ -74,7 +74,7 @@ typedef struct {
     uint32_t timestamp;
     uint32_t epoch;
     int64_t noticed_us, requested_us;
-    int16_t pcm[RT_FRAMES * 2];
+    int32_t pcm[RT_FRAMES * 2];
 } held_t;
 
 struct rtp {
@@ -84,7 +84,7 @@ struct rtp {
     volatile bool stop;
     SemaphoreHandle_t audio_lock;  // the decoder and the window
     decoder_t *dec;
-    int16_t *pcm;
+    int32_t *pcm;
     uint8_t *plain;
     SemaphoreHandle_t done;  // given when the receive task exits
     uint16_t frames_per_packet;
@@ -121,8 +121,6 @@ struct rtp {
     int64_t min_lead_us;  // how far ahead of its playtime audio was handed on
 };
 
-static const int16_t s_silence[RT_FRAMES * 2];
-
 static const char *TAG = "ap2_rtp";
 
 static uint32_t be32(const uint8_t *p) {
@@ -134,7 +132,7 @@ static uint64_t be64(const uint8_t *p) {
 }
 
 static bool playtime_us(rtp_t *r, uint32_t timestamp, int64_t *out) {
-    return r->ap1 ? ap1_clock_playtime_us(&r->clock, timestamp, out) : session_playtime_us(timestamp, out);
+    return r->ap1 ? ap1_clock_playtime_us(&r->clock, timestamp, out) : session_playtime_us(timestamp, AP2_RATE, out);
 }
 
 // AirPlay 1 audio waits in the window until the sender's clock is measured
@@ -167,10 +165,10 @@ static void request_resend(rtp_t *r, uint16_t first, uint16_t count) {
     r->requested += count;
 }
 
-static void deliver(rtp_t *r, const int16_t *pcm, size_t frames, uint32_t timestamp, uint32_t epoch) {
+static void deliver(rtp_t *r, const int32_t *pcm, size_t frames, uint32_t timestamp, uint32_t epoch) {
     int64_t at_us;
     if (playtime_us(r, timestamp, &at_us)) {
-        session_pcm(pcm, frames, at_us, epoch);
+        session_pcm(pcm, frames, at_us, AP2_RATE, epoch);
         int64_t lead = at_us - esp_timer_get_time();
         r->min_lead_us = lead < r->min_lead_us ? lead : r->min_lead_us;
     }
@@ -198,7 +196,7 @@ static void advance(rtp_t *r) {
                  (unsigned long)r->lost, (unsigned long)r->recovered, (unsigned long)r->requested);
     }
     if (r->have_ts) {
-        deliver(r, s_silence, r->frames_per_packet, r->next_ts, r->window_epoch);
+        deliver(r, NULL, r->frames_per_packet, r->next_ts, r->window_epoch);
     } else {
         r->next_seq++;
     }
@@ -292,7 +290,7 @@ static int decode(rtp_t *r, const uint8_t *p, size_t len) {
     if (r->l16) {
         int frames = (int)(n / 4) < r->frames_per_packet ? (int)(n / 4) : r->frames_per_packet;
         for (int i = 0; i < frames * 2; i++) {
-            r->pcm[i] = (int16_t)(r->plain[2 * i] << 8 | r->plain[2 * i + 1]);
+            r->pcm[i] = (int32_t)((uint32_t)r->plain[2 * i] << 24 | (uint32_t)r->plain[2 * i + 1] << 16);
         }
         return frames;
     }
@@ -358,7 +356,7 @@ static void put_packet(rtp_t *r, const uint8_t *p, size_t len) {
             deliver(r, r->pcm, (size_t)frames, timestamp, epoch);
         } else {
             *h = (held_t){.held = true, .seq = seq, .frames = (uint16_t)frames, .timestamp = timestamp, .epoch = epoch};
-            memcpy(h->pcm, r->pcm, (size_t)frames * 2 * sizeof(int16_t));
+            memcpy(h->pcm, r->pcm, (size_t)frames * 2 * sizeof(int32_t));
         }
     }
     release(r);
@@ -563,7 +561,7 @@ static rtp_t *create(bool realtime, bool ap1) {
 }
 
 static bool alloc_realtime(rtp_t *r) {
-    r->pcm = ap2_malloc(DECODER_MAX_FRAMES * 2 * sizeof(int16_t));
+    r->pcm = ap2_malloc(DECODER_MAX_FRAMES * 2 * sizeof(int32_t));
     r->plain = ap2_malloc(PACKET_MAX);
     r->window = ap2_malloc(WINDOW * sizeof(held_t));
     if (r->window) {

@@ -13,6 +13,7 @@ typedef struct {
     bool fahrenheit;
     bool haptics;
     bool art_colors;
+    bool airplay_lossless;
     uint8_t timer_sound;  // UI_TIMER_SOUND_*
     uint8_t timer_volume; // UI_TIMER_VOLUME_MIN-100 %
     bool bluetooth;

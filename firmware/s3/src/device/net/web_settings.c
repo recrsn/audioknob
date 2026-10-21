@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "airplay.h"
 #include "artwork.h"
 #include "cJSON.h"
 #include "device_name.h"
@@ -95,6 +96,10 @@ static cJSON *now_playing_json(void) {
     cJSON_AddStringToObject(np, "artist", track.artist);
     cJSON_AddStringToObject(np, "album", track.album);
     cJSON_AddNumberToObject(np, "art", art_version);
+    const char *format = state.source == SOURCE_AIRPLAY ? airplay_stream_format() : NULL;
+    if (format) {
+        cJSON_AddStringToObject(np, "format", format);
+    }
     return np;
 }
 
@@ -176,6 +181,7 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddBoolToObject(json, "fahrenheit", s.fahrenheit);
     cJSON_AddBoolToObject(json, "haptics", s.haptics);
     cJSON_AddBoolToObject(json, "artColors", s.art_colors);
+    cJSON_AddBoolToObject(json, "airplayLossless", s.airplay_lossless);
     cJSON_AddNumberToObject(json, "timerSound", s.timer_sound);
     cJSON_AddNumberToObject(json, "timerVolume", s.timer_volume);
     cJSON_AddBoolToObject(json, "bluetooth", s.bluetooth);
@@ -396,6 +402,7 @@ static esp_err_t set_handler(httpd_req_t *req) {
         {"fahrenheit", UI_SETTING_FAHRENHEIT, 0, 1},
         {"haptics", UI_SETTING_HAPTICS, 0, 1},
         {"artColors", UI_SETTING_ART_COLORS, 0, 1},
+        {"airplayLossless", UI_SETTING_AIRPLAY_LOSSLESS, 0, 1},
         {"timerSound", UI_SETTING_TIMER_SOUND, 0, UI_TIMER_SOUND_COUNT - 1},
         {"timerVolume", UI_SETTING_TIMER_VOLUME, UI_TIMER_VOLUME_MIN, 100},
         {"bluetooth", UI_SETTING_BLUETOOTH, 0, 1},

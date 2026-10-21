@@ -457,8 +457,14 @@ bpw_obj rtsp_info_plist(bpw_t *w, const ap2_conn_t *conn) {
 
     bpw_obj formats = bpw_dict(w);
     bpw_dict_set(w, formats, "audioStream", bpw_uint(w, 0x40000));  // ALAC/44100/S16/2
-    // AAC-LC/44100/F24/2 and ALAC/44100/S16/2: the DAC runs at 44.1 kHz only.
-    bpw_dict_set(w, formats, "bufferStream", bpw_uint(w, 0x400000 | 0x40000));
+    // ALAC/44100/S16/2, AAC-LC/44100/F24/2 and AAC-LC/48000/F24/2, plus
+    // ALAC/48000/S24/2 for lossless (bits after shairport-sync). The DAC is
+    // reclocked to whichever the sender picks.
+    uint64_t buffered = 0x40000 | 0x400000 | 0x800000;
+    if (ap2_lossless()) {
+        buffered |= 0x200000;
+    }
+    bpw_dict_set(w, formats, "bufferStream", bpw_uint(w, buffered));
     bpw_dict_set(w, d, "supportedFormats", formats);
 
     uint8_t txt[640];

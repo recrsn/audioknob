@@ -53,10 +53,12 @@ typedef struct {
 // audio SETUP (sender gets a 503); other return values are ignored.
 typedef bool (*raop_event_cb_t)(const raop_event_t *event);
 
-// Decoded interleaved stereo s16, in order, as soon as it is available --
-// typically ~2 s before it should be heard. playtime_us is when the first
-// frame must reach the DAC, on the esp_timer_get_time() clock.
-typedef void (*raop_pcm_cb_t)(const int16_t *pcm, size_t frames, int64_t playtime_us);
+// Decoded interleaved stereo, left-justified 32-bit (NULL: silence), in
+// order, as soon as it is available -- typically ~2 s before it should be
+// heard. playtime_us is when the first frame must reach the DAC, on the
+// esp_timer_get_time() clock. rate is the stream's, 44.1 or 48 kHz; it may
+// change between calls.
+typedef void (*raop_pcm_cb_t)(const int32_t *pcm, size_t frames, int64_t playtime_us, uint32_t rate);
 
 typedef struct raop_ctx_s raop_ctx_t;
 
@@ -68,6 +70,14 @@ raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], raop_event_cb_t 
 
 // Re-advertises under a new name; a session in progress is unaffected.
 void raop_set_name(raop_ctx_t *ctx, const char *name);
+
+// Offers lossless (24-bit/48 kHz ALAC) to senders, besides AAC; on unless
+// turned off. Takes effect for the next sender to connect. Callable before
+// raop_create().
+void raop_set_lossless(bool on);
+
+// The running stream's encoding ("AAC 48 kHz"), or NULL with none.
+const char *raop_stream_format(void);
 
 // Drops the current session (if any) within ~100 ms. Safe from any task,
 // including from inside the event callback.

@@ -372,6 +372,14 @@ void airplay_rename(void) {
     xTaskNotify(s_ctrl_task, CTRL_RENAME, eSetBits);
 }
 
+void airplay_set_lossless(bool on) {
+    raop_set_lossless(on);
+}
+
+const char *airplay_stream_format(void) {
+    return raop_stream_format();
+}
+
 void airplay_toggle_play_pause(void) {
     xTaskNotify(s_ctrl_task, CTRL_PLAY_PAUSE, eSetBits);
 }

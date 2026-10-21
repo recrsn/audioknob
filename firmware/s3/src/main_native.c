@@ -34,6 +34,7 @@ static ui_settings_t s_settings = {
     .clock_24h = true,
     .haptics = true,
     .art_colors = true,
+    .airplay_lossless = true,
     .timer_sound = UI_TIMER_SOUND_CHIME,
     .timer_volume = 60,
     .bluetooth = true,
@@ -82,6 +83,9 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         break;
     case UI_SETTING_HAPTICS:
         s_settings.haptics = value;
+        break;
+    case UI_SETTING_AIRPLAY_LOSSLESS:
+        s_settings.airplay_lossless = value;
         break;
     case UI_SETTING_ART_COLORS:
         s_settings.art_colors = value;

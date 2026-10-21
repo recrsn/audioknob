@@ -20,8 +20,6 @@
 // for the hook to mix into. The hook owns all synth state; the API only
 // posts a target that the hook picks up at its next block.
 
-#define SAMPLE_RATE AUDIO_OUT_SAMPLE_RATE
-
 #define LUT_BITS      10
 #define LUT_SIZE      (1u << LUT_BITS)
 #define LUT_FRAC_BITS (32 - LUT_BITS)
@@ -157,11 +155,34 @@ static struct {
     uint32_t t, next_at, period;
     float release, release_step, duck, gain;
     uint32_t clock;
+    uint32_t rate;
     voice_t voices[MAX_VOICES];
 } h;
 
 static uint32_t ms_to_samples(uint32_t ms) {
-    return ms * (SAMPLE_RATE / 1000) + ms * (SAMPLE_RATE % 1000) / 1000;
+    return ms * (h.rate / 1000) + ms * (h.rate % 1000) / 1000;
+}
+
+// The DAC was reclocked under a sounding chime (a stream started at the
+// other rate): keep its notes' pitch and decay, and its sequencer's place.
+static void set_rate(uint32_t rate) {
+    float k = (float)h.rate / (float)rate;
+    for (int i = 0; i < MAX_VOICES; i++) {
+        voice_t *v = &h.voices[i];
+        for (int p = 0; p < v->count; p++) {
+            v->inc[p] = (uint32_t)((float)v->inc[p] * k);
+            v->decay[p] = powf(v->decay[p], k);
+        }
+    }
+    h.release_step *= k;
+    h.t = (uint32_t)((uint64_t)h.t * rate / h.rate);
+    h.rate = rate;
+    if (h.pattern) {
+        h.period = ms_to_samples(h.pattern->period_ms);
+        if (h.next < h.pattern->count) {
+            h.next_at = ms_to_samples(h.pattern->notes[h.next].at_ms);
+        }
+    }
 }
 
 static void trigger(float hz) {
@@ -190,9 +211,9 @@ static void trigger(float hz) {
     for (int p = 0; p < timbre->count; p++) {
         const partial_t *pt = &timbre->partials[p];
         v->phase[p] = 0;
-        v->inc[p] = (uint32_t)(hz * pt->ratio / SAMPLE_RATE * 4294967296.0f);
+        v->inc[p] = (uint32_t)(hz * pt->ratio / h.rate * 4294967296.0f);
         v->amp[p] = NOTE_PEAK * pt->amp / sum;
-        v->decay[p] = expf(-1.0f / (pt->tau_s * SAMPLE_RATE));
+        v->decay[p] = expf(-1.0f / (pt->tau_s * h.rate));
     }
     v->attack = 0;
     v->born = h.clock++;
@@ -211,7 +232,7 @@ static float voice_sample(voice_t *v) {
     }
     if (v->attack < 1.0f) {
         s *= v->attack;
-        v->attack += 1.0f / (ATTACK_S * SAMPLE_RATE);
+        v->attack += 1.0f / (ATTACK_S * h.rate);
     }
     return s;
 }
@@ -246,7 +267,7 @@ static void seq_step(void) {
     if (!h.seq_on) {
         return;
     }
-    if (h.next < h.pattern->count && h.t == h.next_at) {
+    if (h.next < h.pattern->count && h.t >= h.next_at) {
         trigger(h.pattern->notes[h.next].hz);
         if (++h.next < h.pattern->count) {
             h.next_at = ms_to_samples(h.pattern->notes[h.next].at_ms);
@@ -256,7 +277,7 @@ static void seq_step(void) {
         if (h.once) {
             h.seq_on = false;
             h.releasing = true;
-            h.release_step = 1.0f / (PREVIEW_RELEASE_S * SAMPLE_RATE);
+            h.release_step = 1.0f / (PREVIEW_RELEASE_S * h.rate);
             return;
         }
         h.t = 0;
@@ -265,11 +286,14 @@ static void seq_step(void) {
     }
 }
 
-static int16_t saturate(float x) {
-    return x > 32767.0f ? 32767 : x < -32768.0f ? -32768 : (int16_t)x;
+static int32_t saturate(float x) {
+    return x >= 2147483520.0f ? INT32_MAX : x <= -2147483648.0f ? INT32_MIN : (int32_t)x;
 }
 
-static void mix(int16_t *pcm, size_t frames) {
+static void mix(int32_t *pcm, size_t frames, uint32_t rate) {
+    if (rate != h.rate) {
+        set_rate(rate);
+    }
     uint32_t target = __atomic_load_n(&s_target, __ATOMIC_ACQUIRE);
     if (target != h.seen) {
         h.seen = target;
@@ -278,13 +302,13 @@ static void mix(int16_t *pcm, size_t frames) {
         } else {
             h.seq_on = false;
             h.releasing = true;
-            h.release_step = 1.0f / (RELEASE_S * SAMPLE_RATE);
+            h.release_step = 1.0f / (RELEASE_S * h.rate);
         }
     }
 
     bool finished = h.releasing && h.release <= 0;
     float duck_to = finished ? 1.0f : DUCK_GAIN;
-    float duck_step = (1.0f - DUCK_GAIN) / (DUCK_S * SAMPLE_RATE);
+    float duck_step = (1.0f - DUCK_GAIN) / (DUCK_S * h.rate);
     float gain_target = s_gain_target;
 
     for (size_t n = 0; n < frames; n++) {
@@ -304,7 +328,7 @@ static void mix(int16_t *pcm, size_t frames) {
         h.gain += (gain_target - h.gain) * GAIN_SMOOTH;
         h.duck = h.duck < duck_to ? fminf(h.duck + duck_step, duck_to) : fmaxf(h.duck - duck_step, duck_to);
 
-        float chime = out * h.gain * 32767.0f;
+        float chime = out * h.gain * 2147483647.0f;
         pcm[n * 2] = saturate(pcm[n * 2] * h.duck + chime);
         pcm[n * 2 + 1] = saturate(pcm[n * 2 + 1] * h.duck + chime);
     }
@@ -323,7 +347,7 @@ static void topup(void) {
     int64_t now;
     for (unsigned n = 0; n < TOPUP_MAX_CHUNKS && !audio_source_suspended() &&
                          audio_out_queued_us(&now) < TOPUP_MIN_US; n++) {
-        audio_out_write(silence, TOPUP_FRAMES);
+        audio_out_write16(silence, TOPUP_FRAMES);
     }
 }
 
@@ -331,6 +355,7 @@ static void begin(void) {
     memset(&h, 0, sizeof(h));
     h.duck = 1.0f;
     h.gain = s_gain_target;
+    h.rate = audio_out_rate();
     __atomic_store_n(&s_done_target, UINT32_MAX, __ATOMIC_RELEASE);
     audio_source_hold_s3(true);
     audio_out_set_mix(mix);

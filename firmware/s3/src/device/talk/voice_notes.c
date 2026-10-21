@@ -214,7 +214,7 @@ static void play_note(job_t *job) {
     if (ok) {
         state(UI_VOICE_PLAYING, NULL);
         pcm_resampler_t resampler;
-        pcm_resampler_init(&resampler, 16000, 44100);
+        pcm_resampler_init(&resampler, 16000, AUDIO_OUT_SAMPLE_RATE);
         int32_t gain = 0;
         size_t skip = reader.preskip / 3;
         const uint8_t *packet;
@@ -239,8 +239,10 @@ static void play_note(job_t *job) {
             talk_get_state(&talk);
             pcm_apply_gain(output, n, &gain, pcm_gain_for_volume(talk.volume));
             xSemaphoreTake(s_write, portMAX_DELAY);
-            if (!stopped())
-                audio_out_write(output, n);
+            if (!stopped()) {
+                audio_out_set_rate(AUDIO_OUT_SAMPLE_RATE);
+                audio_out_write16(output, n);
+            }
             xSemaphoreGive(s_write);
             frames++;
             xSemaphoreTake(s_lock, portMAX_DELAY);

@@ -27,7 +27,7 @@
 
 #define IN_CHUNK 2048
 #define RS_OUT_FRAMES 4096
-// audio_out_write() blocks until its frames are queued; short writes let a
+// audio_out_write16() blocks until its frames are queued; short writes let a
 // stop silence output within ~12 ms.
 #define WRITE_FRAMES 512
 #define DECODE_ERRORS_RESET 20
@@ -194,7 +194,9 @@ static void play_pcm(decode_t *d, size_t bytes) {
     }
     update_format(info.sample_rate, info.channel);
     if (d->resampler.in_rate != info.sample_rate) {
-        pcm_resampler_init(&d->resampler, info.sample_rate, AUDIO_OUT_SAMPLE_RATE);
+        // The DAC runs at either of these itself; anything else is resampled.
+        bool native = info.sample_rate == 44100 || info.sample_rate == AUDIO_OUT_SAMPLE_RATE_MAX;
+        pcm_resampler_init(&d->resampler, info.sample_rate, native ? info.sample_rate : AUDIO_OUT_SAMPLE_RATE);
     }
 
     int16_t *pcm = (int16_t *)d->out;
@@ -202,7 +204,7 @@ static void play_pcm(decode_t *d, size_t bytes) {
     pcm_to_stereo(pcm, frames, info.channel);
 
     // Pieces small enough that their output fits d->rs.
-    size_t piece = (size_t)((uint64_t)(RS_OUT_FRAMES - 2) * info.sample_rate / AUDIO_OUT_SAMPLE_RATE) - 1;
+    size_t piece = (size_t)((uint64_t)(RS_OUT_FRAMES - 2) * info.sample_rate / d->resampler.out_rate) - 1;
     for (size_t at = 0; at < frames; at += piece) {
         size_t n = frames - at < piece ? frames - at : piece;
         size_t out = pcm_resample(&d->resampler, pcm + at * 2, n, d->rs);
@@ -211,7 +213,8 @@ static void play_pcm(decode_t *d, size_t bytes) {
             if (s_out_epoch != d->epoch) {
                 return;
             }
-            audio_out_write(d->rs + w * 2, out - w < WRITE_FRAMES ? out - w : WRITE_FRAMES);
+            audio_out_set_rate(d->resampler.out_rate);
+            audio_out_write16(d->rs + w * 2, out - w < WRITE_FRAMES ? out - w : WRITE_FRAMES);
         }
     }
     if (s_out_epoch == d->epoch) {

@@ -16,7 +16,8 @@ bool audio_source_claim(audio_source_t source) { atomic_store(&owner,source);ret
 void audio_source_release(audio_source_t source) { int expected=source;atomic_compare_exchange_strong(&owner,&expected,AUDIO_SOURCE_ESP32); }
 audio_source_t audio_source_active(void) { return atomic_load(&owner); }
 bool audio_source_suspended(void) { return false; }
-void audio_out_write(const int16_t *pcm,size_t frames) { assert(pcm&&frames<=900);atomic_fetch_add(&output_frames,frames);usleep(frames*1000000/44100); }
+void audio_out_set_rate(uint32_t hz) { (void)hz; }
+void audio_out_write16(const int16_t *pcm,size_t frames) { assert(pcm&&frames<=900);atomic_fetch_add(&output_frames,frames);usleep(frames*1000000/44100); }
 bool mic_start(const mic_config_t *cfg) { (void)cfg;bool expected=false;return atomic_compare_exchange_strong(&mic_owned,&expected,true); }
 void mic_stop(void) { atomic_store(&mic_owned,false); }
 size_t mic_read(int16_t *pcm,size_t frames,uint32_t timeout) {
