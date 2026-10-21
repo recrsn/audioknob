@@ -165,21 +165,17 @@ static void feedback(haptic_effect_t effect) {
 }
 
 // The app pages (lights, timers, settings) claim the knob first; otherwise
-// it drives the volume of whichever source is in front. Runs on the knob
-// task, hence the lock.
+// it drives the volume of whichever source is in front. Runs on the
+// LVGL task, with the lock already held.
 static void on_knob_rotate(int steps) {
-    lcd_driver_lvgl_lock();
     bool used = ui_knob_rotate(steps);
-    lcd_driver_lvgl_unlock();
     if (used || now_playing_adjust_volume(steps)) {
         feedback(HAPTIC_TICK);
     }
 }
 
 static void on_knob_press(void) {
-    lcd_driver_lvgl_lock();
     bool used = ui_knob_press();
-    lcd_driver_lvgl_unlock();
     if (!used && now_playing_airplay_in_front()) {
         airplay_toggle_play_pause();
         used = true;
@@ -191,9 +187,7 @@ static void on_knob_press(void) {
 
 // Always the UI's: it opens the launcher, or goes home from it.
 static void on_knob_long_press(void) {
-    lcd_driver_lvgl_lock();
     ui_knob_long_press();
-    lcd_driver_lvgl_unlock();
     feedback(HAPTIC_LONG);
 }
 
@@ -333,10 +327,9 @@ void app_main(void) {
     lights_ui_start();
 #endif
     lv_timer_create(state_poll_timer_cb, 33, NULL);
+    knob_start(on_knob_rotate, on_knob_press, on_knob_long_press);
     lcd_driver_show_ui();
     lcd_driver_lvgl_unlock();
-
-    knob_start(on_knob_rotate, on_knob_press, on_knob_long_press);
 
     wifi_start(on_network_up);
     github_release_start();

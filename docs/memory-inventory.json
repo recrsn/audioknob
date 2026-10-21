@@ -1,10 +1,10 @@
 {
   "base": "d110ad416a1cecb2ac176752ff210fc9ca3fa602",
-  "checkpoint": "54aca98c78c3a326370a5cb98a0e7b3641a11c26",
-  "working_tree": "Includes uncommitted reusable network-worker changes; airplay_art 6 KiB stack moved to PSRAM",
+  "checkpoint": "d7f679a05f3e7d79f9105c026375540f52c0368f",
+  "working_tree": "Checkpoint includes reusable network worker and PSRAM artwork stack; uncommitted interrupt-driven LVGL encoder removes knob task",
   "known_baseline_stack_bytes": {
     "S3": {
-      "internal": 71424,
+      "internal": 68352,
       "PSRAM": 110592
     },
     "ESP32": {
@@ -15,7 +15,7 @@
   "elf": {
     "S3": {
       "path": "firmware/s3/.pio/build/s3/firmware.elf",
-      "sha256": "607c5477ea41b03c050135e33ae1a4af38434ee1ec8449cc614d4b8d14d9833f",
+      "sha256": "d7e3c5a748ba0bf15cd555024b999a6ffc0dfdbe40cb104935c91bb1624b06f2",
       "sections": {
         ".rtc.text": {
           "bytes": 0,
@@ -58,11 +58,11 @@
           "address": 1070237580
         },
         ".dram0.bss": {
-          "bytes": 49000,
+          "bytes": 49560,
           "address": 1070237584
         },
         ".flash.text": {
-          "bytes": 1956300,
+          "bytes": 1957300,
           "address": 1107296288
         },
         ".flash_rodata_dummy": {
@@ -74,12 +74,12 @@
           "address": 1008599072
         },
         ".flash.rodata": {
-          "bytes": 1097024,
+          "bytes": 1097104,
           "address": 1008599328
         },
         ".flash.rodata_noload": {
           "bytes": 13623,
-          "address": 1009696352
+          "address": 1009696432
         },
         ".ext_ram.dummy": {
           "bytes": 3080160,
@@ -99,38 +99,38 @@
         },
         ".dram0.heap_start": {
           "bytes": 0,
-          "address": 1070286584
+          "address": 1070287144
         },
         ".debug_aranges": {
-          "bytes": 112184,
+          "bytes": 112192,
           "address": 0
         },
         ".debug_info": {
-          "bytes": 7862027,
+          "bytes": 7864982,
           "address": 0
         },
         ".debug_abbrev": {
-          "bytes": 833400,
+          "bytes": 833364,
           "address": 0
         },
         ".debug_line": {
-          "bytes": 6966594,
+          "bytes": 6969289,
           "address": 0
         },
         ".debug_frame": {
-          "bytes": 282220,
+          "bytes": 282244,
           "address": 0
         },
         ".debug_str": {
-          "bytes": 822112,
+          "bytes": 822216,
           "address": 0
         },
         ".debug_loc": {
-          "bytes": 3630870,
+          "bytes": 3630904,
           "address": 0
         },
         ".debug_ranges": {
-          "bytes": 560584,
+          "bytes": 560816,
           "address": 0
         },
         ".debug_line_str": {

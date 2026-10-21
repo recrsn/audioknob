@@ -1,8 +1,8 @@
 # Internal RAM and PSRAM inventory
 
 2026-10-21. Rebased onto main `d110ad4`; sound/location checkpoint `54aca98`.
-Includes the uncommitted shared worker with a reusable static stack and main's
-OTA download reuse. Both firmware builds passed; neither was flashed for this
+Includes checkpoint `d7f679a` (reusable network worker and PSRAM artwork stack),
+plus the interrupt-driven LVGL encoder change. Both firmware builds passed; neither was flashed for this
 inventory. CSV rows include source locations; JSON captures ELF sections and
 hashes. All sizes below are reservations/payloads, not measured stack use.
 
@@ -10,10 +10,10 @@ hashes. All sizes below are reservations/payloads, not measured stack use.
 
 | Chip / scenario | Known internal stacks | PSRAM stacks |
 | --- | ---: | ---: |
-| S3, joined network, AirPlay ready | **69.75 KiB + Wi-Fi stack** | **108 KiB** |
+| S3, joined network, AirPlay ready | **66.75 KiB + Wi-Fi stack** | **108 KiB** |
 | ESP32, Bluetooth enabled | **44.75 KiB** | **0** |
 
-The S3 subtotal includes 52 KiB of application internal stacks and 17.75 KiB of
+The S3 subtotal includes 49 KiB of application internal stacks and 17.75 KiB of
 known framework internal stacks; 104 KiB of application PSRAM stacks plus 4 KiB
 for mDNS. Session/setup/install stacks below are additional only when applicable.
 The vendor Wi-Fi stack is explicitly excluded from the known internal subtotal:
@@ -33,7 +33,6 @@ be captured under actual TLS, decoding, recording and update workloads.
 | --- | ---: | --- | ---: | --- |
 | `src_watch` | 3 | internal | 1 | service lifetime after initialization; created once; retained |
 | `uart_rx` | 6 | internal | 1 | service lifetime after initialization; created once; retained |
-| `knob` | 3 | internal | 1 | service lifetime after initialization; created once; retained |
 | `airplay_play` | 4 | internal | 1 | service lifetime after initialization; created once; retained |
 | `airplay_ctrl` | 6 | internal | 1 | service lifetime after initialization; created once; retained |
 | `airplay_art` | 6 | PSRAM | 1 | service lifetime after initialization; created once; retained |
@@ -134,7 +133,7 @@ These are already in the linked internal data/BSS totals, not extra heap tasks.
 
 | Chip | Internal data + BSS | Internal-resident executable/vector storage | Static PSRAM data/BSS |
 | --- | ---: | ---: | ---: |
-| S3 | 76,532 bytes (74.74 KiB) | 121,856 bytes (119 KiB) | 0 |
+| S3 | 77,092 bytes (75.29 KiB) | 121,623 bytes (118.77 KiB) | 0 |
 | ESP32 | 54,724 bytes (53.44 KiB) | 103,072 bytes (100.66 KiB) | 0 |
 
 The data/BSS figures include global state, static stacks, interrupt stacks and
@@ -222,3 +221,12 @@ under a mutex and frees scratch buffers; it does not access NVS, partitions or
 files. This moves 6 KiB of stack reservation from internal RAM to PSRAM without
 adding recurring stack allocations. The 48 KiB board sample above predates this
 change; this artwork-stack update has not been flashed or measured on hardware.
+
+## Encoder task removed
+
+The hardware knob now captures timestamped GPIO edges into a fixed 64-entry
+internal ring (512 bytes) and decodes them through an LVGL encoder device. UI
+callbacks run on the existing LVGL PSRAM stack. Its dedicated 3 KiB internal
+stack and TCB are gone; the ring and decoder state add static internal storage,
+so 3 KiB is the stack saving, not the total net RAM saving. No high-water-based
+stack trimming was performed. Physical encoder validation remains outstanding.

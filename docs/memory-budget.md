@@ -384,3 +384,20 @@ partition or filesystem operations run on this task. Internal stack reservation
 falls by 6 KiB and PSRAM reservation increases by 6 KiB, excluding unchanged
 TCB/allocator overhead. This change has not been flashed; cover decoding and
 stack high-water marks under JPEG/PNG workloads remain board checks.
+
+
+## Interrupt-driven LVGL encoder
+
+`knob` no longer owns a task or stack. GPIO edge interrupts only capture both
+line levels and a millisecond timestamp into a fixed internal 64-entry ring
+(512 bytes). LVGL consumes the edges, debounces pulses/button transitions,
+filters release pulses and dispatches the existing app callbacks through an
+encoder device and a dedicated non-scrollable, non-editable group target.
+Buffered timestamps preserve short/long classification across slow frames.
+Queue overflow cancels uncertain input and waits for release before resuming.
+
+This removes the 3 KiB internal stack and its TCB, while adding static ring and
+decoder state and small LVGL objects in its existing PSRAM heap. Known normal
+S3 stack reservations are now 66.75 KiB internal (excluding Wi-Fi) and 108 KiB
+PSRAM. The encoder change is not flashed yet; board responsiveness remains to
+test. Other stack sizes remain unchanged pending high-water measurements.

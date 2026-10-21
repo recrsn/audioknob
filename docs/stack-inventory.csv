@@ -1,7 +1,6 @@
 chip,task,bytes_each,instances,memory,lifetime,allocation,baseline,source,notes
 S3,src_watch,3072,1,internal,service lifetime after initialization,created once; retained,True,firmware/s3/src/device/drivers/audio_source.c,
 S3,uart_rx,6144,1,internal,service lifetime after initialization,created once; retained,True,firmware/s3/src/device/drivers/uart_link.c,
-S3,knob,3072,1,internal,service lifetime after initialization,created once; retained,True,firmware/s3/src/device/drivers/knob.c,
 S3,airplay_play,4096,1,internal,service lifetime after initialization,created once; retained,True,firmware/s3/src/device/airplay/airplay_player.c,
 S3,airplay_ctrl,6144,1,internal,service lifetime after initialization,created once; retained,True,firmware/s3/src/device/airplay/airplay.c,
 S3,airplay_art,6144,1,PSRAM,service lifetime after initialization,created once; retained,True,firmware/s3/src/device/airplay/airplay.c,Retained 6 KiB PSRAM stack; memory-only artwork decode; TCB remains internal.
