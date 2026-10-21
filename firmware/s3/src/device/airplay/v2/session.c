@@ -23,7 +23,6 @@
 #include "freertos/semphr.h"
 #include "lwip/inet.h"
 #include "ptp.h"
-#include "raop_rtp.h"
 #include "rtp.h"
 
 #define TYPE_REALTIME 96
@@ -37,9 +36,7 @@ static struct {
     ap2_conn_t *principal;
     int type;  // of the running stream, 0 if none
     buffered_t *buffered;
-    rtp_t *rtp;
-    // An AirPlay 1 stream: NTP-timed, and it emits PLAY/FLUSH itself.
-    raop_rtp_t *ap1_rtp;
+    rtp_t *rtp;  // AirPlay 1 streams have only this
 
     // Producers check their epoch against this before queueing audio, so
     // nothing decoded before a flush or pause can play after it.
@@ -175,12 +172,6 @@ static void stop_streams(void) {
     if (s.rtp) {
         rtp_stop(s.rtp);
         s.rtp = NULL;
-    }
-    if (s.ap1_rtp) {
-        raop_rtp_end(s.ap1_rtp);
-        s.ap1_rtp = NULL;
-        // Its PLAY went out past the epoch, so FLUSH won't follow from it.
-        ap2_emit_type(RAOP_EVENT_FLUSH);
     }
     s.type = 0;
     s.play_enabled = false;
@@ -497,38 +488,53 @@ bool session_ap1_setup(ap2_conn_t *conn, uint16_t control_port, uint16_t timing_
     if (!inet_aton(conn->client_ip, &host)) {
         return false;
     }
+    int v = conn->ap1.version;
+    rtp_ap1_t params = {
+        .sender = host,
+        .control_port = control_port,
+        .timing_port = timing_port,
+        .aeskey = conn->ap1.encrypted ? conn->ap1.aeskey : NULL,
+        .aesiv = conn->ap1.encrypted ? conn->ap1.aesiv : NULL,
+        .rtpmap = conn->ap1.rtpmap,
+        .fmtp = conn->ap1.fmtp,
+        .min_latency = conn->ap1.min_latency,
+        .max_latency = conn->ap1.max_latency,
+        // shairport-sync's rule for which senders play late.
+        .latency_offset = v > 0 && (v <= 353 || v >= 371),
+    };
     xSemaphoreTakeRecursive(s.lock, portMAX_DELAY);
     become_principal(conn);
     stop_streams();
-    raop_rtp_resp_t r = raop_rtp_init(host, conn->ap1.encrypted ? conn->ap1.aeskey : NULL,
-                                      conn->ap1.encrypted ? conn->ap1.aesiv : NULL, conn->ap1.rtpmap, conn->ap1.fmtp,
-                                      control_port,
-                                      timing_port, ap2_event_cb, ap2_push_pcm);
-    s.ap1_rtp = r.ctx;
+    s.rtp = rtp_start_ap1(&params, ports);
+    bool ok = s.rtp != NULL;
     xSemaphoreGiveRecursive(s.lock);
-    if (!r.ctx) {
+    if (!ok) {
+        ap2_log_heap();
         return false;
     }
-    ports[0] = r.cport;
-    ports[1] = r.tport;
-    ports[2] = r.aport;
     ESP_LOGI(TAG, "conn %d: AirPlay 1 stream%s", conn->id, conn->ap1.encrypted ? ", encrypted" : "");
     return true;
 }
 
 void session_ap1_record(ap2_conn_t *conn, uint16_t seqno, uint32_t rtptime) {
     xSemaphoreTakeRecursive(s.lock, portMAX_DELAY);
-    if (conn == s.principal && s.ap1_rtp) {
-        raop_rtp_record(s.ap1_rtp, seqno, rtptime);
+    // seq and rtptime both 0: the sender says where to start with a FLUSH.
+    if (conn == s.principal && s.rtp && (seqno || rtptime)) {
+        rtp_ap1_flush(s.rtp, seqno);
+        flush_output();
     }
     xSemaphoreGiveRecursive(s.lock);
 }
 
 bool session_ap1_flush(ap2_conn_t *conn, uint16_t seqno, uint32_t rtptime) {
     xSemaphoreTakeRecursive(s.lock, portMAX_DELAY);
-    bool playing = conn == s.principal && s.ap1_rtp;
+    bool playing = conn == s.principal && s.rtp;
     if (playing) {
-        raop_rtp_flush(s.ap1_rtp, seqno, rtptime);
+        // Without RTP-Info there's nothing to hold back, only the queue to drop.
+        if (seqno || rtptime) {
+            rtp_ap1_flush(s.rtp, seqno);
+        }
+        flush_output();
     }
     xSemaphoreGiveRecursive(s.lock);
     return playing;

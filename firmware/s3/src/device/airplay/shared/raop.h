@@ -77,5 +77,3 @@ void raop_abort(raop_ctx_t *ctx);
 bool raop_remote_command(raop_ctx_t *ctx, const char *command);
 bool raop_remote_volume(raop_ctx_t *ctx, float volume);
 
-// Monotonic ms clock for RTSP/RTP housekeeping (resend timeouts, stalls).
-uint32_t raop_time_ms(void);

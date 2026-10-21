@@ -48,6 +48,13 @@ static void copy_header(const rtsp_req_t *req, const char *name, char *out, size
     snprintf(out, len, "%s", value ? value : "");
 }
 
+static uint32_t sdp_uint(const char *sdp, const char *name) {
+    char *value = raop_sdp_attr(sdp, name);
+    uint32_t n = value ? (uint32_t)strtoul(value, NULL, 10) : 0;
+    free(value);
+    return n;
+}
+
 void ap1_announce(ap2_conn_t *conn, const rtsp_req_t *req, rtsp_resp_t *resp) {
     const char *sdp = (const char *)req->body;
     ap1_free(conn);
@@ -75,9 +82,15 @@ void ap1_announce(ap2_conn_t *conn, const rtsp_req_t *req, rtsp_resp_t *resp) {
     free(iv);
     conn->ap1.rtpmap = raop_sdp_attr(sdp, "rtpmap");
     conn->ap1.fmtp = raop_sdp_attr(sdp, "fmtp");
+    conn->ap1.min_latency = sdp_uint(sdp, "min-latency");
+    conn->ap1.max_latency = sdp_uint(sdp, "max-latency");
+    const char *agent = rtsp_header(req, "User-Agent");
+    const char *version = agent ? strstr(agent, "AirPlay/") : NULL;
+    conn->ap1.version = version ? atoi(version + strlen("AirPlay/")) : 0;
     copy_header(req, "DACP-ID", conn->ap1.dacp_id, sizeof(conn->ap1.dacp_id));
     copy_header(req, "Active-Remote", conn->ap1.active_remote, sizeof(conn->ap1.active_remote));
-    ESP_LOGI(TAG, "conn %d: AirPlay 1 sender", conn->id);
+    ESP_LOGI(TAG, "conn %d: AirPlay 1 sender, version %d, latency %lu-%lu", conn->id, conn->ap1.version,
+             (unsigned long)conn->ap1.min_latency, (unsigned long)conn->ap1.max_latency);
 }
 
 void ap1_setup(ap2_conn_t *conn, const rtsp_req_t *req, rtsp_resp_t *resp) {

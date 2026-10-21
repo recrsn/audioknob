@@ -41,6 +41,8 @@
 // Classic metadata over SET_PARAMETER: artwork (15), progress (16), text (17).
 #define FEATURES_METADATA ((1ULL << 15) | (1ULL << 16) | (1ULL << 17))
 #define FEATURES (FEATURES_BASE | FEATURES_HOMEKIT | FEATURES_METADATA)
+#define TASK_START_TRIES 10
+#define TASK_START_RETRY_MS 50
 
 struct raop_ctx_s {
     raop_event_cb_t event_cb;
@@ -152,10 +154,6 @@ void ap2_emit(const raop_event_t *event) {
     s_ctx.event_cb(event);
 }
 
-bool ap2_event_cb(const raop_event_t *event) {
-    return s_ctx.event_cb(event);
-}
-
 void ap2_emit_type(raop_event_type_t type) {
     raop_event_t event = {.type = type};
     s_ctx.event_cb(&event);
@@ -244,7 +242,17 @@ void ap2_log_heap(void) {
 bool ap2_task_start(TaskFunction_t fn, const char *name, uint32_t stack, void *arg, UBaseType_t prio,
                       BaseType_t core, bool psram_stack) {
     UBaseType_t caps = (psram_stack ? MALLOC_CAP_SPIRAM : MALLOC_CAP_INTERNAL) | MALLOC_CAP_8BIT;
-    return xTaskCreatePinnedToCoreWithCaps(fn, name, stack, arg, prio, NULL, core, caps) == pdPASS;
+    // A task that just exited frees its stack later, from another task: a
+    // stream replacing one that just stopped waits for that memory.
+    for (int tries = 0; tries < TASK_START_TRIES; tries++) {
+        if (xTaskCreatePinnedToCoreWithCaps(fn, name, stack, arg, prio, NULL, core, caps) == pdPASS) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(TASK_START_RETRY_MS));
+    }
+    ESP_LOGE(TAG, "no memory for task %s", name);
+    ap2_log_heap();
+    return false;
 }
 
 void ap2_task_exit(void) {
@@ -449,8 +457,4 @@ bool raop_remote_volume(raop_ctx_t *ctx, float volume) {
         ok = session_volume(sent);
     }
     return ok;
-}
-
-uint32_t raop_time_ms(void) {
-    return (uint32_t)(esp_timer_get_time() / 1000);
 }

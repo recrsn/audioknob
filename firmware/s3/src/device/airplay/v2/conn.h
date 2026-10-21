@@ -58,6 +58,8 @@ typedef struct ap2_conn {
         bool encrypted;
         char *rtpmap, *fmtp;
         char dacp_id[32], active_remote[32];
+        uint32_t min_latency, max_latency;  // SDP, frames; 0 if absent
+        int version;                        // User-Agent's AirPlay/<version>, 0 if none
     } ap1;
 
     category_t category;
