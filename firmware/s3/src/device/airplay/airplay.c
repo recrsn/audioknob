@@ -14,6 +14,8 @@
 #include "freertos/task.h"
 #include "mdns.h"
 #include "raop.h"
+#include "radio.h"
+#include "stream_player.h"
 
 #define CTRL_NET_UP BIT0
 #define CTRL_VOLUME BIT1
@@ -151,6 +153,17 @@ static bool on_raop_event(const raop_event_t *event) {
         snprintf(s_client, sizeof(s_client), "%s", event->session.client ? event->session.client : "");
         xSemaphoreGive(s_lock);
         post_artwork(NULL, 0);
+        break;
+
+    case RAOP_EVENT_PREPARE:
+        if (audio_source_suspended()) return false;
+        // Pairing/idle sessions leave radio playing. Actual audio SETUP must
+        // release its TLS and decoder before adding another stream's buffers.
+        if (audio_source_active() == AUDIO_SOURCE_RADIO) radio_stop();
+        if (!stream_player_wait_stopped(1000)) {
+            ESP_LOGW(TAG, "radio teardown timed out; refusing overlapping stream");
+            return false;
+        }
         break;
 
     case RAOP_EVENT_PLAY:

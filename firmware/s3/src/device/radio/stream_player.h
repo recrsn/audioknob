@@ -12,8 +12,8 @@
 // or other sources: whoever calls stream_player_play() must hold the DAC
 // (audio_source) while it plays, since audio_out takes one writer.
 //
-// Its two tasks exist only while something plays, so their internal-RAM
-// stacks are free for AirPlay the rest of the time.
+// Its two PSRAM-stack tasks exist only while something plays. All sources
+// share audio_out's persistent I2S DMA ring.
 
 typedef enum {
     STREAM_IDLE,
@@ -42,6 +42,9 @@ void stream_player_init(void);
 void stream_player_play(const char *url);
 // Silences output at once; the tasks wind down on their own. Non-blocking.
 void stream_player_stop(void);
+// Wait for decoder, HTTP/TLS and ring teardown. Use only from a worker task,
+// after stop; false on timeout or if a new play superseded that stop.
+bool stream_player_wait_stopped(uint32_t timeout_ms);
 
 // 0-100 %, cubic like AirPlay's.
 void stream_player_set_volume(uint8_t volume_pct);

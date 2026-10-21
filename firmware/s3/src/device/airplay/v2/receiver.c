@@ -150,8 +150,8 @@ const uint8_t *ap2_mac(void) {
     return s_mac;
 }
 
-void ap2_emit(const raop_event_t *event) {
-    s_ctx.event_cb(event);
+bool ap2_emit(const raop_event_t *event) {
+    return s_ctx.event_cb(event);
 }
 
 void ap2_emit_type(raop_event_type_t type) {

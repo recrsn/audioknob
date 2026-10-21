@@ -272,6 +272,8 @@ static int setup_stream(ap2_conn_t *conn, const bplist_t *pl, bp_obj stream, bpw
         return 400;
     }
     bplist_dict_uint(pl, stream, "type", &type);
+    if (type != TYPE_REALTIME && type != TYPE_BUFFERED) return 501;
+    if (!ap2_emit(&(raop_event_t){.type = RAOP_EVENT_PREPARE})) return 503;
 
     become_principal(conn);
     stop_streams();
@@ -488,6 +490,7 @@ bool session_ap1_setup(ap2_conn_t *conn, uint16_t control_port, uint16_t timing_
     if (!inet_aton(conn->client_ip, &host)) {
         return false;
     }
+    if (!ap2_emit(&(raop_event_t){.type = RAOP_EVENT_PREPARE})) return false;
     int v = conn->ap1.version;
     rtp_ap1_t params = {
         .sender = host,

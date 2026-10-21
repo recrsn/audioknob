@@ -90,3 +90,6 @@ speakers; station 0 resumed on the knob at its original volume 36.
 
 Raw logs, state snapshots, exact diagnostic source, and firmware SHA-256:
 /Users/amitosh/.codex/visualizations/2026/10/21/01a15cf6-fa38-7802-a51c-bdfeff74c601/airplay-watchdog-investigation
+
+
+Follow-up implementation and regression results: [radio-airplay-handoff.md](radio-airplay-handoff.md).

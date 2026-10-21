@@ -80,3 +80,7 @@ restored to MacBook speakers, and the knob's original radio station 0 resumed
 at its original volume 36. The original device name was restored. No reset was
 observed. Raw logs, before/active/after state, and per-operation readings:
 /Users/amitosh/.codex/visualizations/2026/10/21/01a15cf6-fa38-7802-a51c-bdfeff74c601/airplay-ctrl-stack/airplay2
+
+
+A subsequent handoff-fix regression run reached **3,068 bytes** of historical
+control-stack use (diagnostics included). See [radio-airplay-handoff.md](radio-airplay-handoff.md).

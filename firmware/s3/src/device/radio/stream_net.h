@@ -32,6 +32,11 @@ typedef struct {
     // the ring, so the caller can start a new epoch for it.
     void (*on_audio)(void *ctx, const stream_info_t *info);
     void (*on_title)(void *ctx, const char *title);
+    // Optional socket ownership hooks, called on the network task. The
+    // connected socket may be shutdown by the owner to wake reads, but only
+    // this task closes it. Unpublish it before HTTP cleanup can close/reuse it.
+    bool (*on_connected)(void *ctx, int socket);
+    void (*on_disconnected)(void *ctx);
 } stream_net_ops_t;
 
 // Blocks until the stream ends. `error` gets a short reason for RETRY and

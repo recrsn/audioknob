@@ -40,7 +40,7 @@ void ap2_set_volume_db(float db);
 
 const uint8_t *ap2_mac(void);
 
-void ap2_emit(const raop_event_t *event);
+bool ap2_emit(const raop_event_t *event);
 void ap2_emit_type(raop_event_type_t type);
 void ap2_push_pcm(const int16_t *pcm, size_t frames, int64_t playtime_us);
 

@@ -16,7 +16,8 @@
 #define RAOP_SAMPLE_RATE 44100
 
 typedef enum {
-    RAOP_EVENT_SESSION_START,  // SETUP: a sender is about to stream
+    RAOP_EVENT_SESSION_START,  // principal sender selected; audio may follow
+    RAOP_EVENT_PREPARE,        // audio SETUP: release old radio resources before allocating
     RAOP_EVENT_PLAY,           // first accepted audio after RECORD or FLUSH
     RAOP_EVENT_FLUSH,          // pause/seek: drop everything queued downstream
     RAOP_EVENT_SESSION_END,    // TEARDOWN, RTSP connection lost, or raop_abort()
@@ -48,8 +49,8 @@ typedef struct {
     };
 } raop_event_t;
 
-// Called from the RTSP or RTP task. Returning false from SESSION_START
-// refuses the stream (sender gets a 503); other return values are ignored.
+// Called from the RTSP or RTP task. Returning false from PREPARE refuses
+// audio SETUP (sender gets a 503); other return values are ignored.
 typedef bool (*raop_event_cb_t)(const raop_event_t *event);
 
 // Decoded interleaved stereo s16, in order, as soon as it is available --

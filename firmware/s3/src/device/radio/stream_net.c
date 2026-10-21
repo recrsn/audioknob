@@ -253,8 +253,24 @@ static stream_net_result_t hop(conn_t *c, stream_ring_t *ring, const stream_net_
         return STREAM_NET_FAILED;
     }
     stream_net_result_t result = STREAM_NET_RETRY;
+    bool published = false;
+    if (ops->should_stop(ops->ctx)) {
+        result = STREAM_NET_STOPPED;
+        goto done;
+    }
     if (esp_http_client_open(client, 0) != ESP_OK) {
         snprintf(error, error_len, "Can't reach the station");
+        goto done;
+    }
+    if (ops->on_connected) {
+        published = true;
+        if (!ops->on_connected(ops->ctx, esp_http_client_get_socket(client))) {
+            result = STREAM_NET_STOPPED;
+            goto done;
+        }
+    }
+    if (ops->should_stop(ops->ctx)) {
+        result = STREAM_NET_STOPPED;
         goto done;
     }
     if (esp_http_client_fetch_headers(client) < 0) {
@@ -321,6 +337,7 @@ static stream_net_result_t hop(conn_t *c, stream_ring_t *ring, const stream_net_
     result = pump(client, c, audio, ring, ops, error, error_len);
 
 done:
+    if (published && ops->on_disconnected) ops->on_disconnected(ops->ctx);
     esp_http_client_cleanup(client);
     return result;
 }
