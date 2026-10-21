@@ -112,6 +112,17 @@ static void render_ready(const ui_firmware_t *f) {
     ui_set_visible(fw.bar, false);
 }
 
+// An S3 install only checks the image and restarts, so it shows no percent.
+static void render_installing(const ui_firmware_t *f) {
+    char body[64];
+    snprintf(body, sizeof(body), "Restarting into %s", f->version);
+    ui_prompt_render(&fw.prompt, &(ui_prompt_content_t){.symbol = LV_SYMBOL_DOWNLOAD,
+                                                         .tint = UI_COLOR_ACCENT,
+                                                         .title = "Installing update",
+                                                         .body = body});
+    ui_set_visible(fw.bar, false);
+}
+
 static void render_progress(const ui_firmware_t *f) {
     bool sending = f->state == UI_FIRMWARE_INSTALLING;
     uint32_t tint = sending ? UI_TINT_BLUETOOTH : UI_COLOR_ACCENT;
@@ -204,8 +215,14 @@ void ui_update_firmware(const ui_firmware_t *f) {
         render_ready(f);
         break;
     case UI_FIRMWARE_RECEIVING:
-    case UI_FIRMWARE_INSTALLING:
         render_progress(f);
+        break;
+    case UI_FIRMWARE_INSTALLING:
+        if (f->bluetooth) {
+            render_progress(f);
+        } else {
+            render_installing(f);
+        }
         break;
     case UI_FIRMWARE_INSTALLED:
     case UI_FIRMWARE_FAILED:
