@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "esp_app_desc.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -138,7 +139,14 @@ static void release_task(void *arg) {
         taskEXIT_CRITICAL(&s_lock);
         check_release();
         github_release_get_status(&status);
-        next_check = esp_timer_get_time() + (status.error[0] ? RETRY_US : DAY_US);
+        int64_t wait_us = status.error[0] ? RETRY_US : DAY_US;
+        next_check = esp_timer_get_time() + wait_us;
+        // Checks only run once SNTP has synced, so wall-clock time is valid here.
+        int64_t now = time(NULL);
+        taskENTER_CRITICAL(&s_lock);
+        s_status.last_check = now;
+        s_status.next_check = now + wait_us / 1000000;
+        taskEXIT_CRITICAL(&s_lock);
     }
 }
 

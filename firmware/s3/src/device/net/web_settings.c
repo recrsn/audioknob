@@ -203,6 +203,8 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON *r = cJSON_AddObjectToObject(json, "release");
     cJSON_AddBoolToObject(r, "checking", release.checking);
     cJSON_AddBoolToObject(r, "checked", release.checked);
+    cJSON_AddNumberToObject(r, "lastCheck", (double)release.last_check);
+    cJSON_AddNumberToObject(r, "nextCheck", (double)release.next_check);
     cJSON_AddBoolToObject(r, "s3", release.s3_available);
     cJSON_AddBoolToObject(r, "bluetooth", release.bluetooth_available);
     cJSON_AddStringToObject(r, "tag", release.tag);

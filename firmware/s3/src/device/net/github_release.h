@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 #include "ota.h"
 
 typedef enum {
@@ -15,6 +16,9 @@ typedef enum {
 typedef struct {
     bool checking;
     bool checked;
+    // Unix seconds; 0 until the first check finishes.
+    int64_t last_check;
+    int64_t next_check;
     bool s3_available;
     bool bluetooth_available;
     release_notice_t notice;

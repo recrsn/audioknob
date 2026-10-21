@@ -6,228 +6,382 @@
 <meta name="color-scheme" content="dark">
 <title>AudioKnob</title>
 <style>
-:root{--bg:#0b0b10;--card:#15151d;--line:#262631;--text:#eeeef2;--dim:#8d8d99;--accent:#4ea1ff;--ok:#6fd08c;--err:#ff7a7a;--ap:#4ea1ff;--bt:#5b7cff;--radio:#f472b6}
+:root{--bg:#000;--card:#1c1c1e;--line:#38383a;--chip:#2c2c2e;--chip-on:#48484a;--field:#2c2c2e;--text:#f2f2f7;--dim:#8e8e93;--accent:#0a84ff;--ok:#30d158;--err:#ff453a;--ap:#4ea1ff;--radio:#f472b6}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font:16px/1.4 -apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
-main{max-width:460px;margin:0 auto;padding:20px 16px 48px}
-header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:4px 4px 16px}
-h1{font-size:24px;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#conn{font-size:13px;color:var(--dim);white-space:nowrap}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--text);font:17px/1.35 -apple-system,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button,select,input{font:inherit}
+button{cursor:pointer}
+button:disabled{cursor:default}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Phone: one page at a time, like iOS Settings. */
+main{max-width:600px;margin:0 auto;overflow-x:clip}
+.page{padding:0 16px 48px}
+.page:not(.shown){display:none}
+.navbar{position:sticky;top:0;z-index:2;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;min-height:48px;margin:0 -16px 8px;padding:0 8px;background:rgba(0,0,0,.82);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-bottom:.5px solid var(--line)}
+.navbar h2{grid-column:2;margin:0;font-size:17px;font-weight:600;white-space:nowrap}
+.back{grid-column:1;justify-self:start;display:flex;align-items:center;gap:2px;padding:8px;color:var(--accent)}
+.back::before{content:"";width:10px;height:10px;border:solid currentColor;border-width:0 0 2.5px 2.5px;transform:rotate(45deg);margin:0 4px 0 4px}
+h1{font-size:34px;font-weight:700;margin:0;padding:52px 4px 12px}
+@media (prefers-reduced-motion:no-preference){
+  .page.fwd{animation:in-fwd .28s ease-out}
+  .page.bwd{animation:in-bwd .28s ease-out}
+}
+@keyframes in-fwd{from{transform:translateX(24%);opacity:0}}
+@keyframes in-bwd{from{transform:translateX(-12%);opacity:0}}
+/* Desktop: the list stays on the left and the page opens beside it, like iPad Settings. */
+@media (min-width:860px){
+  main{max-width:1060px;display:grid;grid-template-columns:360px minmax(0,1fr);gap:0 32px;padding:0 24px}
+  #p-root{display:block;position:sticky;top:0;height:100vh;overflow-y:auto;padding:0 4px 32px;scrollbar-width:thin}
+  .page:not(#p-root){grid-column:2;grid-row:1;max-width:640px;padding:0 0 48px}
+  .page.fwd,.page.bwd{animation:none}
+  .navbar{margin:0 0 8px;padding:52px 4px 12px;background:none;-webkit-backdrop-filter:none;backdrop-filter:none;border:0;display:block;position:static}
+  .navbar h2{font-size:34px;font-weight:700}
+  .back{display:none}
+  .link.on{background:var(--accent)}
+  .link.on .val,.link.on .chev{color:#fff}
+  #devcard.on{background:var(--accent)}
+  #devcard.on #devsub,#devcard.on .chev{color:#fff;border-color:#fff}
+}
+/* Grouped lists */
+.group{margin:0 0 28px}
+.label{font-size:13px;text-transform:uppercase;color:var(--dim);margin:0 16px 6px}
+.card{background:var(--card);border-radius:12px;overflow:hidden}
+.foot{font-size:13px;color:var(--dim);margin:6px 16px 0}
+.row{position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;min-height:46px;padding:8px 16px;width:100%;border:0;background:none;color:inherit;text-align:left}
+.row+.row::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--line)}
+.row:has(.ic)+.row::before{left:60px}
+.row>:first-child{flex:none}
+.val{color:var(--dim);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.col{flex-direction:column;align-items:stretch}
+.link{flex-wrap:nowrap}
+.link>span:first-of-type{flex:none}
+.chev{flex:none;width:8px;height:8px;border:solid #5a5a5f;border-width:2px 2px 0 0;transform:rotate(45deg);margin-left:2px}
+.badge{flex:none;min-width:22px;height:22px;border-radius:11px;background:var(--err);color:#fff;font-size:14px;display:grid;place-items:center;padding:0 6px}
+.action{color:var(--accent);justify-content:flex-start}
+.action.danger{color:var(--err)}
+.action:disabled{color:var(--dim)}
+.ic{flex:none;width:30px;height:30px;border-radius:7px;display:grid;place-items:center;background:var(--c)}
+.ic svg{width:19px;height:19px;fill:#fff}
+@media (hover:hover){
+  a.row:hover,button.row:not(:disabled):hover{background:rgba(255,255,255,.05)}
+  .link.on:hover{background:var(--accent)}
+}
+/* The device, the way iOS opens with the account */
+#devcard{display:flex;align-items:center;gap:14px;min-height:76px}
+#devcard .ic{width:56px;height:56px;border-radius:50%;background:linear-gradient(160deg,#4a4a52,#1c1c1e);border:1px solid #48484a}
+#devcard .ic::after{content:"";width:22px;height:22px;border-radius:50%;border:3px solid #d1d1d6}
+#devcard .who{flex:1;min-width:0}
+#name{font-size:20px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#devsub{font-size:14px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #conn.off{color:var(--err)}
-h2{font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin:28px 4px 8px}
-.card{background:var(--card);border-radius:16px;overflow:hidden}
-.row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;padding:10px 16px;border-top:1px solid var(--line)}
-.row:first-child{border-top:0}
-.row>span:first-child{flex:none}
-.val{color:var(--dim);text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.col{flex-direction:column;align-items:stretch;gap:8px}
-.hint{font-size:13px;color:var(--dim);margin:0}
+#conn:not(:empty)::after{content:" · ";color:var(--dim)}
 /* Now playing */
 #np{padding:16px}
 #np .top{display:flex;gap:14px;align-items:center}
-#art{width:88px;height:88px;border-radius:12px;flex:none;background:#22222c center/cover no-repeat;display:grid;place-items:center;color:#55556a;font-size:34px}
+#art{width:72px;height:72px;border-radius:10px;flex:none;background:var(--chip) center/cover no-repeat;display:grid;place-items:center;color:#636366;font-size:28px}
 #np .meta{min-width:0}
-#src{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:#22222c;color:var(--dim)}
+#src{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:3px 8px;border-radius:99px;background:var(--chip);color:var(--dim)}
 #src.airplay{background:rgba(78,161,255,.16);color:var(--ap)}
 #src.bluetooth{background:rgba(91,124,255,.18);color:#8ea4ff}
 #src.radio{background:rgba(244,114,182,.16);color:var(--radio)}
-#title{font-size:18px;font-weight:600;margin-top:6px}
-#artist,#album{color:var(--dim);font-size:14px}
+#title{font-size:17px;font-weight:600;margin-top:6px}
+#artist,#album{color:var(--dim);font-size:15px}
 #title,#artist,#album{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.transport{display:flex;justify-content:center;gap:18px;margin:16px 0 6px}
-.transport button{width:52px;height:52px;border-radius:50%;border:0;background:#22222c;color:var(--text);display:grid;place-items:center;padding:0}
-.transport #play{width:60px;height:60px;background:var(--accent);color:#fff}
+.transport{display:flex;justify-content:center;gap:18px;margin:14px 0 4px}
+.transport button{width:50px;height:50px;border-radius:50%;border:0;background:var(--chip);color:var(--text);display:grid;place-items:center;padding:0}
+.transport #play{width:58px;height:58px;background:var(--text);color:#000}
 .transport svg{width:24px;height:24px;fill:currentColor}
-.vol{display:flex;align-items:center;gap:10px;margin-top:10px}
-.vol button{flex:none;width:36px;height:36px;border-radius:50%;border:0;background:#22222c;color:var(--text);font-size:20px;line-height:1;padding:0}
+.vol{display:flex;align-items:center;gap:10px;margin-top:8px}
+.vol button{flex:none;width:34px;height:34px;border-radius:50%;border:0;background:var(--chip);color:var(--text);font-size:20px;line-height:1;padding:0}
 #volval{width:3ch;text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
 .disabled{opacity:.4;pointer-events:none}
 /* Controls */
-input[type=range]{flex:1;width:100%;accent-color:var(--accent);height:28px;margin:0}
-.slider{display:flex;align-items:center;gap:12px;flex:1;max-width:240px}
+input[type=range]{flex:1;width:100%;min-width:0;accent-color:var(--accent);height:28px;margin:0}
+.slider{display:flex;align-items:center;gap:12px;flex:1 1 160px;max-width:300px}
 .slider output{width:4ch;text-align:right;color:var(--dim);font-variant-numeric:tabular-nums}
-.sw{position:relative;flex:none;width:51px;height:31px}
+.sw{position:relative;flex:none;width:51px;height:31px;margin-left:auto}
 .sw input{position:absolute;inset:0;opacity:0;margin:0;cursor:pointer;z-index:1}
-.sw i{position:absolute;inset:0;border-radius:99px;background:#3a3a46}
+.sw i{position:absolute;inset:0;border-radius:99px;background:#39393d}
 .sw i::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff}
+.sw input:focus-visible+i{outline:2px solid var(--accent);outline-offset:2px}
 /* Only once loaded, so switches don't animate into their first state. */
 .ready .sw i{transition:background .2s}.ready .sw i::after{transition:transform .2s}
 .sw input:checked+i{background:var(--ok)}
 .sw input:checked+i::after{transform:translateX(20px)}
-.seg{display:flex;background:#22222c;border-radius:9px;padding:2px;flex:none}
-.seg button{border:0;background:none;color:var(--dim);padding:6px 12px;border-radius:7px;font-size:14px}
-.seg button.on{background:#3a3a46;color:var(--text)}
-select,input[type=text]{width:100%;padding:11px 12px;font-size:16px;border-radius:10px;border:1px solid var(--line);background:#0f0f15;color:var(--text)}
-.row>select{width:auto}
-.inline{display:flex;gap:8px}
-.btn{border:0;border-radius:10px;padding:11px 16px;font-size:16px;background:var(--accent);color:#fff;flex:none}
-.btn.danger{background:none;color:var(--err);padding:0 4px;font-size:16px}
-#btactions .inline{justify-content:space-between;align-items:center}
-.split{justify-content:space-between;align-items:center}
-progress{-webkit-appearance:none;appearance:none;width:100%;height:6px;border:0;border-radius:3px;background:var(--line);overflow:hidden}
+.seg{display:flex;background:var(--chip);border-radius:9px;padding:2px;margin-left:auto}
+.seg button{border:0;background:none;color:var(--text);padding:5px 12px;border-radius:7px;font-size:14px;white-space:nowrap}
+.seg button.on{background:#636366}
+select,input[type=text]{width:100%;min-width:0;padding:10px 12px;font-size:17px;border-radius:10px;border:0;background:var(--field);color:var(--text)}
+.row>select{width:auto;max-width:60%;margin-left:auto;background:none;color:var(--dim);text-align:right;padding-right:0}
+.col>select{width:100%;margin-left:0}
+.inline{display:flex;gap:8px;align-items:center}
+.split{justify-content:space-between}
+.wrap{flex-wrap:wrap}
+.btn{border:0;border-radius:10px;padding:10px 16px;font-size:17px;background:var(--accent);color:#fff;flex:none}
+.btn:disabled{opacity:.5}
+progress{-webkit-appearance:none;appearance:none;width:100%;height:4px;border:0;border-radius:2px;background:var(--line);overflow:hidden}
 progress::-webkit-progress-bar{background:var(--line)}
 progress::-webkit-progress-value{background:var(--accent);transition:width .3s}
 progress::-moz-progress-bar{background:var(--accent)}
-.val.high{color:var(--accent)}.val.danger{color:var(--err)}
-.btn.ghost{background:none;color:var(--accent);padding:0 4px;align-self:flex-start}
-#locresults{display:flex;flex-direction:column}
-#locresults button{display:flex;flex-direction:column;align-items:flex-start;border:0;border-top:1px solid var(--line);background:none;color:var(--text);padding:10px 4px;font-size:16px;text-align:left}
-#locresults small{color:var(--dim);font-size:13px}
-/* Radio */
-.station{display:flex;align-items:center;gap:6px;min-height:52px;padding:6px 8px 6px 16px;border-top:1px solid var(--line)}
-.station:first-child{border-top:0}
+.results{display:flex;flex-direction:column}
+.results:empty{display:none}
+.results button{display:flex;flex-direction:column;align-items:flex-start;border:0;border-top:.5px solid var(--line);background:none;color:var(--text);padding:10px 4px;font-size:17px;text-align:left}
+.results small{color:var(--dim);font-size:13px}
+/* Radio presets */
+.station{position:relative;display:flex;align-items:center;gap:4px;min-height:56px;padding:6px 8px 6px 16px}
+.station+.station::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--line)}
 .station .sname{flex:1;min-width:0}
 .station .sname div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .station .sname small{display:block;color:var(--dim);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .station.on .sname div{color:var(--radio);font-weight:600}
 .station.failed small{color:var(--err)}
-.icon{flex:none;width:36px;height:36px;border-radius:50%;border:0;background:none;color:var(--dim);font-size:17px;line-height:1;padding:0;display:grid;place-items:center}
+.icon{flex:none;width:40px;height:40px;border-radius:50%;border:0;background:none;color:var(--dim);font-size:17px;line-height:1;padding:0;display:grid;place-items:center}
 .icon:disabled{opacity:.25}
-.icon.play{background:#22222c;color:var(--text)}
-.station.on .icon.play{background:var(--radio);color:#fff}
 .icon.del{color:var(--err)}
 #stationsempty{padding:16px;color:var(--dim)}
-#rbresults{display:flex;flex-direction:column}
-#rbresults button{display:flex;flex-direction:column;align-items:flex-start;border:0;border-top:1px solid var(--line);background:none;color:var(--text);padding:10px 4px;font-size:16px;text-align:left}
-#rbresults small{color:var(--dim);font-size:13px}
-details summary{color:var(--accent);cursor:pointer;font-size:15px}
-details[open] summary{margin-bottom:8px}
 .stack{display:flex;flex-direction:column;gap:8px}
-.stack .btn{align-self:flex-start}
-#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#2a2a35;color:var(--text);padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none}
+.stack .btn,#addform .btn{align-self:flex-start}
+.slider.full{max-width:none}
+#newname{flex:1;background:none;padding:0}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#2c2c2e;color:var(--text);padding:10px 16px;border-radius:12px;font-size:15px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px);z-index:3}
 #toast.show{opacity:1}
 </style>
 </head>
 <body>
 <main>
-<header><h1 id="name">AudioKnob</h1><span id="conn">Connecting…</span></header>
+<section class="page" id="p-root">
+  <h1>Settings</h1>
+  <div class="group card">
+    <a class="row" id="devcard" href="#about">
+      <i class="ic"></i>
+      <div class="who"><div id="name">AudioKnob</div><div id="devsub"><span id="conn">Connecting…</span><span id="host"></span></div></div>
+      <span class="chev"></span>
+    </a>
+  </div>
 
-<section class="card" id="np">
-  <div class="top">
-    <div id="art">♪</div>
-    <div class="meta">
-      <span id="src">Idle</span>
-      <div id="title">Nothing playing</div>
-      <div id="artist"></div>
-      <div id="album"></div>
+  <div class="group card" id="np">
+    <div class="top">
+      <div id="art">♪</div>
+      <div class="meta">
+        <span id="src">Idle</span>
+        <div id="title">Nothing playing</div>
+        <div id="artist"></div>
+        <div id="album"></div>
+      </div>
+    </div>
+    <div id="controls">
+      <div class="transport">
+        <button id="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM9.5 12 18 6v12z"/></svg></button>
+        <button id="play" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path id="playicon" d="M8 5v14l11-7z"/></svg></button>
+        <button id="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
+      </div>
+      <div class="vol">
+        <button id="voldown" aria-label="Volume down">−</button>
+        <input type="range" id="volume" min="0" max="100" aria-label="Volume">
+        <button id="volup" aria-label="Volume up">+</button>
+        <span id="volval"></span>
+      </div>
     </div>
   </div>
-  <div id="controls">
-    <div class="transport">
-      <button id="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zM9.5 12 18 6v12z"/></svg></button>
-      <button id="play" aria-label="Play or pause"><svg viewBox="0 0 24 24"><path id="playicon" d="M8 5v14l11-7z"/></svg></button>
-      <button id="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 18l8.5-6L6 6z"/></svg></button>
-    </div>
-    <div class="vol">
-      <button id="voldown" aria-label="Volume down">−</button>
-      <input type="range" id="volume" min="0" max="100" aria-label="Volume">
-      <button id="volup" aria-label="Volume up">+</button>
-      <span id="volval"></span>
-    </div>
+
+  <nav aria-label="Settings">
+  <div class="group card">
+    <a class="row link" href="#wifi"><i class="ic" style="--c:#0a84ff"><svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8 3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4 2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg></i><span>Wi-Fi</span><span class="val" id="v-wifi"></span><span class="chev"></span></a>
+    <a class="row link" href="#bluetooth"><i class="ic" style="--c:#0a84ff"><svg viewBox="0 0 24 24"><path d="M17.71 7.71 12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29zM13 5.83l1.88 1.88L13 9.59V5.83zm1.88 10.46L13 18.17v-3.76l1.88 1.88z"/></svg></i><span>Bluetooth</span><span class="val" id="v-bt"></span><span class="chev"></span></a>
+    <a class="row link" href="#airplay"><i class="ic" style="--c:#5e5ce6"><svg viewBox="0 0 24 24"><path d="M6 22h12l-6-6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg></i><span>AirPlay</span><span class="val" id="v-airplay"></span><span class="chev"></span></a>
+  </div>
+  <div class="group card">
+    <a class="row link" href="#radio"><i class="ic" style="--c:#ff375f"><svg viewBox="0 0 24 24"><path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.89 2 2 2h16c1.11 0 2-.9 2-2V8c0-1.11-.89-2-2-2H8.3l8.26-3.34L15.88 1 3.24 6.15zM7 20c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm13-8h-2v-2h-2v2H4V8h16v4z"/></svg></i><span>Radio</span><span class="val" id="v-radio"></span><span class="chev"></span></a>
+    <a class="row link" href="#sounds"><i class="ic" style="--c:#ff453a"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></i><span>Sounds</span><span class="val"></span><span class="chev"></span></a>
+    <a class="row link" href="#display"><i class="ic" style="--c:#0a84ff"><svg viewBox="0 0 24 24"><path d="M20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6zm0-10c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z"/></svg></i><span>Display</span><span class="val"></span><span class="chev"></span></a>
+    <a class="row link" href="#clock"><i class="ic" style="--c:#ff9f0a"><svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg></i><span>Clock &amp; Weather</span><span class="val"></span><span class="chev"></span></a>
+  </div>
+  <div class="group card">
+    <a class="row link" href="#update"><i class="ic" style="--c:#8e8e93"><svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></i><span>Software Update</span><span class="val"></span><span class="badge" id="v-update" hidden>1</span><span class="chev"></span></a>
+    <a class="row link" href="#about"><i class="ic" style="--c:#8e8e93"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></i><span>About</span><span class="val"></span><span class="chev"></span></a>
+  </div>
+  </nav>
+</section>
+
+<section class="page" id="p-wifi">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Wi-Fi</h2></div>
+  <div class="group card">
+    <div class="row"><span>Network</span><span class="val" id="wifi"></span></div>
+    <div class="row"><span>Address</span><span class="val" id="addr"></span></div>
+  </div>
+  <div class="group">
+    <div class="card"><button class="row action danger" id="forget">Forget This Network…</button></div>
+    <p class="foot">The device restarts into setup mode and shows a QR code to join its own network.</p>
   </div>
 </section>
 
-<h2>Radio</h2>
-<section class="card">
-  <div id="stations"></div>
-  <div class="row col">
-    <form class="inline" id="rbform"><input type="text" id="rbq" placeholder="Find a station" autocomplete="off"><button class="btn">Search</button></form>
-    <div id="rbresults"></div>
-    <details>
-      <summary>Add by address</summary>
-      <form class="stack" id="addform">
+<section class="page" id="p-bluetooth">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Bluetooth</h2></div>
+  <div class="group card">
+    <div class="row"><span>Bluetooth</span><label class="sw"><input type="checkbox" id="bluetooth" aria-label="Bluetooth"><i></i></label></div>
+  </div>
+  <div class="group" id="btactions">
+    <p class="label">Devices</p>
+    <div class="card">
+      <div class="row"><span>Paired devices</span><span class="val" id="bonded"></span></div>
+      <button class="row action" id="pair">Pair a Device</button>
+      <button class="row action danger" id="unpair">Forget All Devices…</button>
+    </div>
+    <p class="foot">The knob shows a code to check against your phone's.</p>
+  </div>
+</section>
+
+<section class="page" id="p-airplay">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>AirPlay</h2></div>
+  <div class="group">
+    <div class="card">
+      <div class="row"><span>AirPlay 2</span><label class="sw"><input type="checkbox" id="ap2" aria-label="AirPlay 2"><i></i></label></div>
+      <div class="row" id="ap1row"><span>AirPlay 1</span><label class="sw"><input type="checkbox" id="ap1" aria-label="AirPlay 1"><i></i></label></div>
+    </div>
+    <p class="foot">Turn a version off to hide the device from senders that use it.</p>
+  </div>
+</section>
+
+<section class="page" id="p-radio">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Radio</h2></div>
+  <div class="group">
+    <p class="label">Presets</p>
+    <div class="card"><div id="stations"></div></div>
+    <p class="foot">The knob plays the list in this order.</p>
+  </div>
+  <div class="group">
+    <p class="label">Add a station</p>
+    <div class="card">
+      <div class="row col">
+        <form class="inline" id="rbform"><input type="text" id="rbq" placeholder="Find a station" autocomplete="off"><button class="btn">Search</button></form>
+        <div class="results" id="rbresults"></div>
+      </div>
+    </div>
+    <p class="foot">Search covers radio-browser.info's directory, asked from this phone.</p>
+  </div>
+  <div class="group">
+    <p class="label">Add by address</p>
+    <div class="card">
+      <form class="row col" id="addform">
         <input type="text" id="addname" placeholder="Name" maxlength="47" required autocomplete="off">
         <input type="text" id="addurl" placeholder="https://… (MP3 or AAC stream, .pls or .m3u)" maxlength="255" required autocomplete="off" inputmode="url">
         <button class="btn">Add</button>
       </form>
-    </details>
-    <p class="hint">Search covers radio-browser.info's directory, asked from this phone. The knob plays the list in this order.</p>
-  </div>
-</section>
-
-<h2>Display</h2>
-<section class="card">
-  <div class="row"><span>Brightness</span><div class="slider"><input type="range" id="brightness" min="5" max="100" step="5"><output id="brightval"></output></div></div>
-  <div class="row"><span>Sleep after</span><select id="sleep"><option value="0">Never</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option></select></div>
-  <div class="row"><span>Art colours</span><label class="sw"><input type="checkbox" id="artColors"><i></i></label></div>
-  <div class="row"><span>Haptics</span><label class="sw"><input type="checkbox" id="haptics"><i></i></label></div>
-</section>
-
-<h2>Timers</h2>
-<section class="card">
-  <div class="row"><span>Timer sound</span><div class="seg" id="timerSound"><button data-v="0">Off</button><button data-v="1">Chime</button><button data-v="2">Bell</button></div></div>
-  <div class="row"><span>Timer volume</span><div class="slider"><input type="range" id="timerVolume" min="5" max="100" step="5"><output id="timervolval"></output></div></div>
-</section>
-
-<h2>Time and weather</h2>
-<section class="card">
-  <div class="row"><span>Clock</span><div class="seg" id="clock24"><button data-v="0">12-hour</button><button data-v="1">24-hour</button></div></div>
-  <div class="row"><span>Units</span><div class="seg" id="fahrenheit"><button data-v="0">°C</button><button data-v="1">°F</button></div></div>
-  <div class="row" id="wxrow"><span>Now</span><span class="val" id="wxnow"></span></div>
-  <div class="row"><span>Air quality</span><span class="val" id="aqi"></span></div>
-  <div class="row"><span>UV index</span><span class="val" id="uv"></span></div>
-  <div class="row col">
-    <div class="inline split"><span>Show air quality</span><div class="seg" id="airShow"><button data-v="0">Off</button><button data-v="1">When high</button><button data-v="2">Always</button></div></div>
-    <p class="hint">Air quality and UV on the clock face, beside the weather.</p>
-  </div>
-  <div class="row col">
-    <div class="inline split"><span>Location</span><span class="val" id="loc"></span></div>
-    <form class="inline" id="locform"><input type="text" id="locq" placeholder="Search for a city" autocomplete="off"><button class="btn">Search</button></form>
-    <div id="locresults"></div>
-    <button class="btn ghost" id="locauto" hidden>Use the detected location</button>
-  </div>
-  <div class="row col"><span>Timezone</span><select id="tz"><option value="">Automatic</option></select></div>
-</section>
-
-<h2>Audio</h2>
-<section class="card">
-  <div class="row"><span>AirPlay 2</span><label class="sw"><input type="checkbox" id="ap2"><i></i></label></div>
-  <div class="row" id="ap1row"><span>AirPlay 1</span><label class="sw"><input type="checkbox" id="ap1"><i></i></label></div>
-  <div class="row"><span>Bluetooth</span><label class="sw"><input type="checkbox" id="bluetooth"><i></i></label></div>
-  <div class="row" id="btpair"><span>Paired devices</span><span class="val" id="bonded"></span></div>
-  <div class="row col" id="btactions">
-    <div class="inline"><button class="btn" id="pair">Pair a device</button><button class="btn danger" id="unpair">Forget all…</button></div>
-    <p class="hint" id="pairhint">The knob shows a code to check against your phone's.</p>
-  </div>
-</section>
-
-<h2>Ambience</h2>
-<section class="card">
-  <div class="row"><span>Sound</span><select id="ambienceSound"><option value="0">Brown noise</option><option value="1">Pink noise</option><option value="2">Rain</option><option value="3">Ocean</option><option value="4">Forest</option></select></div>
-  <div class="row"><span>Volume</span><div class="slider"><input type="range" id="ambienceVolume" min="0" max="100" step="5"><output id="ambval"></output></div></div>
-  <div class="row"><span>Playing</span><button class="btn" id="ambplay">Play</button></div>
-  <div class="row"><span>During focus</span><select id="focusSound"><option value="0">No sound</option><option value="1">Brown noise</option><option value="2">Pink noise</option><option value="3">Rain</option><option value="4">Ocean</option><option value="5">Forest</option></select></div>
-</section>
-
-<h2>Device</h2>
-<section class="card">
-  <div class="row col">
-    <label for="newname">Name</label>
-    <form class="inline" id="nameform"><input type="text" id="newname" maxlength="32" required autocomplete="off"><button class="btn">Save</button></form>
-    <p class="hint">Shown in AirPlay and Bluetooth lists. Phones already paired over Bluetooth may keep the old name until you pair again.</p>
-  </div>
-  <div class="row"><span>WiFi</span><span class="val" id="wifi"></span></div>
-  <div class="row"><span>Address</span><span class="val" id="addr"></span></div>
-  <div class="row"><button class="btn danger" id="forget">Forget WiFi network…</button></div>
-</section>
-
-<h2>About</h2>
-<section class="card">
-  <div class="row"><span>Version</span><span class="val" id="version"></span></div>
-  <div class="row"><span>Bluetooth firmware</span><span class="val" id="btversion"></span></div>
-  <div class="row"><span>Free memory</span><span class="val" id="mem"></span></div>
-  <div class="row"><span>Storage used</span><span class="val" id="storage"></span></div>
-  <div class="row col">
-    <div class="inline split"><span>GitHub updates</span><button class="btn" id="checkupd">Check for updates</button></div>
-    <p class="hint" id="releasehint">Checks automatically every day.</p>
-    <div class="inline">
-      <button class="btn" id="releases3" hidden>Download main update</button>
-      <button class="btn" id="releasebt" hidden>Download Bluetooth update</button>
     </div>
-    <div class="inline split"><span>Upload firmware</span><button class="btn" id="updbtn">Choose file…</button></div>
+  </div>
+</section>
+
+<section class="page" id="p-sounds">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Sounds</h2></div>
+  <div class="group">
+    <p class="label">Timers</p>
+    <div class="card">
+      <div class="row"><span>Sound</span><div class="seg" id="timerSound"><button data-v="0">Off</button><button data-v="1">Chime</button><button data-v="2">Bell</button></div></div>
+      <div class="row"><span>Volume</span><div class="slider"><input type="range" id="timerVolume" min="5" max="100" step="5" aria-label="Timer volume"><output id="timervolval"></output></div></div>
+    </div>
+  </div>
+  <div class="group">
+    <p class="label">Ambience</p>
+    <div class="card">
+      <div class="row"><span>Sound</span><select id="ambienceSound" aria-label="Ambience sound"><option value="0">Brown noise</option><option value="1">Pink noise</option><option value="2">Rain</option><option value="3">Ocean</option><option value="4">Forest</option></select></div>
+      <div class="row"><span>Volume</span><div class="slider"><input type="range" id="ambienceVolume" min="0" max="100" step="5" aria-label="Ambience volume"><output id="ambval"></output></div></div>
+      <div class="row"><span>During focus</span><select id="focusSound" aria-label="Sound during focus"><option value="0">No sound</option><option value="1">Brown noise</option><option value="2">Pink noise</option><option value="3">Rain</option><option value="4">Ocean</option><option value="5">Forest</option></select></div>
+    </div>
+    <p class="foot">During focus plays while a Pomodoro focus block runs, never over music.</p>
+  </div>
+</section>
+
+<section class="page" id="p-display">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Display</h2></div>
+  <div class="group">
+    <p class="label">Brightness</p>
+    <div class="card">
+      <div class="row"><div class="slider full"><input type="range" id="brightness" min="5" max="100" step="5" aria-label="Brightness"><output id="brightval"></output></div></div>
+    </div>
+  </div>
+  <div class="group card">
+    <div class="row"><span>Sleep after</span><select id="sleep" aria-label="Sleep after"><option value="0">Never</option><option value="30">30 seconds</option><option value="60">1 minute</option><option value="120">2 minutes</option><option value="300">5 minutes</option><option value="600">10 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option></select></div>
+  </div>
+  <div class="group">
+    <div class="card">
+      <div class="row"><span>Art colours</span><label class="sw"><input type="checkbox" id="artColors" aria-label="Art colours"><i></i></label></div>
+      <div class="row"><span>Haptics</span><label class="sw"><input type="checkbox" id="haptics" aria-label="Haptics"><i></i></label></div>
+    </div>
+    <p class="foot">Art colours tints the now-playing screen from the cover art.</p>
+  </div>
+</section>
+
+<section class="page" id="p-clock">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Clock &amp; Weather</h2></div>
+  <div class="group card">
+    <div class="row"><span>24-hour time</span><label class="sw"><input type="checkbox" id="clock24" aria-label="24-hour time"><i></i></label></div>
+    <div class="row"><span>Temperature</span><div class="seg" id="fahrenheit"><button data-v="0">°C</button><button data-v="1">°F</button></div></div>
+  </div>
+  <div class="group">
+    <div class="card">
+      <div class="row"><span>Air quality</span><div class="seg" id="airShow"><button data-v="0">Off</button><button data-v="1">When high</button><button data-v="2">Always</button></div></div>
+    </div>
+    <p class="foot">Air quality and UV on the clock face, beside the weather.</p>
+  </div>
+  <div class="group">
+    <p class="label">Location</p>
+    <div class="card">
+      <div class="row"><span>Set automatically</span><label class="sw"><input type="checkbox" id="locAuto" aria-label="Set location automatically"><i></i></label></div>
+      <div class="row"><span>Location</span><span class="val" id="loc"></span></div>
+      <div class="row col" id="locmanual" hidden>
+        <form class="inline" id="locform"><input type="text" id="locq" placeholder="Search for a city" autocomplete="off"><button class="btn">Search</button></form>
+        <div class="results" id="locresults"></div>
+      </div>
+    </div>
+  </div>
+  <div class="group">
+    <p class="label">Time zone</p>
+    <div class="card">
+      <div class="row"><span>Set automatically</span><label class="sw"><input type="checkbox" id="tzAuto" aria-label="Set time zone automatically"><i></i></label></div>
+      <div class="row" id="tzautorow"><span>Time zone</span><span class="val" id="tzval"></span></div>
+      <div class="row" id="tzmanual" hidden><span>Time zone</span><select id="tz" aria-label="Time zone"></select></div>
+    </div>
+  </div>
+</section>
+
+<section class="page" id="p-update">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Software Update</h2></div>
+  <div class="group">
+    <div class="card">
+      <div class="row"><span>AudioKnob</span><span class="val" id="version"></span></div>
+      <div class="row"><span>Bluetooth</span><span class="val" id="btversion"></span></div>
+      <button class="row action" id="releases3" hidden>Download main update</button>
+      <button class="row action" id="releasebt" hidden>Download Bluetooth update</button>
+      <button class="row action" id="checkupd">Check Now</button>
+    </div>
+    <p class="foot" id="releasehint">Checks automatically every day.</p>
+  </div>
+  <div class="group">
+    <div class="card">
+      <button class="row action" id="updbtn">Upload Firmware File…</button>
+      <div class="row" id="updbarrow" hidden><progress id="updbar" max="100"></progress></div>
+    </div>
     <input type="file" id="updfile" accept=".bin" hidden>
-    <progress id="updbar" max="100" hidden></progress>
-    <p class="hint" id="updhint"></p>
+    <p class="foot" id="updhint"></p>
+  </div>
+</section>
+
+<section class="page" id="p-about">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>About</h2></div>
+  <div class="group">
+    <p class="label">Name</p>
+    <div class="card">
+      <form class="row" id="nameform"><input type="text" id="newname" maxlength="32" required autocomplete="off" aria-label="Name"><button class="btn">Save</button></form>
+    </div>
+    <p class="foot">Shown in AirPlay and Bluetooth lists. Phones already paired over Bluetooth may keep the old name until you pair again.</p>
+  </div>
+  <div class="group card">
+    <div class="row"><span>Version</span><span class="val" id="aboutversion"></span></div>
+    <div class="row"><span>Bluetooth firmware</span><span class="val" id="aboutbtversion"></span></div>
+    <div class="row"><span>Storage used</span><span class="val" id="storage"></span></div>
+    <div class="row"><span>Address</span><span class="val" id="aboutaddr"></span></div>
   </div>
 </section>
 </main>
@@ -273,7 +427,7 @@ function setText(id, text) {
 // No percent makes it indeterminate.
 function setBar(percent) {
   const bar = $("updbar");
-  bar.hidden = percent === null;
+  $("updbarrow").hidden = percent === null;
   if (percent === undefined) bar.removeAttribute("value");
   else if (percent !== null) bar.value = percent;
 }
@@ -315,35 +469,6 @@ function renderNowPlaying(np) {
   }
 }
 
-// Same categories and thresholds as the device (ui_weather.c, ui.h).
-const AQI_LEVELS = [[50, "Good"], [100, "Moderate"], [150, "Unhealthy for sensitive groups"], [200, "Unhealthy"], [300, "Very unhealthy"], [Infinity, "Hazardous"]];
-const UV_LEVELS = [[2, "Low"], [5, "Moderate"], [7, "High"], [10, "Very high"], [Infinity, "Extreme"]];
-const category = (levels, v) => levels.find(([max]) => v <= max)[1];
-
-function setReading(id, text, high, danger) {
-  setText(id, text);
-  $(id).className = "val" + (danger ? " danger" : high ? " high" : "");
-}
-
-function renderWeather(w, fahrenheit) {
-  if (!w) {
-    setText("wxnow", "—");
-    setReading("aqi", "—");
-    setReading("uv", "—");
-    return;
-  }
-  const t = Math.round(fahrenheit ? w.tempC * 9 / 5 + 32 : w.tempC);
-  setText("wxnow", `${t}°${fahrenheit ? "F" : "C"}` + (w.place ? ` · ${w.place}` : ""));
-  if (w.aqi === undefined) setReading("aqi", "—");
-  else setReading("aqi", `${w.aqi} ${category(AQI_LEVELS, w.aqi)} · PM2.5 ${Math.round(w.pm25)} µg/m³`, w.aqi >= 100, w.aqi > 150);
-  if (w.uv === undefined) {
-    setReading("uv", "—");
-  } else {
-    const uv = Math.round(w.uv), peak = Math.round(w.uvMax);
-    setReading("uv", `${uv} ${category(UV_LEVELS, uv)}` + (peak > uv ? ` · peak ${peak}` : ""), uv >= 6, uv >= 8);
-  }
-}
-
 // The list comes from /api/stations when its version moves; what's playing
 // comes with every poll.
 let stations = [], stationsVersion = -1;
@@ -354,6 +479,7 @@ async function loadStations(version) {
     stations = await (await fetch("/api/stations", {cache: "no-store"})).json();
     stationsVersion = version;
     renderStations();
+    if (state) renderRoot(state);
   } catch (e) {
     // The next poll tries again.
   }
@@ -393,10 +519,7 @@ function renderStations() {
     sub.textContent = !on ? st.url : radio.state === "playing" ? (radio.detail || "Playing")
                     : RADIO_STATES[radio.state] || radio.detail || "Can't play this station";
     name.append(title, sub);
-    const playing = on && !failed;
     row.append(
-      iconButton(playing ? "■" : "▶", playing ? "Stop" : "Play", "play",
-                 () => post("/api/stations", playing ? {action: "stop"} : {action: "play", index: i})),
       name,
       iconButton("↑", "Move up", "", () => post("/api/stations", {action: "move", index: i, to: i - 1}), i === 0),
       iconButton("↓", "Move down", "", () => post("/api/stations", {action: "move", index: i, to: i + 1}),
@@ -431,40 +554,79 @@ function render(s) {
   if (document.activeElement !== $("focusSound")) $("focusSound").value = s.focusSound;
   if (!busy.has($("ambienceVolume"))) $("ambienceVolume").value = s.ambienceVolume;
   setText("ambval", s.ambienceVolume + "%");
-  $("ambplay").textContent = s.ambience.playing ? "Stop" : "Play";
-  ambPlaying = s.ambience.playing;
   $("haptics").checked = s.haptics;
   setSeg("timerSound", s.timerSound);
   if (!busy.has($("timerVolume"))) $("timerVolume").value = s.timerVolume;
   setText("timervolval", s.timerVolume + "%");
-  setSeg("clock24", s.clock24);
+  $("clock24").checked = s.clock24;
   setSeg("fahrenheit", s.fahrenheit);
   setSeg("airShow", s.airShow);
-  renderWeather(s.weather, s.fahrenheit);
-  setText("loc", s.locationAuto ? (s.location ? `Automatic (${s.location})` : "Automatic") : s.location);
-  $("locauto").hidden = s.locationAuto;
-  if (zonesLoaded) $("tz").value = s.tzAuto ? "" : s.tz;
-  $("tz").options[0].textContent = s.tzAuto && s.tz ? `Automatic (${s.tz})` : "Automatic";
+  // Switching location off only opens the search: the device stays automatic
+  // until a city is picked.
+  if (!s.locationAuto) locManual = false;
+  const locAuto = s.locationAuto && !locManual;
+  $("locAuto").checked = locAuto;
+  $("locmanual").hidden = locAuto;
+  setText("loc", s.location || (s.locationAuto ? "Detecting…" : "—"));
+  $("tzAuto").checked = s.tzAuto;
+  $("tzautorow").hidden = !s.tzAuto;
+  $("tzmanual").hidden = s.tzAuto;
+  setText("tzval", (s.tz || "Unknown").replace(/_/g, " "));
+  if (zonesLoaded && document.activeElement !== $("tz")) $("tz").value = s.tz;
   // Without the AirPlay 2 receiver built in, the one switch means AirPlay.
   $("ap1row").hidden = !s.airplay2;
   $("ap2").closest(".row").firstElementChild.textContent = s.airplay2 ? "AirPlay 2" : "AirPlay";
   $("ap2").checked = s.airplay2 ? !!(s.airplay & 2) : !!(s.airplay & 1);
   $("ap1").checked = !!(s.airplay & 1);
   $("bluetooth").checked = s.bluetooth;
-  $("btpair").hidden = $("btactions").hidden = !s.bt;
+  $("btactions").hidden = !s.bt;
   if (s.bt) {
     setText("bonded", s.bt.bonded ? String(s.bt.bonded) : "None");
     $("unpair").hidden = !s.bt.bonded;
     $("pair").disabled = s.bt.pairing;
-    setText("pair", s.bt.pairing ? "Pairing…" : "Pair a device");
+    setText("pair", s.bt.pairing ? "Pairing…" : "Pair a Device");
   }
   setText("wifi", s.ssid || "Not connected");
   setText("addr", s.ip ? `${s.hostname}.local · ${s.ip}` : "—");
   setText("version", s.version);
   setText("btversion", s.btVersion || "—");
+  setText("aboutversion", s.version);
+  setText("aboutbtversion", s.btVersion || "—");
+  setText("aboutaddr", s.ip ? `${s.hostname}.local · ${s.ip}` : "—");
+  setText("host", s.ip ? `${s.hostname}.local` : "Not on WiFi");
+  renderRoot(s);
   setText("storage", s.storageTotalBytes ? `${(s.storageUsedBytes / 1048576).toFixed(1)} / ${(s.storageTotalBytes / 1048576).toFixed(1)} MiB` : "Unavailable");
-  setText("mem", `${s.freeInternalKb} KB · ${(s.freePsramKb / 1024).toFixed(1)} MB PSRAM`);
   renderUpdate(s);
+}
+
+// What each row on the main list says about the page behind it.
+function renderRoot(s) {
+  setText("v-wifi", s.ssid || "Not connected");
+  setText("v-bt", s.bluetooth ? "On" : "Off");
+  const ap = s.airplay2 ? [s.airplay & 2 && "2", s.airplay & 1 && "1"].filter(Boolean) : [s.airplay & 1 && "On"].filter(Boolean);
+  setText("v-airplay", !ap.length ? "Off" : s.airplay2 ? "AirPlay " + ap.join(" & ") : "On");
+  setText("v-radio", stations.length === 1 ? "1 station" : `${stations.length} stations`);
+  $("v-update").hidden = !(s.release.s3 || s.release.bluetooth);
+}
+
+// "today at 9:12", "tomorrow at 9:12" or a date, in this phone's time.
+function when(unix) {
+  const d = new Date(unix * 1000), day = new Date(d).setHours(0, 0, 0, 0);
+  const today = new Date().setHours(0, 0, 0, 0);
+  const time = d.toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+  const days = Math.round((day - today) / 86400000);
+  const label = {"-1": "yesterday", 0: "today", 1: "tomorrow"}[days];
+  return `${label || d.toLocaleDateString([], {month: "short", day: "numeric"})} at ${time}`;
+}
+
+function releaseHint(r, available) {
+  if (r.checking) return "Checking GitHub…";
+  const status = r.error ? r.error + ". "
+    : available ? `Update available: ${available}. Confirm on the device after downloading. `
+    : r.lastCheck ? "Up to date. " : "";
+  const times = r.lastCheck ? `Last checked ${when(r.lastCheck)}; next check ${when(r.nextCheck)}.`
+                            : "The first check runs once WiFi and the clock are ready.";
+  return status + times;
 }
 
 function renderUpdate(s) {
@@ -478,9 +640,7 @@ function renderUpdate(s) {
   setText("releases3", `Download main ${r.s3Version || r.tag}`);
   setText("releasebt", `Download Bluetooth ${r.bluetoothVersion || r.tag}`);
   const available = [r.s3 && `Main ${r.s3Version || r.tag}`, r.bluetooth && `Bluetooth ${r.bluetoothVersion || r.tag}`].filter(Boolean).join(" · ");
-  setText("releasehint", r.checking ? "Checking GitHub…" : r.error ? r.error :
-    r.s3 || r.bluetooth ? `Update available: ${available}. Confirm on the device after downloading.` :
-    r.checked ? "You're up to date. Checks automatically every day." : "Checks automatically every day.");
+  setText("releasehint", releaseHint(r, available));
   // Back from the restart: the bootloader rolls back an image that never
   // got this page up.
   if (installing && wentOffline && (u.state === "idle" || u.state === "installed")) {
@@ -558,8 +718,6 @@ holdable($("brightness"), v => set("brightness", v), 80);
 $("brightness").addEventListener("input", e => setText("brightval", e.target.value + "%"));
 $("sleep").onchange = e => set("sleep", e.target.value);
 $("artColors").onchange = e => set("artColors", +e.target.checked);
-let ambPlaying = false;
-$("ambplay").onclick = () => post("/api/ambience", {action: ambPlaying ? "stop" : "play"});
 $("ambienceSound").onchange = e => set("ambienceSound", e.target.value);
 $("focusSound").onchange = e => set("focusSound", e.target.value);
 holdable($("ambienceVolume"), v => set("ambienceVolume", v), 80);
@@ -568,7 +726,8 @@ $("haptics").onchange = e => set("haptics", +e.target.checked);
 // Each value sent plays a sample on the device, so the slider waits longer.
 holdable($("timerVolume"), v => set("timerVolume", v), 300);
 $("timerVolume").addEventListener("input", e => setText("timervolval", e.target.value + "%"));
-for (const id of ["clock24", "fahrenheit", "airShow", "timerSound"]) {
+$("clock24").onchange = e => set("clock24", +e.target.checked);
+for (const id of ["fahrenheit", "airShow", "timerSound"]) {
   $(id).onclick = e => {
     const v = e.target.dataset.v;
     if (v === undefined) return;
@@ -577,6 +736,12 @@ for (const id of ["clock24", "fahrenheit", "airShow", "timerSound"]) {
   };
 }
 $("tz").onchange = e => set("tz", e.target.value);
+// Off pins the zone in use now, which the select then changes.
+$("tzAuto").onchange = e => {
+  if (e.target.checked) set("tz", "");
+  else if (state.tz) set("tz", state.tz);
+  else e.target.checked = true;
+};
 
 // The phone asks Open-Meteo's geocoder (the forecast's own source); the
 // device only stores the pick.
@@ -610,7 +775,16 @@ $("locform").onsubmit = async e => {
     list.append(b);
   }
 };
-$("locauto").onclick = () => post("/api/location", {auto: 1});
+let locManual = false;
+$("locAuto").onchange = e => {
+  locManual = !e.target.checked;
+  if (!locManual) {
+    $("locresults").textContent = "";
+    if (!state.locationAuto) post("/api/location", {auto: 1});
+  }
+  render(state);
+  if (locManual) $("locq").focus();
+};
 
 async function addStation(name, url) {
   name = name.trim().slice(0, 47);
@@ -738,6 +912,56 @@ $("updfile").onchange = () => {
   };
   xhr.send(file);
 };
+
+// One page at a time on phones, the list beside the page on wide screens;
+// the hash names the page so the browser's back button works.
+const PAGES = [...document.querySelectorAll(".page")].map(p => p.id.slice(2));
+const wide = matchMedia("(min-width:860px)");
+let page = null, rootScroll = 0, fromRoot = false;
+
+function show(name, dir) {
+  for (const p of PAGES) {
+    const el = $("p-" + p);
+    const shown = p === name || (wide.matches && p === "root");
+    el.classList.toggle("shown", shown);
+    el.classList.remove("fwd", "bwd");
+    if (shown && dir && p === name) {
+      void el.offsetWidth;
+      el.classList.add(dir);
+    }
+  }
+  for (const a of document.querySelectorAll(".link, #devcard")) a.classList.toggle("on", a.getAttribute("href") === "#" + name);
+}
+
+function route() {
+  let name = location.hash.slice(1);
+  if (!PAGES.includes(name) || name === "root") name = wide.matches ? "wifi" : "root";
+  if (name === page) return;
+  const prev = page;
+  page = name;
+  if (wide.matches) {
+    show(name);
+    scrollTo(0, 0);
+    return;
+  }
+  if (prev === "root") rootScroll = scrollY;
+  fromRoot = prev === "root";
+  show(name, !prev ? null : name === "root" ? "bwd" : "fwd");
+  scrollTo(0, name === "root" ? rootScroll : 0);
+}
+
+// Back returns through history when the list is what came before, so the
+// browser's own back and forward stay in step.
+for (const a of document.querySelectorAll(".back")) {
+  a.onclick = e => {
+    if (!fromRoot) return;
+    e.preventDefault();
+    history.back();
+  };
+}
+addEventListener("hashchange", route);
+wide.addEventListener("change", () => { page = null; route(); });
+route();
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 poll();
