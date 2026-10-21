@@ -1,5 +1,5 @@
 #include "net_runtime.h"
-#include "stream_net.c"
+#include "radio/stream/net.c"
 size_t stream_ring_write(stream_ring_t *r, const uint8_t *b, size_t n,
                          TickType_t w) {
   (void)r;

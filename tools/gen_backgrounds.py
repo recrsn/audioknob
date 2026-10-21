@@ -178,7 +178,7 @@ def main():
         "// RGB565, native-endian, UI_BG_W x UI_BG_H.",
         "extern const uint16_t ui_bg_wallpaper[UI_BG_W * UI_BG_H];",
     ]
-    body = [banner, '#include "ui_bg_data.h"\n']
+    body = [banner, '#include "ui/assets/ui_bg_data.h"\n']
     body.append(c_array("uint16_t", "ui_bg_wallpaper", render(wallpaper_pixel), 16, "0x%04x"))
     header.append("\n// Per layout: how far each pixel goes from UI_COLOR_BG to the tint, 0-255.")
     for name, tile_y in NOW_PLAYING:

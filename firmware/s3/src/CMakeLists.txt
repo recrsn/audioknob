@@ -18,11 +18,11 @@ set(AK_REQUIRES
     esp_netif
     esp_event
     esp_http_server
-    # Weather and IP geolocation over HTTPS (device/net/online.c), app version for About.
+    # Weather and IP geolocation over HTTPS (online/online.c), app version for About.
     esp_http_client
     json
     esp_app_format
-    # Firmware updates (device/net/ota.c, device/net/esp32_fw.c).
+    # Firmware updates (update/ota.c, update/esp32_fw.c).
     app_update
     lwip
     mbedtls
@@ -44,24 +44,18 @@ endif()
 # include/ dir is added to every component's compile flags.
 idf_build_set_property(COMPILE_OPTIONS "-I${CMAKE_SOURCE_DIR}/include" APPEND)
 
-# Sources include each other by bare file name, so every directory is on the
+# Sources include each other by path from this directory, the only one on the
 # include path.
-set(AK_DIRS ui ui/assets device/core device/drivers device/net device/airplay device/airplay/shared device/airplay/v2 device/ambience device/radio device/talk)
-set(AK_INCLUDE_DIRS ${AK_DIRS})
-set(AK_SRCS "")
-foreach(dir ${AK_DIRS})
-    file(GLOB dir_srcs "${CMAKE_CURRENT_SOURCE_DIR}/${dir}/*.c")
-    list(APPEND AK_SRCS ${dir_srcs})
-endforeach()
-list(APPEND AK_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/main.c")
+file(GLOB_RECURSE AK_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+list(REMOVE_ITEM AK_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/main_native.c")
 
-# The device web page (device/net/web_settings.c), served as is.
-set(AK_EMBED_TXTFILES "device/net/web/index.html")
+# The device web page (web/server.c), served as is.
+set(AK_EMBED_TXTFILES "web/index.html")
 
 
 idf_component_register(
     SRCS ${AK_SRCS}
-    INCLUDE_DIRS ${AK_INCLUDE_DIRS}
+    INCLUDE_DIRS .
     REQUIRES ${AK_REQUIRES}
     EMBED_TXTFILES ${AK_EMBED_TXTFILES}
 )

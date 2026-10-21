@@ -1,4 +1,4 @@
-file(GLOB AK_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
+file(GLOB_RECURSE AK_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/*.c")
 
 idf_component_register(
     SRCS ${AK_SRCS}

@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 
-#include "rtp_timeline.h"
+#include "airplay/receiver/rtp_timeline.h"
 
 // Steps through a session of the given length one block at a time, as the
 // buffered decoder does, and checks the distance never wraps.

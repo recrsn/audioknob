@@ -1,6 +1,6 @@
 #include <assert.h>
 #include <stdio.h>
-#include "audio_source.c"
+#include "audio/source.c"
 static wireless_state_t peer;
 static int pauses, stops[8], local_stops;
 bool uart_link_get_latest(wireless_state_t *s) {

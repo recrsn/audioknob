@@ -1,6 +1,6 @@
 #include "runtime.h"
-#include "audio_out.h"
-#include "audio_source.h"
+#include "audio/out.h"
+#include "audio/source.h"
 static pthread_mutex_t output_lock = PTHREAD_MUTEX_INITIALIZER;
 static audio_out_mix_t output_mix;
 static atomic_bool suspended, held, local, block_topup, force_low_queue;
@@ -41,9 +41,9 @@ bool audio_source_claim_local(void) {
 }
 void audio_source_release_local(void) { atomic_store(&local, false); }
 #ifdef FOCUS
-#include "../../firmware/s3/src/device/ambience/focus_sound.c"
+#include "ambience/focus_sound.c"
 #else
-#include "../../firmware/s3/src/device/drivers/alarm_sound.c"
+#include "audio/alarm_sound.c"
 #endif
 #define WAIT_FOR(expr) do { \
     int64_t deadline = esp_timer_get_time() + 5000000; \

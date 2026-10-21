@@ -3,9 +3,9 @@
 #include <stdio.h>
 #include <string.h>
 #define TAG JOBS_TAG
-#include "../../firmware/s3/src/device/net/network_jobs.c"
+#include "net/network_jobs.c"
 #undef TAG
-#include "../../firmware/s3/src/device/net/online.c"
+#include "online/online.c"
 
 static int mutex;
 static jmp_buf blocked;

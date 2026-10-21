@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "app_state.h"
-#include "bt_pairing.h"
+#include "bt/pairing.h"
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "esp_app_desc.h"

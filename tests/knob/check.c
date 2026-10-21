@@ -1,5 +1,5 @@
 #include "runtime.h"
-#include "../../firmware/s3/src/device/drivers/knob.c"
+#include "drivers/knob.c"
 #include <stdio.h>
 static int turns, clicks, longs, calls;
 static int order[128];

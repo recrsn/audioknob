@@ -1,5 +1,5 @@
 #include "runtime.h"
-#include "stream_player.c"
+#include "radio/stream/player.c"
 static void until(bool (*predicate)(void)) {
   int64_t end = esp_timer_get_time() + 3000000;
   while (!predicate()) {

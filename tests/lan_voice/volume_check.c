@@ -1,5 +1,5 @@
 #include "runtime.h"
-#include "now_playing.c"
+#include "core/now_playing.c"
 static audio_source_t owner;
 static uint8_t volume = 70;
 static int old_source_changes;

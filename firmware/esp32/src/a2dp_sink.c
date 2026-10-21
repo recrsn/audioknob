@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "app_state.h"
-#include "bt_app_core.h"
+#include "bt/app_core.h"
 #include "esp_gap_bt_api.h"
 #include "esp_log.h"
 #include "i2s_out.h"

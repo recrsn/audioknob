@@ -6,8 +6,8 @@
 
 // Exercise the production release jobs through the real shared dispatcher
 // with a simulated monotonic clock; no test-only hooks in the firmware.
-#include "../../firmware/s3/src/device/net/network_jobs.c"
-#include "../../firmware/s3/src/device/net/github_release.c"
+#include "net/network_jobs.c"
+#include "update/github_release.c"
 
 static int64_t now;
 static jmp_buf blocked;

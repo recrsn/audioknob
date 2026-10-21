@@ -1,5 +1,5 @@
 #include "mock_sdk.h"
-#include "https_download.h"
+#include "update/https_download.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

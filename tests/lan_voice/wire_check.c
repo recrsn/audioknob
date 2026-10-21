@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <opus/opus.h>
-#include "talk_wire.h"
-#include "voice_ogg.h"
+#include "talk/wire.h"
+#include "talk/voice/ogg.h"
 
 int main(int argc, char **argv) {
     assert(argc == 2);

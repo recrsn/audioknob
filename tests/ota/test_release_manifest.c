@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "release_manifest.h"
+#include "update/release_manifest.h"
 #include "cJSON.h"
 
 static const char *repo = "recrsn/audioknob";

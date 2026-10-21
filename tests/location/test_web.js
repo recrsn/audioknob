@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
-const html = fs.readFileSync(path.join(__dirname, "../../firmware/s3/src/device/net/web/index.html"), "utf8");
+const html = fs.readFileSync(path.join(__dirname, "../../firmware/s3/src/web/index.html"), "utf8");
 const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 new vm.Script(script);
 const elements = {}, requests = [];

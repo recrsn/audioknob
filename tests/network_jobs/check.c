@@ -1,5 +1,5 @@
 #include "runtime.h"
-#include "../../firmware/s3/src/device/net/network_jobs.c"
+#include "net/network_jobs.c"
 
 static atomic_int calls[NETWORK_JOB_COUNT], active, block_job=-1, entered, resubmit;
 static int order[20000], order_count;

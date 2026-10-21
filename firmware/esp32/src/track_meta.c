@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <string.h>
 
-#include "avrcp_controller.h"
+#include "avrcp/controller.h"
 #include "esp_log.h"
 #include "protocol.h"
 #include "state_sync.h"

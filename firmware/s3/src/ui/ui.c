@@ -1,10 +1,10 @@
-#include "ui.h"
+#include "ui/ui.h"
 #include "lvgl.h"
-#include "fonts.h"
-#include "icons.h"
-#include "ui_bg_data.h"
-#include "ui_internal.h"
-#include "ui_launcher.h"
+#include "ui/assets/fonts.h"
+#include "ui/assets/icons.h"
+#include "ui/assets/ui_bg_data.h"
+#include "ui/internal.h"
+#include "ui/shell/launcher.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,7 +28,7 @@
 // home while the source keeps playing, and the audio chip at the top of the
 // clock and every app page brings it back.
 //
-// Apps live in the launcher (ui_launcher.c), opened by a long knob press
+// Apps live in the launcher (ui/shell/launcher.c), opened by a long knob press
 // anywhere or a tap on the clock; a second long press, a tap off its icons,
 // or the pill on an app page goes home. An idle app page drops home on its own, and the clock
 // shows chips for whatever is still in progress, so getting back to a

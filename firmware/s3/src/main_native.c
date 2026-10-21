@@ -8,11 +8,11 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "art_color.h"
-#include "lights.h"
+#include "ui/now_playing/art_color.h"
+#include "ui/apps/lights/lights.h"
 #include "lvgl.h"
-#include "tz.h"
-#include "ui.h"
+#include "ui/apps/settings/tz.h"
+#include "ui/ui.h"
 
 #define WINDOW_WIDTH  360
 #define WINDOW_HEIGHT 360
@@ -208,7 +208,7 @@ static void on_pairing(ui_pairing_action_t action) {
     ui_update_pairing(&s_pairing);
 }
 
-// Stands in for ota.c so the update screens can be laid out: U sends a
+// Stands in for update/ota.c so the update screens can be laid out: U sends a
 // sample image, in turn for the S3, for Bluetooth, and one that fails at
 // 40%. The S3 one reads as installed straight away, as after its restart.
 #define SIM_FW_TICK_MS 100

@@ -5,10 +5,10 @@
 #include <opus/opus.h>
 #include "encoder/impl/esp_opus_enc.h"
 #include "decoder/impl/esp_opus_dec.h"
-#include "audio_source.h"
-#include "mic.h"
-#include "talk.h"
-#include "voice_notes.h"
+#include "audio/source.h"
+#include "audio/mic/mic.h"
+#include "talk/talk.h"
+#include "talk/voice/notes.h"
 static atomic_int owner=AUDIO_SOURCE_ESP32;
 static atomic_bool mic_owned;
 atomic_uint output_frames;

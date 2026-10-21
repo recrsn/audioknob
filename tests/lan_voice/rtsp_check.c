@@ -1,6 +1,6 @@
 #include "runtime.h"
-#include "talk_rtsp.h"
-#include "http_util.h"
+#include "talk/rtsp.h"
+#include "airplay/shared/http_util.h"
 #include <stdatomic.h>
 static atomic_bool active;
 static atomic_int received;

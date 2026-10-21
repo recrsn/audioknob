@@ -3,7 +3,7 @@
 #include <string.h>
 
 #include "a2dp_sink.h"
-#include "bt_power.h"
+#include "bt/power.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"

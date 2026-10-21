@@ -3,7 +3,7 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
-#include "ota.h"
+#include "update/ota.h"
 
 static uint8_t image[8192], expected_digest[32];
 static size_t offset, available;

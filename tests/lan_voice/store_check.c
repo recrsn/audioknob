@@ -1,8 +1,8 @@
 #include "runtime.h"
-#include "flash_message.h"
-#include "message_store.h"
-#include "voice_notes.h"
-#include "voice_ogg.h"
+#include "talk/flash_message.h"
+#include "talk/message_store.h"
+#include "talk/voice/notes.h"
+#include "talk/voice/ogg.h"
 #include "esp_partition.h"
 #include "esp_spiffs.h"
 #include <stdatomic.h>

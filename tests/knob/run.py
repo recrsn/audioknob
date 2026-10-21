@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix='audioknob-encoder-') as temp:
     binary = stub / 'check'
     subprocess.run(['clang', '-std=gnu11', '-g', '-O1', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-DAK_NATIVE', '-DLV_CONF_INCLUDE_SIMPLE',
-                    '-I' + str(stub), '-I' + str(HERE), '-I' + str(S3 / 'include'),
+                    '-I' + str(stub), '-I' + str(HERE), '-I' + str(S3 / 'src'), '-I' + str(S3 / 'include'),
                     '-I' + str(S3 / '.pio/libdeps/native/lvgl'), '-I/opt/homebrew/include',
                     str(HERE / 'check.c'), str(lvgl_libraries[0]),
                     '-o', str(binary)], check=True)

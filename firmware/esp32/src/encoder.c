@@ -2,8 +2,8 @@
 
 #include <stdbool.h>
 
-#include "avrcp_controller.h"
-#include "avrcp_target.h"
+#include "avrcp/controller.h"
+#include "avrcp/target.h"
 #include "driver/gpio.h"
 #include "driver/pulse_cnt.h"
 #include "esp_log.h"
