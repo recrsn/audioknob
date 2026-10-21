@@ -92,3 +92,20 @@ int64_t esp_http_client_fetch_headers(esp_http_client_handle_t client);
 int esp_http_client_get_status_code(esp_http_client_handle_t client);
 int esp_http_client_set_redirection(esp_http_client_handle_t client);
 int esp_http_client_close(esp_http_client_handle_t client);
+
+#define portMAX_DELAY UINT32_MAX
+typedef int StaticSemaphore_t;
+typedef int *SemaphoreHandle_t;
+typedef void *esp_timer_handle_t;
+typedef struct { void (*callback)(void *); const char *name; } esp_timer_create_args_t;
+SemaphoreHandle_t xSemaphoreCreateMutexStatic(StaticSemaphore_t *storage);
+int xSemaphoreTake(SemaphoreHandle_t sem, uint32_t ticks);
+int xSemaphoreGive(SemaphoreHandle_t sem);
+int esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *out);
+int esp_timer_start_periodic(esp_timer_handle_t timer, uint64_t interval);
+void vTaskDelay(uint32_t ticks);
+
+typedef uint8_t StackType_t;
+typedef int StaticTask_t;
+TaskHandle_t xTaskCreateStatic(void (*fn)(void *), const char *name, unsigned stack,
+                             void *arg, unsigned priority, StackType_t *buffer, StaticTask_t *tcb);

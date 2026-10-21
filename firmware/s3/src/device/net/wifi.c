@@ -10,6 +10,7 @@
 #include "esp_random.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "network_jobs.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -339,6 +340,7 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
             esp_wifi_connect();
         }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        network_jobs_set_network(false);
         wifi_event_sta_disconnected_t *event = data;
         if (!s_setup_mode) {
             ESP_LOGW(TAG, "disconnected (reason %d), retrying", event->reason);

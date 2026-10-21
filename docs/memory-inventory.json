@@ -1,0 +1,318 @@
+{
+  "base": "d110ad416a1cecb2ac176752ff210fc9ca3fa602",
+  "checkpoint": "54aca98c78c3a326370a5cb98a0e7b3641a11c26",
+  "working_tree": "Includes uncommitted reusable network-worker changes; airplay_art 6 KiB stack moved to PSRAM",
+  "known_baseline_stack_bytes": {
+    "S3": {
+      "internal": 71424,
+      "PSRAM": 110592
+    },
+    "ESP32": {
+      "internal": 45824,
+      "PSRAM": 0
+    }
+  },
+  "elf": {
+    "S3": {
+      "path": "firmware/s3/.pio/build/s3/firmware.elf",
+      "sha256": "607c5477ea41b03c050135e33ae1a4af38434ee1ec8449cc614d4b8d14d9833f",
+      "sections": {
+        ".rtc.text": {
+          "bytes": 0,
+          "address": 1611653120
+        },
+        ".rtc.force_fast": {
+          "bytes": 0,
+          "address": 1611653120
+        },
+        ".rtc_noinit": {
+          "bytes": 0,
+          "address": 1342177280
+        },
+        ".rtc.force_slow": {
+          "bytes": 32,
+          "address": 1342177280
+        },
+        ".rtc_reserved": {
+          "bytes": 24,
+          "address": 1611661288
+        },
+        ".iram0.vectors": {
+          "bytes": 1028,
+          "address": 1077362688
+        },
+        ".iram0.text": {
+          "bytes": 120595,
+          "address": 1077363716
+        },
+        ".dram0.dummy": {
+          "bytes": 105472,
+          "address": 1070104576
+        },
+        ".dram0.data": {
+          "bytes": 27532,
+          "address": 1070210048
+        },
+        ".noinit": {
+          "bytes": 0,
+          "address": 1070237580
+        },
+        ".dram0.bss": {
+          "bytes": 49000,
+          "address": 1070237584
+        },
+        ".flash.text": {
+          "bytes": 1956300,
+          "address": 1107296288
+        },
+        ".flash_rodata_dummy": {
+          "bytes": 1966080,
+          "address": 1006632992
+        },
+        ".flash.appdesc": {
+          "bytes": 256,
+          "address": 1008599072
+        },
+        ".flash.rodata": {
+          "bytes": 1097024,
+          "address": 1008599328
+        },
+        ".flash.rodata_noload": {
+          "bytes": 13623,
+          "address": 1009696352
+        },
+        ".ext_ram.dummy": {
+          "bytes": 3080160,
+          "address": 1006632992
+        },
+        ".iram0.text_end": {
+          "bytes": 233,
+          "address": 1077484311
+        },
+        ".iram0.data": {
+          "bytes": 0,
+          "address": 1077484544
+        },
+        ".iram0.bss": {
+          "bytes": 0,
+          "address": 1077484544
+        },
+        ".dram0.heap_start": {
+          "bytes": 0,
+          "address": 1070286584
+        },
+        ".debug_aranges": {
+          "bytes": 112184,
+          "address": 0
+        },
+        ".debug_info": {
+          "bytes": 7862027,
+          "address": 0
+        },
+        ".debug_abbrev": {
+          "bytes": 833400,
+          "address": 0
+        },
+        ".debug_line": {
+          "bytes": 6966594,
+          "address": 0
+        },
+        ".debug_frame": {
+          "bytes": 282220,
+          "address": 0
+        },
+        ".debug_str": {
+          "bytes": 822112,
+          "address": 0
+        },
+        ".debug_loc": {
+          "bytes": 3630870,
+          "address": 0
+        },
+        ".debug_ranges": {
+          "bytes": 560584,
+          "address": 0
+        },
+        ".debug_line_str": {
+          "bytes": 16014,
+          "address": 0
+        },
+        ".debug_loclists": {
+          "bytes": 103821,
+          "address": 0
+        },
+        ".debug_rnglists": {
+          "bytes": 6121,
+          "address": 0
+        },
+        ".comment": {
+          "bytes": 228,
+          "address": 0
+        },
+        ".xtensa.info": {
+          "bytes": 56,
+          "address": 0
+        },
+        ".xt.prop": {
+          "bytes": 240,
+          "address": 0
+        },
+        ".xt.lit": {
+          "bytes": 0,
+          "address": 0
+        }
+      }
+    },
+    "ESP32": {
+      "path": "firmware/esp32/.pio/build/esp32/firmware.elf",
+      "sha256": "e10830230e2d26f8d131512c56e5551f346e55ae2fafd8977b808f6020386efa",
+      "sections": {
+        ".rtc.text": {
+          "bytes": 0,
+          "address": 1074528256
+        },
+        ".rtc.dummy": {
+          "bytes": 0,
+          "address": 1073217536
+        },
+        ".rtc.force_fast": {
+          "bytes": 0,
+          "address": 1073217536
+        },
+        ".rtc_noinit": {
+          "bytes": 0,
+          "address": 1342177280
+        },
+        ".rtc.force_slow": {
+          "bytes": 32,
+          "address": 1342177280
+        },
+        ".rtc_fast_reserved": {
+          "bytes": 0,
+          "address": 1073225728
+        },
+        ".rtc_slow_reserved": {
+          "bytes": 24,
+          "address": 1342185448
+        },
+        ".iram0.vectors": {
+          "bytes": 1028,
+          "address": 1074266112
+        },
+        ".iram0.text": {
+          "bytes": 102043,
+          "address": 1074267140
+        },
+        ".dram0.data": {
+          "bytes": 20108,
+          "address": 1073470304
+        },
+        ".ext_ram_noinit": {
+          "bytes": 0,
+          "address": 1065353216
+        },
+        ".noinit": {
+          "bytes": 0,
+          "address": 1073490412
+        },
+        ".ext_ram.bss": {
+          "bytes": 0,
+          "address": 1065353216
+        },
+        ".dram0.bss": {
+          "bytes": 34616,
+          "address": 1073490416
+        },
+        ".flash.appdesc": {
+          "bytes": 256,
+          "address": 1061158944
+        },
+        ".flash.rodata": {
+          "bytes": 153368,
+          "address": 1061159200
+        },
+        ".flash.text": {
+          "bytes": 580698,
+          "address": 1074593824
+        },
+        ".iram0.text_end": {
+          "bytes": 1,
+          "address": 1074369183
+        },
+        ".iram0.data": {
+          "bytes": 0,
+          "address": 1074369184
+        },
+        ".iram0.bss": {
+          "bytes": 0,
+          "address": 1074369184
+        },
+        ".dram0.heap_start": {
+          "bytes": 0,
+          "address": 1073525032
+        },
+        ".debug_aranges": {
+          "bytes": 59240,
+          "address": 0
+        },
+        ".debug_info": {
+          "bytes": 3275551,
+          "address": 0
+        },
+        ".debug_abbrev": {
+          "bytes": 373742,
+          "address": 0
+        },
+        ".debug_line": {
+          "bytes": 2348372,
+          "address": 0
+        },
+        ".debug_frame": {
+          "bytes": 150160,
+          "address": 0
+        },
+        ".debug_str": {
+          "bytes": 466798,
+          "address": 0
+        },
+        ".debug_loc": {
+          "bytes": 885641,
+          "address": 0
+        },
+        ".debug_ranges": {
+          "bytes": 72176,
+          "address": 0
+        },
+        ".debug_line_str": {
+          "bytes": 8304,
+          "address": 0
+        },
+        ".debug_loclists": {
+          "bytes": 74834,
+          "address": 0
+        },
+        ".debug_rnglists": {
+          "bytes": 3446,
+          "address": 0
+        },
+        ".comment": {
+          "bytes": 207,
+          "address": 0
+        },
+        ".xtensa.info": {
+          "bytes": 56,
+          "address": 0
+        },
+        ".xt.prop": {
+          "bytes": 2580,
+          "address": 0
+        },
+        ".xt.lit": {
+          "bytes": 16,
+          "address": 0
+        }
+      }
+    }
+  },
+  "notes": "No runtime task census, high-water marks, heap or largest-block measurements. Baseline assumes normal joined S3 with AirPlay ready and ESP32 Bluetooth enabled. Stack bytes exclude TCBs and allocator overhead; network static stack is already in ELF data/BSS."
+}

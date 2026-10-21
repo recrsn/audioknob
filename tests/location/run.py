@@ -10,7 +10,7 @@ with tempfile.TemporaryDirectory(prefix='audioknob-location-') as temp:
     stub = Path(temp)
     (stub / 'freertos').mkdir()
     for header in ['ui.h', 'cJSON.h', 'esp_heap_caps.h', 'esp_log.h', 'nvs.h',
-                   'settings.h', 'freertos/FreeRTOS.h', 'freertos/semphr.h', 'freertos/task.h']:
+                   'settings.h', 'esp_timer.h', 'freertos/FreeRTOS.h', 'freertos/semphr.h', 'freertos/task.h']:
         (stub / header).write_text('#include "mock_sdk.h"\n')
     binary = str(stub / 'location')
     subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',

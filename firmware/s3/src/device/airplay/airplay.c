@@ -28,6 +28,8 @@
 #define CTRL_TASK_PRIO 3
 
 // Below everything audio: a large PNG cover takes seconds to decode.
+// Covers decode from memory and never access NVS/partitions/files, so the
+// retained artwork stack can use PSRAM instead of internal audio/DMA memory.
 #define ART_STACK_SIZE 6144
 #define ART_TASK_PRIO 1
 
@@ -284,8 +286,9 @@ void airplay_init(void) {
 
     BaseType_t ok =
         xTaskCreatePinnedToCore(ctrl_task, "airplay_ctrl", CTRL_STACK_SIZE, NULL, CTRL_TASK_PRIO, &s_ctrl_task, 0);
-    BaseType_t art_ok = xTaskCreatePinnedToCore(art_task, "airplay_art", ART_STACK_SIZE, NULL, ART_TASK_PRIO,
-                                                &s_art_task, tskNO_AFFINITY);
+    BaseType_t art_ok = xTaskCreatePinnedToCoreWithCaps(art_task, "airplay_art", ART_STACK_SIZE, NULL, ART_TASK_PRIO,
+                                                        &s_art_task, tskNO_AFFINITY,
+                                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     ESP_ERROR_CHECK(s_lock && s_art && ok == pdPASS && art_ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }
 

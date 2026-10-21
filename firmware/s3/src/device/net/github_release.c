@@ -8,23 +8,20 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "network_jobs.h"
 #include "https_download.h"
-#include "ntp.h"
 #include "release_manifest.h"
 #include "sdkconfig.h"
 #include "uart_link.h"
-#include "wifi.h"
 
 #define RELEASE_JSON_CAP (64 * 1024)
-#define DAY_US (24LL * 60 * 60 * 1000000)
-#define RETRY_US (60LL * 60 * 1000000)
+#define RELEASE_BODY_TIMEOUT_US (30LL * 1000000)
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
-static TaskHandle_t s_task;
+static bool s_started;
 static github_release_status_t s_status;
 static release_manifest_t s_manifest;
-// Downloads run on the release task: its internal stack is already there,
+// Downloads run on the shared network task: its internal stack is already there,
 // where a new one may not fit once AirPlay has fragmented internal RAM.
 static release_asset_t s_download;
 static ota_target_t s_download_target;
@@ -68,9 +65,10 @@ static void check_release(void) {
                 : status == 403 || status == 429 ? "GitHub rate limit; try again later"
                                                  : "Couldn't check GitHub (check WiFi/time)";
     } else {
+        int64_t deadline = esp_timer_get_time() + RELEASE_BODY_TIMEOUT_US;
         size_t total = 0;
         int n = 0;
-        while (total < RELEASE_JSON_CAP - 1 &&
+        while (esp_timer_get_time() < deadline && total < RELEASE_JSON_CAP - 1 &&
                (n = esp_http_client_read(client, body + total, RELEASE_JSON_CAP - 1 - total)) > 0) {
             total += n;
         }
@@ -87,13 +85,16 @@ static void check_release(void) {
     free(body);
     hello_t bluetooth;
     uart_link_get_esp32_firmware(&bluetooth);
+    int64_t checked_at = time(NULL);
     taskENTER_CRITICAL(&s_lock);
     bool manual = s_status.notice == RELEASE_CHECKING;
     s_status.checking = false;
     s_status.checked = true;
+    s_status.last_check = checked_at;
+    s_status.next_check = 0; // Startup/manual discovery has no periodic deadline.
     snprintf(s_status.error, sizeof(s_status.error), "%s", error ? error : "");
     if (!error) {
-        // Dismissal lasts for this release and boot, even across daily checks.
+        // Dismissal lasts for this release and boot; a manual check can show it again.
         bool changed = strcmp(s_manifest.tag, manifest->tag) ||
                        strcmp(s_manifest.s3.version, manifest->s3.version) ||
                        strcmp(s_manifest.bluetooth.version, manifest->bluetooth.version);
@@ -111,79 +112,56 @@ static void check_release(void) {
     free(manifest);
 }
 
-static void release_task(void *arg) {
-    (void)arg;
-    int64_t next_check = 0;
-    for (;;) {
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
-        taskENTER_CRITICAL(&s_lock);
-        bool download = s_download_pending;
-        s_download_pending = false;
-        taskEXIT_CRITICAL(&s_lock);
-        if (download) {
-            ota_download(s_download.url, s_download.size, s_download_target, s_download.sha256);
-        }
-        github_release_status_t status;
-        github_release_get_status(&status);
-        bool manual = status.checking;
-        if (!manual && esp_timer_get_time() < next_check) {
-            continue;
-        }
-        char ip[16], ssid[33];
-        if (!wifi_get_station(ssid, sizeof(ssid), ip, sizeof(ip)) || !ntp_is_synced()) {
-            if (manual) {
-                taskENTER_CRITICAL(&s_lock);
-                s_status.checking = false;
-                s_status.notice = RELEASE_ERROR;
-                snprintf(s_status.error, sizeof(s_status.error), "Waiting for WiFi and clock sync");
-                taskEXIT_CRITICAL(&s_lock);
-            }
-            continue;
-        }
-        ota_status_t ota;
-        ota_get_status(&ota);
-        if (ota.state == OTA_RECEIVING || ota.state == OTA_READY || ota.state == OTA_INSTALLING) {
-            // Leave a manual request queued until the active update is done.
-            continue;
-        }
-        taskENTER_CRITICAL(&s_lock);
-        s_status.checking = true;
-        taskEXIT_CRITICAL(&s_lock);
-        check_release();
-        github_release_get_status(&status);
-        int64_t wait_us = status.error[0] ? RETRY_US : DAY_US;
-        next_check = esp_timer_get_time() + wait_us;
-        // Checks only run once SNTP has synced, so wall-clock time is valid here.
-        int64_t now = time(NULL);
-        taskENTER_CRITICAL(&s_lock);
-        s_status.last_check = now;
-        s_status.next_check = now + wait_us / 1000000;
-        taskEXIT_CRITICAL(&s_lock);
+static void release_job(void) {
+    ota_status_t ota;
+    ota_get_status(&ota);
+    if (ota.state == OTA_RECEIVING || ota.state == OTA_READY || ota.state == OTA_INSTALLING) {
+        // Retain startup/manual intent, without holding a stack while OTA owns
+        // the update path. This is deferral, not periodic release discovery.
+        network_jobs_schedule(NETWORK_JOB_RELEASE, 60);
+        return;
+    }
+    taskENTER_CRITICAL(&s_lock);
+    s_status.checking = true;
+    taskEXIT_CRITICAL(&s_lock);
+    check_release();
+    // One startup attempt; further discovery is explicitly requested in Settings.
+}
+
+static void download_job(void) {
+    taskENTER_CRITICAL(&s_lock);
+    bool pending = s_download_pending;
+    s_download_pending = false;
+    taskEXIT_CRITICAL(&s_lock);
+    if (pending) {
+        // The OTA reservation keeps this asset stable and excludes other
+        // downloads. Flash writes run on the shared internal stack.
+        ota_download(s_download.url, s_download.size, s_download_target, s_download.sha256);
     }
 }
 
 void github_release_start(void) {
-    if (!s_task && xTaskCreate(release_task, "release_check", 8192, NULL, 2, &s_task) != pdPASS) {
-        taskENTER_CRITICAL(&s_lock);
-        s_status.notice = RELEASE_ERROR;
-        snprintf(s_status.error, sizeof(s_status.error), "Couldn't start update checks: out of memory");
-        taskEXIT_CRITICAL(&s_lock);
+    taskENTER_CRITICAL(&s_lock);
+    bool start = !s_started;
+    s_started = true;
+    taskEXIT_CRITICAL(&s_lock);
+    if (start) {
+        network_jobs_register(NETWORK_JOB_RELEASE, release_job, true);
+        network_jobs_register(NETWORK_JOB_RELEASE_DOWNLOAD, download_job, false);
+        network_jobs_schedule(NETWORK_JOB_RELEASE, 0);
     }
 }
 
 bool github_release_check(void) {
-    if (!s_task) {
-        return false;
-    }
     taskENTER_CRITICAL(&s_lock);
-    bool ok = !s_status.checking;
+    bool ok = s_started && !s_status.checking;
     if (ok) {
         s_status.checking = true;
         s_status.notice = RELEASE_CHECKING;
     }
     taskEXIT_CRITICAL(&s_lock);
     if (ok) {
-        xTaskNotifyGive(s_task);
+        network_jobs_schedule(NETWORK_JOB_RELEASE, 0);
     }
     return ok;
 }
@@ -198,7 +176,7 @@ bool github_release_download(ota_target_t target) {
                      (target == OTA_TARGET_S3 ? s_status.s3_available : s_status.bluetooth_available);
     asset = target == OTA_TARGET_S3 ? s_manifest.s3 : s_manifest.bluetooth;
     taskEXIT_CRITICAL(&s_lock);
-    if (!available || !s_task || !ota_download_reserve(target)) {
+    if (!available || !s_started || !ota_download_reserve(target)) {
         return false;
     }
     taskENTER_CRITICAL(&s_lock);
@@ -208,7 +186,7 @@ bool github_release_download(ota_target_t target) {
     s_download_pending = true;
     s_status.notice = RELEASE_QUIET;
     taskEXIT_CRITICAL(&s_lock);
-    xTaskNotifyGive(s_task);
+    network_jobs_schedule(NETWORK_JOB_RELEASE_DOWNLOAD, 0);
     return true;
 }
 

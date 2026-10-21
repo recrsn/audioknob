@@ -9,7 +9,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "freertos/task.h"
+#include "network_jobs.h"
 #include "nvs.h"
 #include "settings.h"
 #include "weather.h"
@@ -18,16 +18,12 @@
 #define WEATHER_REFRESH_S  (15 * 60)
 #define RETRY_MIN_S        30
 #define RETRY_MAX_S        (10 * 60)
-// TLS handshakes run on this stack.
-#define TASK_STACK         8192
 
 #define NVS_NAMESPACE "location"
 
 static const char *TAG = "online";
 
 static SemaphoreHandle_t s_lock;
-static SemaphoreHandle_t s_network_up;
-static TaskHandle_t s_task;
 // Guarded by s_lock. The detected location is cached in NVS so the
 // timezone and forecast have a place before the network is up.
 static struct {
@@ -43,6 +39,11 @@ static struct {
 } s_loc = {.version = 1};
 static ui_weather_t s_weather;
 static uint32_t s_weather_version;
+// Only the shared worker changes these retry counters.
+static uint32_t s_last_geo_request;
+static uint32_t s_weather_for;
+static int s_geo_retry_s = RETRY_MIN_S;
+static int s_weather_retry_s = RETRY_MIN_S;
 
 static void load_blob(nvs_handle_t nvs, const char *key, geo_t *out, bool *have) {
     size_t len = sizeof(*out);
@@ -153,101 +154,84 @@ static void set_weather_status(const char *status) {
     }
 }
 
-static int64_t now_s(void) {
-    return xTaskGetTickCount() / configTICK_RATE_HZ;
+static int next_retry(int retry) {
+    return retry * 2 > RETRY_MAX_S ? RETRY_MAX_S : retry * 2;
 }
 
-// Sleeps until `s` seconds pass or the location is changed.
-static void wait_s(int64_t s) {
-    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((s > 1 ? s : 1) * 1000));
+static void save_job(void) {
+    if (!save_cache()) {
+        network_jobs_schedule(NETWORK_JOB_LOCATION_SAVE, RETRY_MIN_S);
+    }
 }
 
-static void online_task(void *arg) {
-    (void)arg;
-    // Response bodies are bulk data: PSRAM.
-    char *buf = heap_caps_malloc(BODY_CAP, MALLOC_CAP_SPIRAM);
-    if (!buf) {
-        ESP_LOGE(TAG, "no memory for responses");
-        vTaskDelete(NULL);
+static void locate_job(void) {
+    uint32_t request;
+    if (!detection_needed(&request)) {
         return;
     }
+    if (request != s_last_geo_request) {
+        s_geo_retry_s = RETRY_MIN_S;
+        s_last_geo_request = request;
+    }
+    geo_t geo;
+    uint32_t before = online_get_location(&geo, NULL);
+    if (!before) {
+        set_weather_status("Locating\xE2\x80\xA6");
+    }
+    char *buf = heap_caps_malloc(BODY_CAP, MALLOC_CAP_SPIRAM);
+    geo_t fresh = {0};
+    bool ok = buf && geo_lookup(&fresh, buf, BODY_CAP);
+    free(buf);
+    if (!ok) {
+        set_weather_status("Can't find location");
+        network_jobs_schedule(NETWORK_JOB_LOCATION, s_geo_retry_s);
+        s_geo_retry_s = next_retry(s_geo_retry_s);
+        return;
+    }
+    set_detected(&fresh, request);
+    s_geo_retry_s = RETRY_MIN_S;
+    network_jobs_schedule(NETWORK_JOB_LOCATION_SAVE, 0);
+    if (online_get_location(&geo, NULL) != before) {
+        network_jobs_schedule(NETWORK_JOB_WEATHER, 0);
+    }
+    // A request made during the blocking lookup must survive its completion.
+    if (detection_needed(&request)) {
+        network_jobs_schedule(NETWORK_JOB_LOCATION, 0);
+    }
+}
 
-    set_weather_status("Waiting for network");
-    xSemaphoreTake(s_network_up, portMAX_DELAY);
-
-    uint32_t weather_for = 0;
-    uint32_t last_request = 0;
-    uint32_t last_location = 0;
-    int64_t geo_due = 0;
-    int64_t weather_due = 0;
-    int geo_retry_s = RETRY_MIN_S;
-    int weather_retry_s = RETRY_MIN_S;
-
-    for (;;) {
-        int64_t now = now_s();
-        uint32_t request;
-        bool locate = detection_needed(&request);
-        geo_t geo;
-        uint32_t version = online_get_location(&geo, NULL);
-        // A fresh Settings request (or returning to auto without a cache)
-        // wakes a lookup immediately, including during a previous backoff.
-        if (request != last_request || version != last_location) {
-            geo_due = now;
-            geo_retry_s = RETRY_MIN_S;
-        }
-        last_request = request;
-        last_location = version;
-        if (locate && now >= geo_due) {
-            if (!version) {
-                set_weather_status("Locating\xE2\x80\xA6");
-            }
-            geo_t fresh = {0};
-            if (geo_lookup(&fresh, buf, BODY_CAP)) {
-                set_detected(&fresh, request);
-                geo_retry_s = RETRY_MIN_S;
-                geo_due = 0;
-            } else {
-                set_weather_status("Can't find location");
-                geo_due = now_s() + geo_retry_s;
-                geo_retry_s = geo_retry_s * 2 > RETRY_MAX_S ? RETRY_MAX_S : geo_retry_s * 2;
-            }
-        }
-
-        bool saved = save_cache();
-        now = now_s();
-        version = online_get_location(&geo, NULL);
-        // Record the requested version even on failure, so another wakeup
-        // does not bypass the weather retry deadline.
-        if (version != weather_for) {
-            weather_for = version;
-            weather_due = now;
-            weather_retry_s = RETRY_MIN_S;
-        }
-        if (version && now >= weather_due) {
-            ui_weather_t w = {.valid = true};
-            snprintf(w.place, sizeof(w.place), "%s", geo.city);
-            if (weather_fetch(geo.lat, geo.lon, &w, buf, BODY_CAP)) {
-                // Optional: retry air quality at the next weather refresh.
-                air_quality_fetch(geo.lat, geo.lon, &w, buf, BODY_CAP);
-                set_weather(&w);
-                weather_due = now_s() + WEATHER_REFRESH_S;
-                weather_retry_s = RETRY_MIN_S;
-            } else {
-                set_weather_status("Weather unavailable");
-                weather_due = now_s() + weather_retry_s;
-                weather_retry_s = weather_retry_s * 2 > RETRY_MAX_S ? RETRY_MAX_S : weather_retry_s * 2;
-            }
-        }
-
-        // Without selected coordinates there is no weather deadline yet.
-        int64_t next = version ? weather_due : now_s() + RETRY_MAX_S;
-        if (detection_needed(&request) && geo_due < next) {
-            next = geo_due;
-        }
-        if (!saved && now_s() + RETRY_MIN_S < next) {
-            next = now_s() + RETRY_MIN_S;
-        }
-        wait_s(next - now_s());
+static void weather_job(void) {
+    geo_t geo;
+    uint32_t version = online_get_location(&geo, NULL);
+    if (!version) {
+        return; // Successful location discovery will schedule weather.
+    }
+    if (version != s_weather_for) {
+        s_weather_for = version;
+        s_weather_retry_s = RETRY_MIN_S;
+    }
+    char *buf = heap_caps_malloc(BODY_CAP, MALLOC_CAP_SPIRAM);
+    ui_weather_t w = {.valid = true};
+    snprintf(w.place, sizeof(w.place), "%s", geo.city);
+    bool ok = buf && weather_fetch(geo.lat, geo.lon, &w, buf, BODY_CAP);
+    if (ok) {
+        // Optional; a failure retries with the next forecast, not a hot loop.
+        air_quality_fetch(geo.lat, geo.lon, &w, buf, BODY_CAP);
+    }
+    free(buf);
+    geo_t current;
+    if (online_get_location(&current, NULL) != version) {
+        network_jobs_schedule(NETWORK_JOB_WEATHER, 0);
+        return; // Do not publish a forecast for an obsolete manual selection.
+    }
+    if (ok) {
+        set_weather(&w);
+        s_weather_retry_s = RETRY_MIN_S;
+        network_jobs_schedule(NETWORK_JOB_WEATHER, WEATHER_REFRESH_S);
+    } else {
+        set_weather_status("Weather unavailable");
+        network_jobs_schedule(NETWORK_JOB_WEATHER, s_weather_retry_s);
+        s_weather_retry_s = next_retry(s_weather_retry_s);
     }
 }
 
@@ -261,13 +245,21 @@ void online_start(void) {
     cJSON_Hooks hooks = {.malloc_fn = psram_malloc, .free_fn = free};
     cJSON_InitHooks(&hooks);
     s_lock = xSemaphoreCreateMutex();
-    s_network_up = xSemaphoreCreateBinary();
     load_cache();
-    xTaskCreate(online_task, "online", TASK_STACK, NULL, 3, &s_task);
+    network_jobs_init();
+    network_jobs_register(NETWORK_JOB_LOCATION, locate_job, true);
+    network_jobs_register(NETWORK_JOB_WEATHER, weather_job, true);
+    network_jobs_register(NETWORK_JOB_LOCATION_SAVE, save_job, false);
+    set_weather_status("Waiting for network");
+    uint32_t request;
+    if (detection_needed(&request)) {
+        network_jobs_schedule(NETWORK_JOB_LOCATION, 0);
+    }
+    network_jobs_schedule(NETWORK_JOB_WEATHER, 0);
 }
 
 void online_network_up(void) {
-    xSemaphoreGive(s_network_up);
+    network_jobs_set_network(true);
 }
 
 uint32_t online_get_location(geo_t *out, bool *manual) {
@@ -286,7 +278,7 @@ void online_detect_location(void) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_loc.detect_requested++;
     xSemaphoreGive(s_lock);
-    xTaskNotifyGive(s_task);
+    network_jobs_schedule(NETWORK_JOB_LOCATION, 0);
 }
 
 void online_set_location(const geo_t *manual) {
@@ -303,7 +295,9 @@ void online_set_location(const geo_t *manual) {
     }
     xSemaphoreGive(s_lock);
     if (changed) {
-        xTaskNotifyGive(s_task);
+        network_jobs_schedule(NETWORK_JOB_LOCATION_SAVE, 0);
+        network_jobs_schedule(NETWORK_JOB_LOCATION, 0);
+        network_jobs_schedule(NETWORK_JOB_WEATHER, 0);
     }
 }
 

@@ -1,14 +1,15 @@
 Run `python3 tests/location/run.py` from the repository root. Requires a C compiler
 with AddressSanitizer/UndefinedBehaviorSanitizer and Node.js.
 
-The C harness executes the real `online.c` worker with a deterministic FreeRTOS
+The C harness executes the real `online.c` jobs through `network_jobs.c`, using a deterministic FreeRTOS
 clock, scripted geolocation/weather responses and transactional in-memory NVS.
 It checks cached automatic and manual locations across simulated reboots, no
 automatic refresh over 24 hours, missing-location backoff (30 seconds through
 the 10-minute cap), explicit refresh with cached coordinates, requests during
 backoff and in-flight lookup, manual changes during lookup or flash write,
 failed NVS open/write/commit and manual-pin removal, 15-minute weather and
-optional air-quality timing, and weather-failure backoff. Selected coordinates
+optional air-quality timing, weather-failure backoff, offline persistence,
+clock/network readiness and response-allocation retry. Selected coordinates
 and location timezone fields are checked without changing timezone application.
 
 The JavaScript harness executes the page's location renderer and click handlers,

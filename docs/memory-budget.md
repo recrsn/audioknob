@@ -228,3 +228,159 @@ comparison does not rule out short clicks or isolate the acoustic chain's
 contribution. No microphone sample clipped or complete 100 ms block collapsed
 below 25% of the profile median. Playback stopped with 33 KiB internal free;
 settings were unchanged and no new firmware was flashed for this comparison.
+
+## Shared network worker with reusable static storage
+
+`online` and `release_check` no longer own persistent tasks. `network_jobs.c`
+holds five fixed slots (location, weather/air quality, release discovery,
+location persistence and reserved OTA downloads), one pending invocation per kind plus the currently
+running callback. A submission keeps the earliest deadline; repeated requests
+do not allocate queue entries and retries cannot postpone user requests.
+A shared 1-second esp_timer callback only checks readiness/deadlines, starts
+the worker once when first needed, and notifies it when due work is ready. It never calls HTTP, TLS or NVS and takes the lifecycle mutex with
+zero wait. Network jobs wait for station-IP readiness and synced/restored time;
+disconnects gate further network jobs without losing pending work. Persistence
+jobs remain runnable offline.
+
+The worker uses one statically reserved 8 KiB **internal** stack and 340-byte
+TCB, at priority 2. It runs ready callbacks serially in round-robin order,
+yields a tick between callbacks, and blocks indefinitely on a task notification
+when none is runnable now. Stack/TCB storage is retained for the service lifetime;
+periodic refreshes never allocate/free it or require another contiguous heap
+block. This supersedes the earlier create/delete-on-demand design: the user's
+priority is correct behavior and predictable reuse, rather than maximum idle
+free RAM. It also removes self-deletion/reclamation and successor-task races.
+
+Queue publication, startup and wait publication use one mutex. The worker marks
+itself waiting before releasing the lock; a notification before it actually
+blocks is retained by FreeRTOS, so a wakeup cannot be lost in that interval.
+Failed startup retains every slot for the next timer tick; failed timer creation/
+start retries on the next submission/network transition. Response-buffer
+allocation failure follows the job's retry/error path without replacing the task.
+
+Weather plus optional air quality retain the 15-minute interval after successful
+completion, using the currently selected saved coordinates. Weather and missing/
+explicitly requested location detection have independent 30-second-to-10-minute
+backoff. NVS open/write/commit failures retry after 30 seconds without repeating
+a successful location lookup. A new manual choice is preserved across an
+in-flight lookup/write, and an explicit Detect again request arriving during a
+lookup is retained. No saved automatic location is refreshed on boot or a
+12-hour timer. An obsolete forecast is discarded if the selection changed while
+HTTP was running; the new selection is queued immediately.
+
+Release discovery gets one startup attempt after WiFi/time readiness and runs
+again on manual request. Active OTA defers that intent by 60 seconds. Completed
+errors, available manifests, dismissal state and last-check timestamps remain
+available while the worker is blocked. There is no daily release polling/hourly release
+retry. The compatible `nextCheck` API field is zero, and the Settings page now
+explains Check Now instead of displaying a nonexistent next check.
+
+Round-robin fairness prevents repeated failures/requests for one kind from
+starving another kind. One in-flight HTTP job cannot be preempted: existing
+10-second weather/geolocation and 15-second release HTTP timeouts still apply,
+and release redirect traversal remains capped at six opens. Response reads now
+also stop at a 30-second body deadline (plus at most one in-progress read's
+timeout), with existing 8 KiB/64 KiB response caps. These are application-level
+bounds, not a hard end-to-end wall-time guarantee for DNS/TLS. Retries and offline/OTA waits block the same retained task; they do not
+allocate another stack or spin while waiting.
+
+### Stack placement and static accounting
+
+A PSRAM stack was considered and deliberately not selected: location persistence
+writes NVS and must run with an internal stack while flash caches are disabled.
+Keeping this one retained worker internal avoids introducing a second storage
+handoff/context and auditing unrelated storage paths. No malloc policy, XiP,
+audio worker/listener or storage consolidation changes are part of this work.
+Response bodies and cJSON allocations remain in PSRAM; the 8 KiB online scratch
+body is now allocated only during location/weather work and freed per job.
+
+The following are compiled payload calculations against the rebased sound/
+location checkpoint `54aca98` on main `d110ad4`, **not board heap measurements**:
+
+| Change | Internal payload bytes saved |
+| --- | ---: |
+| Remove two dynamically allocated 8 KiB stacks | +16,384 |
+| Remove their two dynamically allocated TCBs (340 bytes each) | +680 |
+| Reserve one reusable static stack + TCB | -8,532 |
+| Remove the online network-up binary semaphore (84 bytes) | +84 |
+| Additional control data/BSS, excluding the static stack/TCB | -228 |
+| One esp_timer object (32 bytes, profiling disabled) | -32 |
+| **Nominal payload saving, idle and active** | **8,356 (8.16 KiB)** |
+
+The service always reserves one 8 KiB stack, even before the first task startup.
+It replaces two original stacks rather than releasing all stack storage at idle.
+The earlier **16.52 KiB idle** estimate no longer applies.
+
+`online` module data/BSS changes 400 → 408 bytes; `github_release` changes
+2,021 → 2,018 bytes (main's timestamps and reserved-download asset included in both); the dispatcher
+is 8,755 bytes, including its 8,192-byte stack, 340-byte TCB, 84-byte static mutex
+and 120-byte slot array. Combined module payload changes 2,421 → 11,181 bytes,
+a difference of 8,760 including retained stack/TCB storage. Baseline sources were
+compiled with the same S3 compiler/configuration and current headers; type sizes
+were read from ELF debug information. Subtotals exclude heap metadata and linker/
+allocation alignment. The old persistent online response body still releases
+8,192 PSRAM bytes at idle. Sequential jobs avoid simultaneously holding online
+and release response bodies. TLS/HTTP/cJSON allocations remain dynamic; this
+change removes stack/TCB churn, not every source of heap fragmentation.
+
+### Verification and remaining board validation
+
+Targeted host checks use the actual dispatcher and production jobs under ASan/
+UBSan: queue coalescing/deadlines, round-robin fairness, readiness and disconnects,
+worker/timer failures, concurrent producers, exactly one task creation across repeated jobs, wakeup at the wait boundary,
+weather/location retries, cached locations across simulated reboots, manual/
+detection/persistence races, offline writes, release startup/manual/OTA behavior,
+retained notices/timestamps, HTTP error/slow-body cleanup and update controls.
+The S3/native firmware builds, sound lifecycle tests, existing OTA and LAN voice
+checks, and partition/image bounds are also checked against the rebased tree.
+One initial LAN host run hit its timed voice-capture-duration assertion during
+parallel builds; the unchanged full suite passed on rerun after rebase. No
+production voice/audio code was changed to mask that timing-sensitive check.
+
+The inventory below initially preceded board validation. A subsequent authorized
+flash and startup smoke check are recorded below. Further validation should compare
+matched boot/settled idle checkpoints,
+worker-active TLS and post-job idle internal heap, largest internal block,
+minimum heap and worker stack high-water marks. Verify real WiFi/clock startup,
+manual release prompts/downloads, no subsequent periodic discovery, 15-minute
+weather/AQI refresh, failed endpoint/reconnect recovery, NVS/manual/Detect again
+persistence across reboot, and radio/AirPlay playback while jobs run. Prior
+sound measurements above belong to earlier firmware and are not measurements
+of this shared-worker change or of main's newer LVGL/AirPlay work.
+
+The complete task-by-task internal/PSRAM inventory, other stack reservations and
+major non-stack buffers are in [stack-inventory.md](stack-inventory.md), with
+[CSV task rows](stack-inventory.csv) and [ELF metadata](memory-inventory.json).
+
+
+### Reusable network worker: authorized flash and startup smoke check
+
+On 2026-10-21, fetched main again (`d110ad4`, unchanged), confirmed the branch
+was up to date, and flashed the S3 over `/dev/cu.usbmodem1101`. Upload hashes
+verified. The running version reports `v0.1.6-1-g54aca98-dirty`. The pre-flash
+image was `v0.1.6`; this comparison includes the sound/location/shared-worker
+changes together, not an isolated measurement of the shared worker.
+
+The device returned online with saved automatic Bengaluru location and
+Asia/Kolkata timezone. Weather, UV and optional AQI/PM2.5 populated, and startup
+release discovery completed without an error (`checked=true`, `nextCheck=0`).
+The first post-boot sample had 45 KiB free internal RAM; after these startup jobs
+completed it reported 48 KiB internal / 6,268 KiB PSRAM, versus 31 KiB internal /
+6,256 KiB PSRAM in the pre-flash sample. These are whole-KiB API observations,
+not minimum-heap, largest-block, fragmentation, stack-high-water or audio-quality
+measurements. Audio and subsequent scheduled/manual-job transitions remain to
+test. State snapshots are saved in the task's `network-worker-flash-check` artifact.
+
+
+## AirPlay artwork stack in PSRAM
+
+`airplay_art` keeps its existing 6,144-byte stack depth, priority 1, no core
+affinity and service lifetime, but uses `xTaskCreatePinnedToCoreWithCaps` with
+`MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT`. It continues to block on artwork notifications
+and reuses that one allocation. Its task control block remains internal.
+The artwork path reads received image bytes from memory, decodes JPEG/PNG,
+publishes the completed buffer under a mutex and frees scratch buffers; no NVS,
+partition or filesystem operations run on this task. Internal stack reservation
+falls by 6 KiB and PSRAM reservation increases by 6 KiB, excluding unchanged
+TCB/allocator overhead. This change has not been flashed; cover decoding and
+stack high-water marks under JPEG/PNG workloads remain board checks.

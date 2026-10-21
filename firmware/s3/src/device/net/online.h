@@ -6,14 +6,14 @@
 #include "geo.h"
 #include "ui.h"
 
-// Background task for the internet-backed features: locates the device by IP
+// Background jobs for the internet-backed features: locates the device by IP
 // (for the timezone and the forecast), then keeps the weather, UV and air
 // quality fresh.
 // Producers only: callers poll the getters, per spec.md's decoupling.
 
 void online_start(void);
 
-// From wifi_start()'s got-IP callback; the task waits for the first one.
+// From wifi_start()'s got-IP callback; network jobs also wait for clock sync.
 void online_network_up(void);
 
 // Each getter returns a version that bumps whenever the data changes, so a
