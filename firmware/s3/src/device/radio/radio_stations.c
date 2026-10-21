@@ -134,9 +134,13 @@ int radio_stations_find(const char *url) {
     return found;
 }
 
-bool radio_stations_add(const char *name, const char *url) {
+static bool station_valid(const char *name, const char *url) {
     bool scheme = !strncasecmp(url, "http://", 7) || !strncasecmp(url, "https://", 8);
-    if (!name[0] || !scheme || strlen(url) >= STREAM_URL_MAX) {
+    return name[0] && scheme && strlen(url) < STREAM_URL_MAX;
+}
+
+bool radio_stations_add(const char *name, const char *url) {
+    if (!station_valid(name, url)) {
         return false;
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -157,6 +161,21 @@ bool radio_stations_remove(int index) {
     if (ok) {
         memmove(&s_list[index], &s_list[index + 1], (size_t)(s_count - index - 1) * sizeof(radio_station_t));
         s_count--;
+        save_locked();
+    }
+    xSemaphoreGive(s_lock);
+    return ok;
+}
+
+bool radio_stations_update(int index, const char *name, const char *url) {
+    if (!station_valid(name, url)) {
+        return false;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool ok = index >= 0 && index < s_count;
+    if (ok) {
+        snprintf(s_list[index].name, sizeof(s_list[index].name), "%s", name);
+        snprintf(s_list[index].url, sizeof(s_list[index].url), "%s", url);
         save_locked();
     }
     xSemaphoreGive(s_lock);

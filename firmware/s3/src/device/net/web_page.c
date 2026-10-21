@@ -7,7 +7,7 @@
 
 #include "esp_heap_caps.h"
 
-#define PAGE_SIZE 8192 // PSRAM: these pages aren't speed-critical
+#define PAGE_SIZE 16384 // PSRAM: these pages aren't speed-critical
 
 bool web_page_begin(web_page_t *page, const char *title, const char *head_extra) {
     page->buf = heap_caps_malloc(PAGE_SIZE, MALLOC_CAP_SPIRAM);
@@ -22,14 +22,42 @@ bool web_page_begin(web_page_t *page, const char *title, const char *head_extra)
     web_page_append_escaped(page, title);
     web_page_append(page,
                     "</title>%s<style>"
-                    "body{font-family:-apple-system,system-ui,sans-serif;background:#0b0b10;color:#eee;"
-                    "max-width:420px;margin:0 auto;padding:24px 16px}"
-                    "h1{font-size:22px;margin:0 0 16px}label{display:block;margin:14px 0 6px;color:#aaa}"
-                    "select,input{width:100%%;box-sizing:border-box;padding:12px;font-size:16px;border-radius:10px;"
-                    "border:1px solid #333;background:#16161e;color:#eee}"
-                    "button{width:100%%;margin-top:20px;padding:14px;font-size:17px;border:0;border-radius:10px;"
-                    "background:#4ea1ff;color:#fff}a{color:#4ea1ff}p{line-height:1.5}"
-                    ".hint{margin:6px 0 0;font-size:14px;color:#888}.ok{color:#6fd08c}.err{color:#ff7a7a}"
+                    ":root{color-scheme:dark}"
+                    "body{margin:0;background:#000;color:#f2f2f7;font:17px/1.35 -apple-system,system-ui,sans-serif;"
+                    "-webkit-font-smoothing:antialiased}"
+                    "main{max-width:560px;margin:0 auto;padding:0 16px 48px}"
+                    "h1{font-size:34px;margin:0;padding:48px 4px 16px}"
+                    "a,.blue{color:#0a84ff;text-decoration:none}"
+                    ".label{display:flex;justify-content:space-between;font-size:13px;text-transform:uppercase;"
+                    "color:#8e8e93;margin:24px 16px 6px}.label a{text-transform:none;font-size:15px}"
+                    ".card{background:#1c1c1e;border-radius:12px;overflow:hidden}"
+                    ".row{position:relative;box-sizing:border-box;display:flex;align-items:center;gap:12px;width:100%%;"
+                    "min-height:46px;padding:8px 16px;border:0;background:none;color:inherit;font:inherit;text-align:left}"
+                    "button.row{cursor:pointer}"
+                    ".row+.row::before{content:\"\";position:absolute;top:0;left:16px;right:0;border-top:.5px solid #38383a}"
+                    ".row .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+                    ".row svg{flex:none;width:18px;height:18px;fill:currentColor}"
+                    ".foot{font-size:13px;color:#8e8e93;margin:6px 16px 0}"
+                    "input{box-sizing:border-box;width:100%%;font:inherit;color:inherit;background:none;border:0;outline:none;"
+                    "padding:6px 0}"
+                    ".ok{color:#30d158}.err{color:#ff453a}"
+                    "dialog{box-sizing:border-box;width:100%%;height:100%%;max-width:none;max-height:none;margin:0;padding:0;"
+                    "border:0;background:#1c1c1e;color:inherit}"
+                    "dialog::backdrop{background:rgba(0,0,0,.5)}"
+                    "@media(min-width:700px){dialog{width:560px;height:auto;max-height:90vh;margin:auto;border-radius:20px}}"
+                    ".sheet{max-width:560px;margin:0 auto;padding:16px 24px 32px}"
+                    ".bar{display:flex;justify-content:space-between}"
+                    ".round{width:44px;height:44px;border-radius:50%%;border:0;padding:0;background:#3a3a3c;color:#fff;"
+                    "display:grid;place-items:center;cursor:pointer;"
+                    "background-image:linear-gradient(rgba(255,255,255,.12),rgba(255,255,255,0));"
+                    "box-shadow:inset 0 1px 0 rgba(255,255,255,.2),0 1px 3px rgba(0,0,0,.5)}"
+                    ".round:active{transform:scale(.94)}.round:disabled{opacity:.4}"
+                    ".round svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;"
+                    "stroke-linejoin:round}"
+                    ".hero{display:block;width:76px;height:76px;margin:36px auto 32px;fill:#0a84ff}"
+                    "h2{font-size:24px;margin:0}.sub{font-size:20px;color:#8e8e93;margin:4px 0 24px}"
+                    ".pill{background:#2c2c2e;border-radius:26px;padding:12px 20px;margin-bottom:10px}"
+                    ".sheet .foot{margin:6px 20px 0}"
                     "</style></head><body>",
                     head_extra);
     return true;

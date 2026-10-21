@@ -29,6 +29,8 @@ int radio_stations_find(const char *url);
 // http(s)://.
 bool radio_stations_add(const char *name, const char *url);
 bool radio_stations_remove(int index);
+// Replaces one station's name and URL; same rules as add.
+bool radio_stations_update(int index, const char *name, const char *url);
 // Moves one station to position `to`, shifting the ones between.
 bool radio_stations_move(int from, int to);
 

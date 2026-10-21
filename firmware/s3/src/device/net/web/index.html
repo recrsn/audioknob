@@ -38,6 +38,7 @@ h1{font-size:34px;font-weight:700;margin:0;padding:52px 4px 12px}
   .page.fwd,.page.bwd{animation:none}
   .navbar{margin:0 0 8px;padding:52px 4px 12px;background:none;-webkit-backdrop-filter:none;backdrop-filter:none;border:0;display:block;position:static}
   .navbar h2{font-size:34px;font-weight:700}
+  .navbar:has(.navbtn){display:flex;align-items:baseline;justify-content:space-between}
   .back{display:none}
   .link.on{background:var(--accent)}
   .link.on .val,.link.on .chev{color:#fff}
@@ -49,6 +50,7 @@ h1{font-size:34px;font-weight:700;margin:0;padding:52px 4px 12px}
 .label{font-size:13px;text-transform:uppercase;color:var(--dim);margin:0 16px 6px}
 .card{background:var(--card);border-radius:12px;overflow:hidden}
 .foot{font-size:13px;color:var(--dim);margin:6px 16px 0}
+.foot a{color:var(--accent)}
 .row{position:relative;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;min-height:46px;padding:8px 16px;width:100%;border:0;background:none;color:inherit;text-align:left}
 .row+.row::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--line)}
 .row:has(.ic)+.row::before{left:60px}
@@ -91,7 +93,7 @@ h1{font-size:34px;font-weight:700;margin:0;padding:52px 4px 12px}
 #title,#artist,#album{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .transport{display:flex;justify-content:center;gap:18px;margin:14px 0 4px}
 .transport button{width:50px;height:50px;border-radius:50%;border:0;background:var(--chip);color:var(--text);display:grid;place-items:center;padding:0}
-.transport #play{width:58px;height:58px;background:var(--text);color:#000}
+.transport #play{width:58px;height:58px;background-color:var(--text);color:#000}
 .transport svg{width:24px;height:24px;fill:currentColor}
 .vol{display:flex;align-items:center;gap:10px;margin-top:8px}
 .vol button{flex:none;width:34px;height:34px;border-radius:50%;border:0;background:var(--chip);color:var(--text);font-size:20px;line-height:1;padding:0}
@@ -121,6 +123,29 @@ select,input[type=text]{width:100%;min-width:0;padding:10px 12px;font-size:17px;
 .wrap{flex-wrap:wrap}
 .btn{border:0;border-radius:10px;padding:10px 16px;font-size:17px;background:var(--accent);color:#fff;flex:none}
 .btn:disabled{opacity:.5}
+/* A little depth so buttons read as pressable */
+.btn,.transport button,.vol button{background-image:linear-gradient(rgba(255,255,255,.14),rgba(255,255,255,0));box-shadow:inset 0 1px 0 rgba(255,255,255,.22),0 1px 3px rgba(0,0,0,.5);transition:transform .08s,filter .08s}
+.btn{font-weight:600}
+.btn:not(:disabled):active,.transport button:active,.vol button:active{transform:scale(.96);filter:brightness(.88)}
+/* Fields inside a list are rows, not boxes */
+.card input[type=text]{background:none;border-radius:0;padding:6px 0}
+.card input[type=text]:focus-visible{outline:none}
+.navbtn.strong{font-weight:600}
+.navbtn:disabled{color:var(--dim)}
+.btn.quiet{background-color:var(--chip-on);color:var(--text);font-size:15px;padding:8px 14px}
+/* Software update status, after macOS's */
+.status{position:relative;display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding:14px 16px}
+.status .ic{width:40px;height:40px;border-radius:10px;background:var(--dim)}
+.status .ic svg{width:26px;height:26px}
+.status.ok .ic{background:var(--ok)}
+.status.new .ic{background:var(--accent)}
+.status.err .ic{background:var(--err)}
+.status.busy svg{animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status .what{flex:1 1 150px;min-width:0}
+#reltitle{font-weight:600}
+#relsub{font-size:14px;color:var(--dim)}
+.status+.row::before,#stations+.row::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--line)}
 progress{-webkit-appearance:none;appearance:none;width:100%;height:4px;border:0;border-radius:2px;background:var(--line);overflow:hidden}
 progress::-webkit-progress-bar{background:var(--line)}
 progress::-webkit-progress-value{background:var(--accent);transition:width .3s}
@@ -130,21 +155,48 @@ progress::-moz-progress-bar{background:var(--accent)}
 .results button{display:flex;flex-direction:column;align-items:flex-start;border:0;border-top:.5px solid var(--line);background:none;color:var(--text);padding:10px 4px;font-size:17px;text-align:left}
 .results small{color:var(--dim);font-size:13px}
 /* Radio presets */
-.station{position:relative;display:flex;align-items:center;gap:4px;min-height:56px;padding:6px 8px 6px 16px}
+.station{position:relative;display:flex;align-items:center;gap:8px;min-height:56px;padding:6px 16px;background:var(--card);color:inherit;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;cursor:pointer}
 .station+.station::before{content:"";position:absolute;top:0;left:16px;right:0;border-top:.5px solid var(--line)}
+.editing .station+.station::before{left:48px}
 .station .sname{flex:1;min-width:0}
 .station .sname div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .station .sname small{display:block;color:var(--dim);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .station.on .sname div{color:var(--radio);font-weight:600}
 .station.failed small{color:var(--err)}
 .icon{flex:none;width:40px;height:40px;border-radius:50%;border:0;background:none;color:var(--dim);font-size:17px;line-height:1;padding:0;display:grid;place-items:center}
-.icon:disabled{opacity:.25}
-.icon.del{color:var(--err)}
+.minus{flex:none;width:22px;height:22px;border-radius:50%;border:0;padding:0;background:var(--err);display:grid;place-items:center;transition:transform .2s}
+.minus::after{content:"";width:10px;height:2px;border-radius:1px;background:#fff}
+.station.arm .minus{transform:rotate(-90deg)}
+.delbtn{flex:none;align-self:stretch;margin:-6px -16px -6px 0;padding:0 18px;border:0;background:var(--err);color:#fff;font-size:15px;font-weight:600}
+.grip{touch-action:none;cursor:grab;margin-right:-10px}
+.grip::before{content:"";width:18px;height:12px;background:linear-gradient(currentColor 0 0) 0 0/100% 2px no-repeat,linear-gradient(currentColor 0 0) 0 5px/100% 2px no-repeat,linear-gradient(currentColor 0 0) 0 10px/100% 2px no-repeat}
+.station.dragging{z-index:1;box-shadow:0 8px 24px rgba(0,0,0,.6);border-radius:10px;transition:box-shadow .15s}
+.station.dragging::before,.station.shifting::before{content:none}
+.station.dragging .grip{cursor:grabbing}
+.station.shifting{transition:transform .15s}
+.navbtn{grid-column:3;justify-self:end;border:0;background:none;color:var(--accent);font-size:17px;padding:8px}
+.card input.edit{flex:1;min-width:0;text-align:right;color:var(--dim);text-overflow:ellipsis}
+.card input.edit:focus{color:var(--text)}
 #stationsempty{padding:16px;color:var(--dim)}
 .stack{display:flex;flex-direction:column;gap:8px}
 .stack .btn,#addform .btn{align-self:flex-start}
 .slider.full{max-width:none}
 #newname{flex:1;background:none;padding:0}
+/* Sheet: up from the bottom on phones, a centred card on wide screens */
+dialog{border:0;padding:0 16px 24px;margin:auto auto 0;width:100%;max-width:600px;max-height:92vh;overflow-y:auto;border-radius:12px 12px 0 0;background:#1c1c1e;color:var(--text)}
+dialog .card{background:#2c2c2e}
+dialog .navbar{background:rgba(28,28,30,.85);border:0;margin-bottom:12px}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+.back.plain{border:0;background:none;font-size:17px}
+.back.plain::before{content:none}
+@media (prefers-reduced-motion:no-preference){dialog[open]{animation:sheet-up .3s ease-out}}
+@keyframes sheet-up{from{transform:translateY(40%);opacity:0}}
+@media (min-width:860px){
+  dialog{margin:auto;border-radius:14px;max-height:80vh}
+  dialog .navbar{display:grid;position:sticky;top:0;padding:0 8px;margin:0 -16px 12px;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}
+  dialog .navbar h2{font-size:17px;font-weight:600}
+  dialog .back{display:flex}
+}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#2c2c2e;color:var(--text);padding:10px 16px;border-radius:12px;font-size:15px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:calc(100% - 32px);z-index:3}
 #toast.show{opacity:1}
 </style>
@@ -157,6 +209,7 @@ progress::-moz-progress-bar{background:var(--accent)}
     <a class="row" id="devcard" href="#about">
       <i class="ic"></i>
       <div class="who"><div id="name">AudioKnob</div><div id="devsub"><span id="conn">Connecting…</span><span id="host"></span></div></div>
+      <span class="badge" id="v-update" hidden>1</span>
       <span class="chev"></span>
     </a>
   </div>
@@ -192,14 +245,18 @@ progress::-moz-progress-bar{background:var(--accent)}
     <a class="row link" href="#bluetooth"><i class="ic" style="--c:#0a84ff"><svg viewBox="0 0 24 24"><path d="M17.71 7.71 12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29zM13 5.83l1.88 1.88L13 9.59V5.83zm1.88 10.46L13 18.17v-3.76l1.88 1.88z"/></svg></i><span>Bluetooth</span><span class="val" id="v-bt"></span><span class="chev"></span></a>
   </div>
   <div class="group card">
-    <a class="row link" href="#radio"><i class="ic" style="--c:#ff375f"><svg viewBox="0 0 24 24"><path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.89 2 2 2h16c1.11 0 2-.9 2-2V8c0-1.11-.89-2-2-2H8.3l8.26-3.34L15.88 1 3.24 6.15zM7 20c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm13-8h-2v-2h-2v2H4V8h16v4z"/></svg></i><span>Radio</span><span class="val" id="v-radio"></span><span class="chev"></span></a>
-    <a class="row link" href="#sounds"><i class="ic" style="--c:#ff453a"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></i><span>Sounds</span><span class="val"></span><span class="chev"></span></a>
     <a class="row link" href="#display"><i class="ic" style="--c:#0a84ff"><svg viewBox="0 0 24 24"><path d="M20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12 20 8.69zM12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6zm0-10c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z"/></svg></i><span>Display</span><span class="val"></span><span class="chev"></span></a>
-    <a class="row link" href="#clock"><i class="ic" style="--c:#ff9f0a"><svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg></i><span>Clock &amp; Weather</span><span class="val"></span><span class="chev"></span></a>
+    <a class="row link" href="#time"><i class="ic" style="--c:#8e8e93"><svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg></i><span>Date &amp; Time</span><span class="val" id="v-time"></span><span class="chev"></span></a>
   </div>
-  <div class="group card">
-    <a class="row link" href="#update"><i class="ic" style="--c:#8e8e93"><svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></i><span>Software Update</span><span class="val"></span><span class="badge" id="v-update" hidden>1</span><span class="chev"></span></a>
-    <a class="row link" href="#about"><i class="ic" style="--c:#8e8e93"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg></i><span>About</span><span class="val"></span><span class="chev"></span></a>
+  <div class="group">
+  <p class="label">Apps</p>
+  <div class="card">
+    <a class="row link" href="#radio"><i class="ic" style="--c:#ff375f"><svg viewBox="0 0 24 24"><path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.89 2 2 2h16c1.11 0 2-.9 2-2V8c0-1.11-.89-2-2-2H8.3l8.26-3.34L15.88 1 3.24 6.15zM7 20c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm13-8h-2v-2h-2v2H4V8h16v4z"/></svg></i><span>Radio</span><span class="val" id="v-radio"></span><span class="chev"></span></a>
+    <a class="row link" href="#timer"><i class="ic" style="--c:#ff9f0a"><svg viewBox="0 0 24 24"><path d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61 1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42C16.07 4.74 14.12 4 12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></svg></i><span>Timer</span><span class="val" id="v-timer"></span><span class="chev"></span></a>
+    <a class="row link" href="#pomodoro"><i class="ic" style="--c:#ff453a"><svg viewBox="0 0 24 24"><path d="M12 7c-4.4 0-8 3.1-8 7.5S7.6 22 12 22s8-3.1 8-7.5S16.4 7 12 7zm1-5h-2v3.1c-1.2-.9-2.8-1.3-4-1 .6 1.4 2 2.3 3.5 2.4h3c1.5-.1 2.9-1 3.5-2.4-1.2-.3-2.8.1-4 1V2z"/></svg></i><span>Pomodoro</span><span class="val" id="v-pomodoro"></span><span class="chev"></span></a>
+    <a class="row link" href="#ambience"><i class="ic" style="--c:#30b0c7"><svg viewBox="0 0 24 24"><path d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2c0-3.32-2.67-7.25-8-11.8z"/></svg></i><span>Ambience</span><span class="val" id="v-ambience"></span><span class="chev"></span></a>
+    <a class="row link" href="#weather"><i class="ic" style="--c:#0a84ff"><svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg></i><span>Weather</span><span class="val" id="v-weather"></span><span class="chev"></span></a>
+  </div>
   </div>
   </nav>
 </section>
@@ -212,7 +269,7 @@ progress::-moz-progress-bar{background:var(--accent)}
   </div>
   <div class="group">
     <div class="card"><button class="row action danger" id="forget">Forget This Network…</button></div>
-    <p class="foot">The device restarts into setup mode and shows a QR code to join its own network.</p>
+    <p class="foot">Restarts the device in setup mode.</p>
   </div>
 </section>
 
@@ -228,56 +285,27 @@ progress::-moz-progress-bar{background:var(--accent)}
       <button class="row action" id="pair">Pair a Device</button>
       <button class="row action danger" id="unpair">Forget All Devices…</button>
     </div>
-    <p class="foot">The knob shows a code to check against your phone's.</p>
+    <p class="foot">Confirm the pairing code on the knob.</p>
   </div>
 </section>
 
 <section class="page" id="p-radio">
-  <div class="navbar"><a class="back" href="#">Settings</a><h2>Radio</h2></div>
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Radio</h2><button class="navbtn" id="radioedit" type="button">Edit</button></div>
   <div class="group">
     <p class="label">Presets</p>
-    <div class="card"><div id="stations"></div></div>
-    <p class="foot">The knob plays the list in this order.</p>
-  </div>
-  <div class="group">
-    <p class="label">Add a station</p>
-    <div class="card">
-      <div class="row col">
-        <form class="inline" id="rbform"><input type="text" id="rbq" placeholder="Find a station" autocomplete="off"><button class="btn">Search</button></form>
-        <div class="results" id="rbresults"></div>
-      </div>
-    </div>
-    <p class="foot">Search covers radio-browser.info's directory, asked from this phone.</p>
-  </div>
-  <div class="group">
-    <p class="label">Add by address</p>
-    <div class="card">
-      <form class="row col" id="addform">
-        <input type="text" id="addname" placeholder="Name" maxlength="47" required autocomplete="off">
-        <input type="text" id="addurl" placeholder="https://… (MP3 or AAC stream, .pls or .m3u)" maxlength="255" required autocomplete="off" inputmode="url">
-        <button class="btn">Add</button>
-      </form>
-    </div>
+    <div class="card"><div id="stations"></div><button class="row action" id="addopen">Add Station…</button></div>
+    <p class="foot" id="stationsfoot">Stations play in this order. Touch and hold a station to move it.</p>
   </div>
 </section>
 
-<section class="page" id="p-sounds">
-  <div class="navbar"><a class="back" href="#">Settings</a><h2>Sounds</h2></div>
-  <div class="group">
-    <p class="label">Timers</p>
-    <div class="card">
-      <div class="row"><span>Sound</span><div class="seg" id="timerSound"><button data-v="0">Off</button><button data-v="1">Chime</button><button data-v="2">Bell</button></div></div>
-      <div class="row"><span>Volume</span><div class="slider"><input type="range" id="timerVolume" min="5" max="100" step="5" aria-label="Timer volume"><output id="timervolval"></output></div></div>
-    </div>
-  </div>
-  <div class="group">
-    <p class="label">Ambience</p>
-    <div class="card">
-      <div class="row"><span>Sound</span><select id="ambienceSound" aria-label="Ambience sound"><option value="0">Brown noise</option><option value="1">Pink noise</option><option value="2">Rain</option><option value="3">Ocean</option><option value="4">Forest</option></select></div>
-      <div class="row"><span>Volume</span><div class="slider"><input type="range" id="ambienceVolume" min="0" max="100" step="5" aria-label="Ambience volume"><output id="ambval"></output></div></div>
-      <div class="row"><span>During focus</span><select id="focusSound" aria-label="Sound during focus"><option value="0">No sound</option><option value="1">Brown noise</option><option value="2">Pink noise</option><option value="3">Rain</option><option value="4">Ocean</option><option value="5">Forest</option></select></div>
-    </div>
-    <p class="foot">During focus plays while a Pomodoro focus block runs, never over music.</p>
+<section class="page" id="p-station">
+  <div class="navbar"><a class="back" href="#radio">Radio</a><h2 id="sttitle"></h2></div>
+  <div id="stpage">
+    <form class="group card" id="stform">
+      <div class="row"><label for="stname">Name</label><input type="text" id="stname" class="edit" maxlength="47" required autocomplete="off"></div>
+      <div class="row"><label for="sturl">Address</label><input type="text" id="sturl" class="edit" maxlength="255" required autocomplete="off" inputmode="url" autocapitalize="none" spellcheck="false"></div>
+    </form>
+    <div class="group card"><button class="row action danger" id="stremove">Remove Station</button></div>
   </div>
 </section>
 
@@ -297,21 +325,68 @@ progress::-moz-progress-bar{background:var(--accent)}
       <div class="row"><span>Art colours</span><label class="sw"><input type="checkbox" id="artColors" aria-label="Art colours"><i></i></label></div>
       <div class="row"><span>Haptics</span><label class="sw"><input type="checkbox" id="haptics" aria-label="Haptics"><i></i></label></div>
     </div>
-    <p class="foot">Art colours tints the now-playing screen from the cover art.</p>
+    <p class="foot">Art colours tints the now-playing screen to match the cover art.</p>
   </div>
 </section>
 
-<section class="page" id="p-clock">
-  <div class="navbar"><a class="back" href="#">Settings</a><h2>Clock &amp; Weather</h2></div>
+<section class="page" id="p-time">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Date &amp; Time</h2></div>
   <div class="group card">
     <div class="row"><span>24-hour time</span><label class="sw"><input type="checkbox" id="clock24" aria-label="24-hour time"><i></i></label></div>
+  </div>
+  <div class="group">
+    <p class="label">Time zone</p>
+    <div class="card">
+      <div class="row"><span>Set automatically</span><label class="sw"><input type="checkbox" id="tzAuto" aria-label="Set time zone automatically"><i></i></label></div>
+      <div class="row" id="tzautorow"><span>Time zone</span><span class="val" id="tzval"></span></div>
+      <div class="row" id="tzmanual" hidden><span>Time zone</span><select id="tz" aria-label="Time zone"></select></div>
+    </div>
+  </div>
+</section>
+
+<section class="page" id="p-timer">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Timer</h2></div>
+  <div class="group">
+    <p class="label">When time is up</p>
+    <div class="card">
+      <div class="row"><span>Sound</span><div class="seg" id="timerSound"><button data-v="0">Off</button><button data-v="1">Chime</button><button data-v="2">Bell</button></div></div>
+      <div class="row"><span>Volume</span><div class="slider"><input type="range" id="timerVolume" min="5" max="100" step="5" aria-label="Timer volume"><output id="timervolval"></output></div></div>
+    </div>
+    <p class="foot">Also used for Pomodoro chimes.</p>
+  </div>
+</section>
+
+<section class="page" id="p-pomodoro">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Pomodoro</h2></div>
+  <div class="group">
+    <div class="card">
+      <div class="row"><span>Sound during focus</span><select id="focusSound" aria-label="Sound during focus"><option value="0">None</option><option value="1">Brown noise</option><option value="2">Pink noise</option><option value="3">Rain</option><option value="4">Ocean</option><option value="5">Forest</option></select></div>
+    </div>
+    <p class="foot">Plays during focus blocks. Doesn't play over music.</p>
+  </div>
+</section>
+
+<section class="page" id="p-ambience">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Ambience</h2></div>
+  <div class="group">
+    <div class="card">
+      <div class="row"><span>Sound</span><select id="ambienceSound" aria-label="Ambience sound"><option value="0">Brown noise</option><option value="1">Pink noise</option><option value="2">Rain</option><option value="3">Ocean</option><option value="4">Forest</option></select></div>
+      <div class="row"><span>Volume</span><div class="slider"><input type="range" id="ambienceVolume" min="0" max="100" step="5" aria-label="Ambience volume"><output id="ambval"></output></div></div>
+    </div>
+    <p class="foot">Defaults for the Ambience app.</p>
+  </div>
+</section>
+
+<section class="page" id="p-weather">
+  <div class="navbar"><a class="back" href="#">Settings</a><h2>Weather</h2></div>
+  <div class="group card">
     <div class="row"><span>Temperature</span><div class="seg" id="fahrenheit"><button data-v="0">°C</button><button data-v="1">°F</button></div></div>
   </div>
   <div class="group">
     <div class="card">
       <div class="row"><span>Air quality</span><div class="seg" id="airShow"><button data-v="0">Off</button><button data-v="1">When high</button><button data-v="2">Always</button></div></div>
     </div>
-    <p class="foot">Air quality and UV on the clock face, beside the weather.</p>
+    <p class="foot">Shows air quality and UV on the clock face.</p>
   </div>
   <div class="group">
     <p class="label">Location</p>
@@ -324,36 +399,6 @@ progress::-moz-progress-bar{background:var(--accent)}
       </div>
     </div>
   </div>
-  <div class="group">
-    <p class="label">Time zone</p>
-    <div class="card">
-      <div class="row"><span>Set automatically</span><label class="sw"><input type="checkbox" id="tzAuto" aria-label="Set time zone automatically"><i></i></label></div>
-      <div class="row" id="tzautorow"><span>Time zone</span><span class="val" id="tzval"></span></div>
-      <div class="row" id="tzmanual" hidden><span>Time zone</span><select id="tz" aria-label="Time zone"></select></div>
-    </div>
-  </div>
-</section>
-
-<section class="page" id="p-update">
-  <div class="navbar"><a class="back" href="#">Settings</a><h2>Software Update</h2></div>
-  <div class="group">
-    <div class="card">
-      <div class="row"><span>AudioKnob</span><span class="val" id="version"></span></div>
-      <div class="row"><span>Bluetooth</span><span class="val" id="btversion"></span></div>
-      <button class="row action" id="releases3" hidden>Download main update</button>
-      <button class="row action" id="releasebt" hidden>Download Bluetooth update</button>
-      <button class="row action" id="checkupd">Check Now</button>
-    </div>
-    <p class="foot" id="releasehint">Checks automatically every day.</p>
-  </div>
-  <div class="group">
-    <div class="card">
-      <button class="row action" id="updbtn">Upload Firmware File…</button>
-      <div class="row" id="updbarrow" hidden><progress id="updbar" max="100"></progress></div>
-    </div>
-    <input type="file" id="updfile" accept=".bin" hidden>
-    <p class="foot" id="updhint"></p>
-  </div>
 </section>
 
 <section class="page" id="p-about">
@@ -363,16 +408,57 @@ progress::-moz-progress-bar{background:var(--accent)}
     <div class="card">
       <form class="row" id="nameform"><input type="text" id="newname" maxlength="32" required autocomplete="off" aria-label="Name"><button class="btn">Save</button></form>
     </div>
-    <p class="foot">Shown in AirPlay and Bluetooth lists. Phones already paired over Bluetooth may keep the old name until you pair again.</p>
+    <p class="foot">Shown to AirPlay and Bluetooth devices. Paired Bluetooth devices may show the old name until re-paired.</p>
+  </div>
+  <div class="group">
+    <p class="label">Software Update</p>
+    <div class="card">
+      <div class="status" id="relstatus">
+        <i class="ic"><svg viewBox="0 0 24 24"><path id="relicon"/></svg></i>
+        <div class="what"><div id="reltitle"></div><div id="relsub"></div></div>
+        <button class="btn quiet" id="checkupd">Check for Updates</button>
+      </div>
+      <button class="row action" id="releases3" hidden>Download main update</button>
+      <button class="row action" id="releasebt" hidden>Download Bluetooth update</button>
+    </div>
+    <p class="foot" id="releasehint"></p>
+  </div>
+  <div class="group">
+    <div class="card">
+      <button class="row action" id="updbtn">Upload Firmware File…</button>
+      <div class="row" id="updbarrow" hidden><progress id="updbar" max="100"></progress></div>
+    </div>
+    <input type="file" id="updfile" accept=".bin" hidden>
+    <p class="foot" id="updhint"></p>
   </div>
   <div class="group card">
-    <div class="row"><span>Version</span><span class="val" id="aboutversion"></span></div>
-    <div class="row"><span>Bluetooth firmware</span><span class="val" id="aboutbtversion"></span></div>
     <div class="row"><span>Storage used</span><span class="val" id="storage"></span></div>
-    <div class="row"><span>Address</span><span class="val" id="aboutaddr"></span></div>
   </div>
 </section>
 </main>
+
+<dialog id="addsheet" aria-labelledby="addtitle">
+  <div class="navbar"><button class="back plain" id="addcancel" type="button">Cancel</button><h2 id="addtitle">Add Station</h2><button class="navbtn strong" id="addsubmit" form="addform" disabled>Add</button></div>
+  <div class="group">
+    <div class="card">
+      <div class="row col">
+        <form class="inline" id="rbform"><input type="text" id="rbq" placeholder="Find a station" autocomplete="off" enterkeyhint="search"><button class="btn">Search</button></form>
+        <div class="results" id="rbresults"></div>
+      </div>
+    </div>
+    <p class="foot">Results from radio-browser.info.</p>
+  </div>
+  <div class="group">
+    <p class="label">Or by address</p>
+    <div class="card">
+      <form id="addform">
+        <div class="row"><input type="text" id="addname" placeholder="Name" maxlength="47" required autocomplete="off" aria-label="Name"></div>
+        <div class="row"><input type="text" id="addurl" placeholder="Stream address" maxlength="255" required autocomplete="off" inputmode="url" aria-label="Stream address"></div>
+      </form>
+    </div>
+    <p class="foot">An MP3 or AAC stream, or a .pls or .m3u playlist.</p>
+  </div>
+</dialog>
 <div id="toast"></div>
 <script>
 "use strict";
@@ -381,7 +467,7 @@ const PLAY = "M8 5v14l11-7z", PAUSE = "M6 5h4v14H6zm8 0h4v14h-4z";
 let state = null, artVersion = -1, zonesLoaded = false;
 // An upload holds the device's one HTTP task, so polls wait it out.
 let uploading = false, installing = null, wentOffline = false;
-const UPDATE_HINT = "A firmware.bin for either chip, the main one or Bluetooth. The device asks before installing it.";
+const UPDATE_HINT = "Upload a firmware .bin for the main or Bluetooth chip. Confirm the install on the device.";
 // Inputs the user is holding keep their own value until released, so a poll
 // doesn't yank a slider out from under a finger.
 const busy = new Set();
@@ -467,6 +553,7 @@ async function loadStations(version) {
     stations = await (await fetch("/api/stations", {cache: "no-store"})).json();
     stationsVersion = version;
     renderStations();
+    renderStationPage();
     if (state) renderRoot(state);
   } catch (e) {
     // The next poll tries again.
@@ -484,21 +571,31 @@ function iconButton(text, label, cls, onclick, disabled) {
   return b;
 }
 
+// In edit mode a tap on − arms that one row; its Delete button removes it.
+let editing = false, armed = null;
+
 function renderStations() {
+  if (drag) return;
   const box = $("stations"), radio = state && state.radio;
   box.textContent = "";
+  $("p-radio").classList.toggle("editing", editing);
+  $("radioedit").hidden = !stations.length && !editing;
+  setText("radioedit", editing ? "Done" : "Edit");
+  $("addopen").hidden = editing;
+  setText("stationsfoot", editing ? "Tap − to remove a station. Drag ≡ to move one."
+                                  : "Stations play in this order. Touch and hold a station to move it.");
   if (!stations.length) {
     const p = document.createElement("div");
     p.id = "stationsempty";
-    p.textContent = "No stations yet. Find some below.";
+    p.textContent = "No stations yet.";
     box.append(p);
     return;
   }
   stations.forEach((st, i) => {
     const on = radio && radio.current === i && radio.state !== "stopped";
     const failed = on && radio.state === "failed";
-    const row = document.createElement("div");
-    row.className = "station" + (on ? " on" : "") + (failed ? " failed" : "");
+    const row = document.createElement(editing ? "div" : "a");
+    row.className = "station" + (on ? " on" : "") + (failed ? " failed" : "") + (editing && armed === st.url ? " arm" : "");
     const name = document.createElement("div");
     name.className = "sname";
     const title = document.createElement("div");
@@ -507,17 +604,184 @@ function renderStations() {
     sub.textContent = !on ? st.url : radio.state === "playing" ? (radio.detail || "Playing")
                     : RADIO_STATES[radio.state] || radio.detail || "Can't play this station";
     name.append(title, sub);
-    row.append(
-      name,
-      iconButton("↑", "Move up", "", () => post("/api/stations", {action: "move", index: i, to: i - 1}), i === 0),
-      iconButton("↓", "Move down", "", () => post("/api/stations", {action: "move", index: i, to: i + 1}),
-                 i === stations.length - 1),
-      iconButton("✕", "Remove", "del", async () => {
-        if (confirm(`Remove ${st.name}?`)) await post("/api/stations", {action: "remove", index: i});
-      }));
+    if (editing) {
+      const minus = iconButton("", `Remove ${st.name}`, "");
+      minus.className = "minus";
+      minus.onclick = e => {
+        e.stopPropagation();
+        armed = armed === st.url ? null : st.url;
+        renderStations();
+      };
+      let tail;
+      if (armed === st.url) {
+        tail = document.createElement("button");
+        tail.type = "button";
+        tail.className = "delbtn";
+        tail.textContent = "Delete";
+        tail.onclick = async e => {
+          e.stopPropagation();
+          armed = null;
+          await post("/api/stations", {action: "remove", index: i});
+        };
+      } else {
+        tail = iconButton("", `Move ${st.name}`, "grip");
+        tail.onpointerdown = e => { e.stopPropagation(); beginDrag(row, i, e); };
+      }
+      row.onclick = () => { if (armed) { armed = null; renderStations(); } };
+      row.append(minus, name, tail);
+    } else {
+      const chev = document.createElement("span");
+      chev.className = "chev";
+      row.href = `#station-${i}`;
+      row.draggable = false;
+      row.append(name, chev);
+      holdToDrag(row, i);
+    }
+    // Alt+arrow moves the focused station, for keyboards.
+    row.onkeydown = e => {
+      const to = i + (e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1 : 0);
+      if (!e.altKey || to === i || to < 0 || to >= stations.length) return;
+      e.preventDefault();
+      moveStation(i, to);
+      $("stations").children[to].focus();
+    };
     box.append(row);
   });
 }
+
+$("radioedit").onclick = () => {
+  editing = !editing;
+  armed = null;
+  renderStations();
+};
+
+// Reordered here first so the row stays where it was dropped; the device's
+// list replaces it on the next version bump.
+function moveStation(from, to) {
+  stations.splice(to, 0, stations.splice(from, 1)[0]);
+  if (state && state.radio.current === from) state.radio.current = to;
+  else if (state && state.radio.current >= Math.min(from, to) && state.radio.current <= Math.max(from, to)) {
+    state.radio.current += from < to ? -1 : 1;
+  }
+  renderStations();
+  post("/api/stations", {action: "move", index: from, to});
+}
+
+// Touch: hold still for a moment, then drag; moving sooner scrolls the page.
+// Mouse: dragging a few pixels starts it. Either way a plain tap opens the station.
+const HOLD_MS = 400;
+function holdToDrag(row, i) {
+  let timer = null, start = null, dragged = false;
+  row.addEventListener("pointerdown", e => {
+    if (e.button) return;
+    start = {x: e.clientX, y: e.clientY};
+    dragged = false;
+    // Touch is captured implicitly; a mouse would otherwise leave the row.
+    if (e.pointerType === "mouse") row.setPointerCapture(e.pointerId);
+    if (e.pointerType !== "mouse") {
+      timer = setTimeout(() => {
+        dragged = true;
+        if (navigator.vibrate) navigator.vibrate(10);
+        beginDrag(row, i, e);
+      }, HOLD_MS);
+    }
+  });
+  row.addEventListener("pointermove", e => {
+    if (!start || drag) return;
+    const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y);
+    if (e.pointerType === "mouse" && moved > 4) {
+      dragged = true;
+      beginDrag(row, i, e, start.y);
+    } else if (moved > 8) {
+      clearTimeout(timer);
+    }
+  });
+  const reset = () => { clearTimeout(timer); start = null; };
+  row.addEventListener("pointerup", reset);
+  row.addEventListener("pointercancel", reset);
+  // Once a drag owns the touch, the page mustn't scroll under it.
+  row.addEventListener("touchmove", e => { if (drag) e.preventDefault(); }, {passive: false});
+  row.addEventListener("contextmenu", e => e.preventDefault());
+  row.addEventListener("click", e => { if (dragged) e.preventDefault(); });
+}
+
+// The dragged row follows the pointer; the rows it passes slide out of its way.
+let drag = null;
+function beginDrag(row, from, e, startY = e.clientY) {
+  const rows = [...$("stations").children];
+  const mids = rows.map(r => { const b = r.getBoundingClientRect(); return b.top + b.height / 2; });
+  const height = row.getBoundingClientRect().height;
+  drag = {from, to: from};
+  row.classList.add("dragging");
+  rows.forEach(r => r !== row && r.classList.add("shifting"));
+  try { row.setPointerCapture(e.pointerId); } catch (err) { /* pointer already gone */ }
+  const move = ev => {
+    const dy = ev.clientY - startY;
+    row.style.transform = `translateY(${dy}px)`;
+    let to = mids.filter(m => m < mids[from] + dy).length;
+    if (to > from) to--;
+    drag.to = Math.max(0, Math.min(rows.length - 1, to));
+    rows.forEach((r, k) => {
+      if (r === row) return;
+      const shift = from < drag.to && k > from && k <= drag.to ? -height
+                  : from > drag.to && k < from && k >= drag.to ? height : 0;
+      r.style.transform = shift ? `translateY(${shift}px)` : "";
+    });
+  };
+  const end = () => {
+    row.removeEventListener("pointermove", move);
+    row.removeEventListener("pointerup", end);
+    row.removeEventListener("pointercancel", end);
+    const to = drag.to;
+    rows.forEach(r => { r.style.transform = ""; r.classList.remove("dragging", "shifting"); });
+    drag = null;
+    if (to !== from) moveStation(from, to);
+  };
+  row.addEventListener("pointermove", move);
+  row.addEventListener("pointerup", end);
+  row.addEventListener("pointercancel", end);
+  move(e);
+}
+
+let stationIndex = -1;
+function renderStationPage() {
+  if (page !== "station") return;
+  const st = stations[stationIndex];
+  if (!st) {
+    if (stationsVersion >= 0) location.replace("#radio");
+    return;
+  }
+  setText("sttitle", st.name);
+  // Don't overwrite a field the user is editing.
+  for (const [id, v] of [["stname", st.name], ["sturl", st.url]]) {
+    if (document.activeElement !== $(id)) $(id).value = v;
+  }
+}
+
+// Each field saves when it loses focus or on Return, like iOS.
+async function saveStation() {
+  const st = stations[stationIndex];
+  const name = $("stname").value.trim(), url = $("sturl").value.trim();
+  if (!st || (name === st.name && url === st.url)) return;
+  if (!name || !/^https?:\/\//i.test(url)) {
+    toast("Needs a name and an http(s):// address");
+    renderStationPage();
+    return;
+  }
+  if (await post("/api/stations", {action: "update", index: stationIndex, name, url})) {
+    stations[stationIndex] = {name, url};
+    renderStationPage();
+    renderStations();
+  }
+}
+$("stname").onchange = $("sturl").onchange = saveStation;
+$("stform").onsubmit = e => { e.preventDefault(); document.activeElement.blur(); };
+
+$("stremove").onclick = async () => {
+  const st = stations[stationIndex];
+  if (!st || !confirm(`Remove ${st.name}?`)) return;
+  if (await post("/api/stations", {action: "remove", index: stationIndex})) $("p-station").querySelector(".back").click();
+};
 
 function renderRadio(s) {
   if (s.radio.list !== stationsVersion) loadStations(s.radio.list);
@@ -571,11 +835,6 @@ function render(s) {
   }
   setText("wifi", s.ssid || "Not connected");
   setText("addr", s.ip ? `${s.hostname}.local · ${s.ip}` : "—");
-  setText("version", s.version);
-  setText("btversion", s.btVersion || "—");
-  setText("aboutversion", s.version);
-  setText("aboutbtversion", s.btVersion || "—");
-  setText("aboutaddr", s.ip ? `${s.hostname}.local · ${s.ip}` : "—");
   setText("host", s.ip ? `${s.hostname}.local` : "Not on WiFi");
   renderRoot(s);
   setText("storage", s.storageTotalBytes ? `${(s.storageUsedBytes / 1048576).toFixed(1)} / ${(s.storageTotalBytes / 1048576).toFixed(1)} MiB` : "Unavailable");
@@ -587,6 +846,11 @@ function renderRoot(s) {
   setText("v-wifi", s.ssid || "Not connected");
   setText("v-bt", s.bluetooth ? "On" : "Off");
   setText("v-radio", stations.length === 1 ? "1 station" : `${stations.length} stations`);
+  setText("v-time", s.clock24 ? "24-hour" : "12-hour");
+  setText("v-timer", ["Off", "Chime", "Bell"][s.timerSound] || "");
+  setText("v-pomodoro", $("focusSound").options[s.focusSound]?.text || "");
+  setText("v-ambience", $("ambienceSound").options[s.ambienceSound]?.text || "");
+  setText("v-weather", s.location || "");
   $("v-update").hidden = !(s.release.s3 || s.release.bluetooth);
 }
 
@@ -600,14 +864,29 @@ function when(unix) {
   return `${label || d.toLocaleDateString([], {month: "short", day: "numeric"})} at ${time}`;
 }
 
-function releaseHint(r, available) {
-  if (r.checking) return "Checking GitHub…";
-  const status = r.error ? r.error + ". "
-    : available ? `Update available: ${available}. Confirm on the device after downloading. `
-    : r.lastCheck ? "Up to date. " : "";
+const REL_ICONS = {
+  ok: "M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
+  new: "M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z",
+  err: "M11 6h2v8h-2zm0 10h2v2h-2z",
+  busy: "M17.65 6.35A7.96 7.96 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z",
+};
+
+function renderRelease(s, available) {
+  const r = s.release;
+  const versions = `Version ${s.version}` + (s.btVersion ? ` · Bluetooth ${s.btVersion}` : "");
+  const [kind, title, sub] =
+    r.checking ? ["busy", "Checking for updates…", versions]
+    : r.error ? ["err", "Couldn't check for updates", r.error]
+    : available ? ["new", "Update available", available]
+    : r.lastCheck ? ["ok", "AudioKnob is up to date", versions]
+    : ["idle", "Not checked yet", versions];
+  $("relstatus").className = "status " + kind;
+  $("relicon").setAttribute("d", REL_ICONS[kind] || REL_ICONS.busy);
+  setText("reltitle", title);
+  setText("relsub", sub);
   const times = r.lastCheck ? `Last checked ${when(r.lastCheck)}; next check ${when(r.nextCheck)}.`
-                            : "The first check runs once WiFi and the clock are ready.";
-  return status + times;
+                            : "Checks start once Wi-Fi and the clock are ready.";
+  setText("releasehint", (available ? "After downloading, confirm the install on the device. " : "") + times);
 }
 
 function renderUpdate(s) {
@@ -621,11 +900,11 @@ function renderUpdate(s) {
   setText("releases3", `Download main ${r.s3Version || r.tag}`);
   setText("releasebt", `Download Bluetooth ${r.bluetoothVersion || r.tag}`);
   const available = [r.s3 && `Main ${r.s3Version || r.tag}`, r.bluetooth && `Bluetooth ${r.bluetoothVersion || r.tag}`].filter(Boolean).join(" · ");
-  setText("releasehint", releaseHint(r, available));
+  renderRelease(s, available);
   // Back from the restart: the bootloader rolls back an image that never
   // got this page up.
   if (installing && wentOffline && (u.state === "idle" || u.state === "installed")) {
-    toast(s.version === installing ? "Updated to " + installing : "Update didn't take: still on " + s.version);
+    toast(s.version === installing ? "Updated to " + installing : "Update failed. Still on " + s.version);
     installing = null;
   }
   if (uploading) return;
@@ -635,9 +914,9 @@ function renderUpdate(s) {
   const what = (u.target === "bluetooth" ? "Bluetooth firmware " : "Version ") + u.version;
   const hints = {
     receiving: `Writing ${u.version || "the update"}… ${u.progress}%`,
-    ready: `${what} is ready: confirm on the device to install it.`,
+    ready: `${what} is ready. Confirm on the device to install.`,
     declined: `${what} was declined on the device.`,
-    installing: u.progress < 100 ? `Sending it to the Bluetooth chip… ${u.progress}%`
+    installing: u.progress < 100 ? `Sending to the Bluetooth chip… ${u.progress}%`
                                  : "Waiting for the Bluetooth chip to restart…",
     installed: `${u.target === "bluetooth" ? "Bluetooth firmware" : "Firmware"} updated to ${u.version}.`,
     failed: "Update failed: " + u.error,
@@ -736,7 +1015,7 @@ $("locform").onsubmit = async e => {
     const params = new URLSearchParams({name: q, count: 5, language: "en", format: "json"});
     places = (await (await fetch("https://geocoding-api.open-meteo.com/v1/search?" + params)).json()).results || [];
   } catch (err) {
-    toast("Couldn't search: is this phone online?");
+    toast("Search failed. Check this phone's connection.");
     return;
   }
   if (!places.length) toast("No places found");
@@ -771,7 +1050,7 @@ async function addStation(name, url) {
   name = name.trim().slice(0, 47);
   url = url.trim();
   if (url.length > 255) {
-    toast("That address is too long for the device");
+    toast("Address too long (255 characters max)");
     return false;
   }
   if (!await post("/api/stations", {action: "add", name, url})) return false;
@@ -792,7 +1071,7 @@ $("rbform").onsubmit = async e => {
     const params = new URLSearchParams({name: q, limit: 30, hidebroken: "true", order: "clickcount", reverse: "true"});
     found = await (await fetch("https://all.api.radio-browser.info/json/stations/search?" + params)).json();
   } catch (err) {
-    toast("Couldn't search: is this phone online?");
+    toast("Search failed. Check this phone's connection.");
     return;
   }
   found = found.filter(r => !r.hls && /^(mp3|aac\+?)$/i.test(r.codec) && (r.url_resolved || r.url).length <= 255)
@@ -806,10 +1085,7 @@ $("rbform").onsubmit = async e => {
     sub.textContent = [r.codec + (r.bitrate ? ` ${r.bitrate} kbps` : ""), r.country].filter(Boolean).join(" · ");
     b.append(sub);
     b.onclick = async () => {
-      if (await addStation(r.name, r.url_resolved || r.url)) {
-        list.textContent = "";
-        $("rbq").value = "";
-      }
+      if (await addStation(r.name, r.url_resolved || r.url)) closeAddSheet();
     };
     list.append(b);
   }
@@ -817,10 +1093,24 @@ $("rbform").onsubmit = async e => {
 
 $("addform").onsubmit = async e => {
   e.preventDefault();
-  if (await addStation($("addname").value, $("addurl").value)) {
-    $("addname").value = $("addurl").value = "";
-  }
+  if (await addStation($("addname").value, $("addurl").value)) closeAddSheet();
 };
+
+const closeAddSheet = () => $("addsheet").close();
+// Escape closes the dialog natively, so clearing hangs off close.
+$("addsheet").onclose = () => {
+  $("rbresults").textContent = "";
+  $("rbq").value = $("addname").value = $("addurl").value = "";
+  $("addsubmit").disabled = true;
+};
+$("addopen").onclick = () => {
+  $("addsheet").showModal();
+  $("rbq").focus();
+};
+$("addcancel").onclick = closeAddSheet;
+$("addform").oninput = () => { $("addsubmit").disabled = !$("addform").checkValidity(); };
+// A tap on the backdrop lands on the dialog itself.
+$("addsheet").onclick = e => { if (e.target === $("addsheet")) closeAddSheet(); };
 
 $("bluetooth").onchange = e => {
   set("bluetooth", +e.target.checked);
@@ -828,10 +1118,10 @@ $("bluetooth").onchange = e => {
 };
 
 $("pair").onclick = async () => {
-  if (await post("/api/pairing", {action: "open"})) toast("Pairing is open: pick the device on your phone");
+  if (await post("/api/pairing", {action: "open"})) toast("Pairing open. Select this device on your phone.");
 };
 $("unpair").onclick = async () => {
-  if (!confirm("Forget every paired Bluetooth device? They'll need to pair again.")) return;
+  if (!confirm("Forget all paired Bluetooth devices?")) return;
   if (await post("/api/pairing", {action: "forget"})) toast("Paired devices forgotten");
 };
 
@@ -845,8 +1135,8 @@ $("nameform").onsubmit = async e => {
 };
 
 $("forget").onclick = async () => {
-  if (!confirm("Forget this WiFi network? The device restarts into setup mode, and this page stops working until it's set up again.")) return;
-  if (await post("/api/forget", {})) toast("Restarting into setup…");
+  if (!confirm("Forget this Wi-Fi network? The device restarts in setup mode and this page goes offline.")) return;
+  if (await post("/api/forget", {})) toast("Restarting in setup mode…");
 };
 
 $("checkupd").onclick = () => post("/api/releases", {action: "check"});
@@ -892,8 +1182,11 @@ $("updfile").onchange = () => {
 // One page at a time on phones, the list beside the page on wide screens;
 // the hash names the page so the browser's back button works.
 const PAGES = [...document.querySelectorAll(".page")].map(p => p.id.slice(2));
+const PARENT = {station: "radio"};
+const depth = name => name === "root" ? 0 : PARENT[name] ? 2 : 1;
 const wide = matchMedia("(min-width:860px)");
-let page = null, rootScroll = 0, fromRoot = false;
+const scrolls = {};
+let page = null, prevPage = null;
 
 function show(name, dir) {
   for (const p of PAGES) {
@@ -906,31 +1199,37 @@ function show(name, dir) {
       el.classList.add(dir);
     }
   }
-  for (const a of document.querySelectorAll(".link, #devcard")) a.classList.toggle("on", a.getAttribute("href") === "#" + name);
+  const lit = "#" + (PARENT[name] || name);
+  for (const a of document.querySelectorAll(".link, #devcard")) a.classList.toggle("on", a.getAttribute("href") === lit);
 }
 
 function route() {
   let name = location.hash.slice(1);
+  const station = /^station-(\d+)$/.exec(name);
+  if (station) {
+    name = "station";
+    stationIndex = +station[1];
+  }
   if (!PAGES.includes(name) || name === "root") name = wide.matches ? "wifi" : "root";
-  if (name === page) return;
+  if (name === "radio" && editing) $("radioedit").click();
   const prev = page;
   page = name;
-  if (wide.matches) {
-    show(name);
-    scrollTo(0, 0);
-    return;
-  }
-  if (prev === "root") rootScroll = scrollY;
-  fromRoot = prev === "root";
-  show(name, !prev ? null : name === "root" ? "bwd" : "fwd");
-  scrollTo(0, name === "root" ? rootScroll : 0);
+  if (name === "station") renderStationPage();
+  if (name === prev) return;
+  prevPage = prev;
+  if (prev) scrolls[prev] = scrollY;
+  const back = prev && depth(name) < depth(prev);
+  if (wide.matches) show(name);
+  else show(name, !prev ? null : back ? "bwd" : "fwd");
+  scrollTo(0, back && !wide.matches ? scrolls[name] || 0 : 0);
 }
 
-// Back returns through history when the list is what came before, so the
+// Back returns through history when its page is what came before, so the
 // browser's own back and forward stay in step.
 for (const a of document.querySelectorAll(".back")) {
   a.onclick = e => {
-    if (!fromRoot) return;
+    const target = a.getAttribute("href").slice(1) || "root";
+    if (prevPage !== target || target === "root" && wide.matches) return;
     e.preventDefault();
     history.back();
   };

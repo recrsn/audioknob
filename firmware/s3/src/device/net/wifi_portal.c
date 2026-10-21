@@ -91,15 +91,39 @@ static void dns_task(void *arg) {
 
 // --- Handlers --------------------------------------------------------------
 
-static void name_field(web_page_t *page) {
-    char name[DEVICE_NAME_MAX + 1];
-    device_name_get(name, sizeof(name));
-    web_page_append(page, "<label for=\"name\">Device name</label><input id=\"name\" name=\"name\" maxlength=\"%d\" "
-                          "required value=\"",
-                    DEVICE_NAME_MAX);
-    web_page_append_escaped(page, name);
-    web_page_append(page, "\"><p class=\"hint\">How it shows up in AirPlay and Bluetooth lists. "
-                          "You can change it later from Settings on the device.</p>");
+// Icons, defined once per page and drawn with <use>.
+static const char ICONS[] =
+    "<svg width=\"0\" height=\"0\" style=\"position:absolute\">"
+    "<symbol id=\"w1\" viewBox=\"0 0 24 24\"><path d=\"M12 21l3.5-3.5a5 5 0 0 0-7 0z\"/>"
+    "<path opacity=\".3\" d=\"M5 13.5l2 2a7 7 0 0 1 10 0l2-2a10 10 0 0 0-14 0z\"/>"
+    "<path opacity=\".3\" d=\"M1 9.5l2 2a12.7 12.7 0 0 1 18 0l2-2a15.5 15.5 0 0 0-22 0z\"/></symbol>"
+    "<symbol id=\"w2\" viewBox=\"0 0 24 24\"><path d=\"M12 21l3.5-3.5a5 5 0 0 0-7 0z\"/>"
+    "<path d=\"M5 13.5l2 2a7 7 0 0 1 10 0l2-2a10 10 0 0 0-14 0z\"/>"
+    "<path opacity=\".3\" d=\"M1 9.5l2 2a12.7 12.7 0 0 1 18 0l2-2a15.5 15.5 0 0 0-22 0z\"/></symbol>"
+    "<symbol id=\"w3\" viewBox=\"0 0 24 24\"><path d=\"M12 21l3.5-3.5a5 5 0 0 0-7 0z\"/>"
+    "<path d=\"M5 13.5l2 2a7 7 0 0 1 10 0l2-2a10 10 0 0 0-14 0z\"/>"
+    "<path d=\"M1 9.5l2 2a12.7 12.7 0 0 1 18 0l2-2a15.5 15.5 0 0 0-22 0z\"/></symbol>"
+    "<symbol id=\"lock\" viewBox=\"0 0 24 24\"><path d=\"M7 10V7a5 5 0 0 1 10 0v3h1a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1"
+    "H6a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zm2 0h6V7a3 3 0 0 0-6 0z\"/></symbol>"
+    "<symbol id=\"x\" viewBox=\"0 0 24 24\"><path d=\"M6 6l12 12M18 6 6 18\"/></symbol>"
+    "<symbol id=\"ok\" viewBox=\"0 0 24 24\"><path d=\"M4 12.5l5 5L20 6.5\"/></symbol>"
+    "</svg>";
+
+// A full-screen sheet: close and confirm buttons, the Wi-Fi glyph, a title.
+static void sheet_begin(web_page_t *page, const char *id, const char *title_id, const char *title,
+                        const char *sub) {
+    web_page_append(page,
+                    "<dialog id=\"%s\"><div class=\"sheet\"><div class=\"bar\">"
+                    "<button class=\"round\" type=\"button\" data-close aria-label=\"Cancel\">"
+                    "<svg><use href=\"#x\"/></svg></button>"
+                    "<button class=\"round\" type=\"submit\" aria-label=\"Join\"><svg><use href=\"#ok\"/></svg></button>"
+                    "</div><svg class=\"hero\"><use href=\"#w3\"/></svg>"
+                    "<h2 id=\"%s\">%s</h2><p class=\"sub\">%s</p>",
+                    id, title_id, title, sub);
+}
+
+static int bars(int8_t rssi) {
+    return rssi > -60 ? 3 : rssi > -72 ? 2 : 1;
 }
 
 static esp_err_t root_handler(httpd_req_t *req) {
@@ -114,23 +138,54 @@ static esp_err_t root_handler(httpd_req_t *req) {
     }
     size_t count = s_ops->scan(networks, MAX_NETWORKS, refresh);
 
-    web_page_append(&page, "<h1>Set up AudioKnob</h1><form method=\"post\" action=\"/connect\">");
-    name_field(&page);
-    web_page_append(&page, "<label for=\"ssid\">WiFi network</label><select id=\"ssid\" name=\"ssid\">");
+    char name[DEVICE_NAME_MAX + 1];
+    device_name_get(name, sizeof(name));
+    web_page_append(&page, "%s<main><form id=\"f\" method=\"post\" action=\"/connect\">"
+                           "<h1>Set Up</h1>"
+                           "<p class=\"label\">Name</p><div class=\"card\"><div class=\"row\">"
+                           "<input name=\"name\" maxlength=\"%d\" required aria-label=\"Name\" value=\"",
+                    ICONS, DEVICE_NAME_MAX);
+    web_page_append_escaped(&page, name);
+    web_page_append(&page, "\"></div></div><p class=\"foot\">Shown to AirPlay and Bluetooth devices.</p>"
+                           "<p class=\"label\"><span>Choose a Network</span><a href=\"/?rescan=1\">Scan Again</a></p>"
+                           "<div class=\"card\">");
     for (size_t i = 0; i < count; i++) {
-        web_page_append(&page, "<option value=\"");
+        web_page_append(&page, "<button class=\"row\" type=\"button\" data-ssid=\"");
         web_page_append_escaped(&page, networks[i].ssid);
-        web_page_append(&page, "\">");
+        web_page_append(&page, "\"%s><span class=\"n\">", networks[i].secure ? "" : " data-open");
         web_page_append_escaped(&page, networks[i].ssid);
-        web_page_append(&page, "%s</option>", networks[i].secure ? "" : " (open)");
+        web_page_append(&page, "</span>%s<svg><use href=\"#w%d\"/></svg></button>",
+                        networks[i].secure ? "<svg><use href=\"#lock\"/></svg>" : "", bars(networks[i].rssi));
     }
-    web_page_append(&page, "</select>"
-                           "<label for=\"other\">Or a hidden network</label>"
-                           "<input id=\"other\" name=\"other\" autocapitalize=\"none\" autocorrect=\"off\">"
-                           "<label for=\"password\">Password</label>"
-                           "<input id=\"password\" name=\"password\" type=\"password\">"
-                           "<button type=\"submit\">Connect</button></form>"
-                           "<p><a href=\"/?rescan=1\">Scan again</a></p>");
+    web_page_append(&page, "<button class=\"row\" type=\"button\" id=\"other\">Other…</button></div>"
+                           "<input type=\"hidden\" name=\"ssid\" id=\"ssid\">");
+
+    sheet_begin(&page, "join", "jointitle", "Join", "Enter the password for this Wi-Fi network.");
+    web_page_append(&page, "<div class=\"pill\"><input type=\"password\" name=\"password\" placeholder=\"Password\" "
+                           "maxlength=\"64\" disabled aria-label=\"Password\"></div></div></dialog>");
+    sheet_begin(&page, "othersheet", "othertitle", "Other Network", "Enter the network name and password.");
+    web_page_append(&page, "<div class=\"pill\"><input name=\"other\" placeholder=\"Network name\" maxlength=\"32\" "
+                           "required disabled autocapitalize=\"none\" autocorrect=\"off\" aria-label=\"Network name\">"
+                           "</div><div class=\"pill\"><input type=\"password\" name=\"password\" placeholder=\"Password\" "
+                           "maxlength=\"64\" disabled aria-label=\"Password\"></div>"
+                           "<p class=\"foot\">Leave the password empty for an open network.</p></div></dialog>"
+                           "</form></main>");
+    // Only the open sheet's fields are enabled, so only they are submitted.
+    web_page_append(&page,
+                    "<script>"
+                    "const f=document.getElementById('f');"
+                    "function sheet(id){const d=document.getElementById(id);"
+                    "d.querySelectorAll('input').forEach(i=>i.disabled=false);d.showModal();d.querySelector('input').focus()}"
+                    "document.querySelectorAll('dialog').forEach(d=>{"
+                    "d.onclose=()=>d.querySelectorAll('input').forEach(i=>{i.disabled=true;i.value=''});"
+                    "d.querySelector('[data-close]').onclick=()=>d.close()});"
+                    "document.querySelectorAll('[data-ssid]').forEach(b=>b.onclick=()=>{"
+                    "f.ssid.value=b.dataset.ssid;"
+                    "if('open' in b.dataset){f.requestSubmit();return}"
+                    "document.getElementById('jointitle').textContent='Join \\u201c'+b.dataset.ssid+'\\u201d';"
+                    "sheet('join')});"
+                    "document.getElementById('other').onclick=()=>{f.ssid.value='';sheet('othersheet')};"
+                    "</script>");
 
     free(networks);
     return web_page_send(req, &page);
@@ -172,12 +227,13 @@ static esp_err_t status_handler(httpd_req_t *req) {
 
     char name[DEVICE_NAME_MAX + 1];
     device_name_get(name, sizeof(name));
-    web_page_append(&page, "<h1>");
+    web_page_append(&page, "<main><h1>");
     web_page_append_escaped(&page, name);
-    web_page_append(&page, "</h1><p>");
+    web_page_append(&page, "</h1><div class=\"card\"><div class=\"row\"><span class=\"n\">");
     web_page_append_escaped(&page, status);
-    web_page_append(&page, "</p><p>The device screen shows the same progress. Once it connects it restarts "
-                           "and this setup network goes away.</p><p><a href=\"/\">Back</a></p>");
+    web_page_append(&page, "</span></div></div><p class=\"foot\">The device restarts once it connects, and this "
+                           "setup network closes.</p><p class=\"foot\"><a href=\"/\">Choose another network</a></p>"
+                           "</main>");
     return web_page_send(req, &page);
 }
 

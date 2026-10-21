@@ -598,9 +598,9 @@ static esp_err_t stations_get_handler(httpd_req_t *req) {
     return send_json(req, list);
 }
 
-// The station presets: add (name, url), remove (index), move (index, to),
-// play (index) or stop. Searching for stations is the page's job, done
-// from the phone against radio-browser.info.
+// The station presets: add (name, url), update (index, name, url), remove
+// (index), move (index, to), play (index) or stop. Searching for stations is
+// the page's job, done from the phone against radio-browser.info.
 static esp_err_t stations_post_handler(httpd_req_t *req) {
     enum { NAME_ENC = RADIO_NAME_MAX * 3, URL_ENC = STREAM_URL_MAX * 3 };
     typedef struct {
@@ -632,6 +632,13 @@ static esp_err_t stations_post_handler(httpd_req_t *req) {
         ok = radio_stations_add(name, b->url);
         why = radio_stations_count() >= RADIO_STATIONS_MAX ? "The list is full"
                                                            : "Needs a name and an http(s):// address";
+    } else if (!strcmp(b->action, "update")) {
+        web_form_value(b->form, "name", b->name, sizeof(b->name));
+        web_form_value(b->form, "url", b->url, sizeof(b->url));
+        char name[RADIO_NAME_MAX];
+        copy_utf8(name, sizeof(name), b->name);
+        ok = has_index && radio_stations_update(index, name, b->url);
+        why = "Needs a name and an http(s):// address";
     } else if (!strcmp(b->action, "remove")) {
         ok = has_index && radio_stations_remove(index);
     } else if (!strcmp(b->action, "move")) {
