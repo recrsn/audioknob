@@ -11,15 +11,22 @@ void audio_out_set_mix(audio_out_mix_t mix) {
     output_mix = mix;
     pthread_mutex_unlock(&output_lock);
 }
-void audio_out_write(const int16_t *pcm, size_t frames) {
+static _Atomic uint32_t output_rate = AUDIO_OUT_SAMPLE_RATE;
+void audio_out_set_rate(uint32_t hz) { atomic_store(&output_rate, hz); }
+uint32_t audio_out_rate(void) { return atomic_load(&output_rate); }
+void audio_out_write(const int32_t *pcm, size_t frames) {
     (void)pcm;
     pthread_mutex_lock(&output_lock);
-    int16_t buf[512 * 2] = {0};
+    int32_t buf[512 * 2] = {0};
     assert(frames <= 512);
-    if (output_mix) output_mix(buf, frames);
+    if (output_mix) output_mix(buf, frames, atomic_load(&output_rate));
     atomic_fetch_add(&writes, 1);
     pthread_mutex_unlock(&output_lock);
     usleep(75);
+}
+void audio_out_write16(const int16_t *pcm, size_t frames) {
+    (void)pcm;
+    audio_out_write(NULL, frames);
 }
 uint32_t audio_out_queued_us(int64_t *now) {
     if (atomic_load(&force_low_queue)) return 0;
