@@ -41,9 +41,12 @@
 #define CAL_FRAMES 32
 // Feed-forward: the DAC clock's offset from the sender's is near constant
 // (the S3 has no audio PLL, so 44.1 kHz is only approximated), so learn it
-// from the net trims and spread the same correction evenly, leaving the
-// servo only the residual. Learned per boot, across streams, and per rate:
-// 44.1 and 48 kHz come from different clock dividers.
+// and spread the same correction evenly, leaving the servo only the
+// residual. The drift is the net trims plus how far the error moved: trims
+// that only remove an offset (a start, a re-align) are matched by the error
+// they remove, where counting trims alone read a 5 ms correction as
+// hundreds of ppm. Learned per boot, across streams, and per rate: 44.1 and
+// 48 kHz come from different clock dividers.
 #define FF_MIN_S 10
 #define FF_MAX_S 600
 
@@ -64,8 +67,9 @@ typedef struct {
 
 typedef struct {
     uint32_t rate;
-    // Net samples added (+) or removed (-) per sample played, and its basis.
-    int64_t net, frames;
+    // Net samples added (+) or removed (-), how far the error moved
+    // meanwhile (early is +), and the frames played.
+    int64_t net, err_us, frames;
 } ff_t;
 
 typedef struct {
@@ -76,6 +80,8 @@ typedef struct {
     int cal_frames;
     int64_t cal_sum_us, bias_us;
     float ff_acc;
+    bool ff_have_err;  // ff_last_err_us is from this run of the stream
+    int64_t ff_last_err_us;
     int64_t err_filtered_us;
     int64_t last_audio_us;
     uint32_t trims, drops;
@@ -111,6 +117,11 @@ static int64_t frames_to_us(int64_t frames, uint32_t rate) {
 
 static ff_t *ff_for(uint32_t rate) {
     return &s_ff[rate == s_ff[0].rate ? 0 : 1];
+}
+
+// Samples the DAC gains on the sender per sample played.
+static double ff_drift(const ff_t *ff) {
+    return ((double)ff->net + (double)ff->err_us * ff->rate / 1000000.0) / (double)ff->frames;
 }
 
 static void write_silence_us(int64_t us) {
@@ -179,7 +190,7 @@ static int feed_forward(sync_t *sync, const ff_t *ff, size_t frames) {
     if (ff->frames < (int64_t)FF_MIN_S * ff->rate) {
         return 0;
     }
-    sync->ff_acc += (float)ff->net / (float)ff->frames * (float)frames;
+    sync->ff_acc += (float)(ff_drift(ff) * (double)frames);
     if (sync->ff_acc >= 1.0f) {
         sync->ff_acc -= 1.0f;
         return 1;
@@ -191,12 +202,19 @@ static int feed_forward(sync_t *sync, const ff_t *ff, size_t frames) {
     return 0;
 }
 
-static void ff_record(ff_t *ff, int adjust, size_t frames) {
+static void ff_record(sync_t *sync, ff_t *ff, int adjust, size_t frames) {
+    int64_t err = sync->err_filtered_us;
+    if (sync->ff_have_err) {
+        ff->err_us += err - sync->ff_last_err_us;
+    }
+    sync->ff_last_err_us = err;
+    sync->ff_have_err = true;
     ff->net += adjust;
     ff->frames += frames;
     if (ff->frames > (int64_t)FF_MAX_S * ff->rate) {
         // Age old history so a changed rate (another sender) is relearned.
         ff->net /= 2;
+        ff->err_us /= 2;
         ff->frames /= 2;
     }
 }
@@ -232,7 +250,7 @@ static int servo_update(sync_t *sync, const ff_t *ff, int64_t lead) {
     } else if (sync->servo_on && mag < SERVO_DISENGAGE_US) {
         sync->servo_on = false;
         ESP_LOGI(TAG, "in sync (%lu trims so far, clock %+ld ppm, underruns %lu)", (unsigned long)sync->trims,
-                 ff->frames ? (long)(ff->net * 1000000 / ff->frames) : 0L, (unsigned long)audio_out_underruns());
+                 ff->frames ? (long)(ff_drift(ff) * 1000000.0) : 0L, (unsigned long)audio_out_underruns());
     }
 
     if (!sync->servo_on || ++sync->servo_phase < TRIM_INTERVAL) {
@@ -303,6 +321,8 @@ static void play_head_locked(sync_t *sync) {
         sync->draining = false;
         sync->drops = 0;
         sync->err_filtered_us = lead - sync->bias_us;
+        // The drops moved the error, not the clock.
+        sync->ff_have_err = false;
     }
     if (lead > GATE_US) {
         // The schedule jumped ahead: restart, which waits and re-aligns.
@@ -317,7 +337,7 @@ static void play_head_locked(sync_t *sync) {
     if (sync->cal_frames >= CAL_SETTLE_FRAMES + CAL_FRAMES) {
         adjust += feed_forward(sync, ff, slot->frames);
         adjust = adjust > 1 ? 1 : (adjust < -1 ? -1 : adjust);
-        ff_record(ff, adjust, slot->frames);
+        ff_record(sync, ff, adjust, slot->frames);
     }
     size_t frames = copy_trimmed(slot->pcm, slot->frames, adjust);
     pop_locked(1);
