@@ -40,9 +40,6 @@ void ap2_set_volume_db(float db);
 
 const uint8_t *ap2_mac(void);
 
-// Whether a RAOP_PROTOCOL_* is currently enabled (raop_set_protocols()).
-bool ap2_protocol_enabled(uint8_t protocol);
-
 void ap2_emit(const raop_event_t *event);
 // raop_event_cb_t and raop_pcm_cb_t into the app, for AirPlay 1 sessions'
 // RTP receiver.

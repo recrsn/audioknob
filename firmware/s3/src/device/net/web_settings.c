@@ -179,9 +179,7 @@ static esp_err_t state_handler(httpd_req_t *req) {
     cJSON_AddNumberToObject(json, "timerSound", s.timer_sound);
     cJSON_AddNumberToObject(json, "timerVolume", s.timer_volume);
     cJSON_AddBoolToObject(json, "bluetooth", s.bluetooth);
-    cJSON_AddNumberToObject(json, "airplay", s.airplay);
     cJSON_AddNumberToObject(json, "airShow", s.air_show);
-    cJSON_AddBoolToObject(json, "airplay2", s.airplay2_available);
     cJSON_AddNumberToObject(json, "ambienceSound", s.ambience_sound);
     cJSON_AddNumberToObject(json, "ambienceVolume", s.ambience_volume);
     cJSON_AddNumberToObject(json, "focusSound", s.focus_sound);
@@ -401,7 +399,6 @@ static esp_err_t set_handler(httpd_req_t *req) {
         {"timerSound", UI_SETTING_TIMER_SOUND, 0, UI_TIMER_SOUND_COUNT - 1},
         {"timerVolume", UI_SETTING_TIMER_VOLUME, UI_TIMER_VOLUME_MIN, 100},
         {"bluetooth", UI_SETTING_BLUETOOTH, 0, 1},
-        {"airplay", UI_SETTING_AIRPLAY, 0, UI_AIRPLAY_1 | UI_AIRPLAY_2},
         {"airShow", UI_SETTING_AIR_SHOW, UI_AIR_SHOW_OFF, UI_AIR_SHOW_ALWAYS},
         {"ambienceSound", UI_SETTING_AMBIENCE_SOUND, 0, UI_AMBIENCE_COUNT - 1},
         {"ambienceVolume", UI_SETTING_AMBIENCE_VOLUME, 0, 100},

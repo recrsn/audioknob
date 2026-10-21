@@ -9,13 +9,11 @@
 #include "device_name.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "mdns.h"
 #include "raop.h"
-#include "sdkconfig.h"
 
 #define CTRL_NET_UP BIT0
 #define CTRL_VOLUME BIT1
@@ -24,15 +22,10 @@
 #define CTRL_NEXT BIT4
 #define CTRL_PREV BIT5
 #define CTRL_RENAME BIT6
-#define CTRL_PROTOCOLS BIT7
 
 // mbedtls key parsing in raop_create() plus blocking DACP HTTP.
 #define CTRL_STACK_SIZE 6144
 #define CTRL_TASK_PRIO 3
-// A run of presses on the settings row lands as one change: mDNS needs a
-// few seconds to probe and announce, and a change in the middle of that
-// leaves records unannounced.
-#define PROTOCOLS_SETTLE_US (2 * 1000 * 1000)
 
 // Below everything audio: a large PNG cover takes seconds to decode.
 #define ART_STACK_SIZE 6144
@@ -48,8 +41,6 @@ static artwork_slot_t *s_art;
 static raop_ctx_t *s_raop;
 static uint8_t s_mac[6];
 static bool s_net_up;
-static volatile uint8_t s_protocols;
-static esp_timer_handle_t s_protocols_timer;
 static TaskHandle_t s_ctrl_task;
 static TaskHandle_t s_art_task;
 // Latest cover not yet decoded (len 0 = clear); newer ones replace it.
@@ -228,11 +219,10 @@ static void advertise_name(char name[DEVICE_NAME_MAX + 1]) {
     mdns_instance_name_set(name);
 }
 
-// Only once some AirPlay version is on, to keep its RAM free otherwise.
 static void start_receiver(void) {
     char name[DEVICE_NAME_MAX + 1];
     device_name_get(name, sizeof(name));
-    s_raop = raop_create(name, s_mac, s_protocols, on_raop_event, airplay_player_push);
+    s_raop = raop_create(name, s_mac, on_raop_event, airplay_player_push);
     if (!s_raop) {
         ESP_LOGE(TAG, "AirPlay receiver failed to start");
     }
@@ -258,17 +248,12 @@ static void ctrl_task(void *arg) {
             advertise_name(name);
         }
         if (!s_raop) {
-            if (s_protocols) {
-                start_receiver();
-            }
+            start_receiver();
             continue;
         }
 
         if (bits & CTRL_RENAME) {
             raop_set_name(s_raop, name);
-        }
-        if (bits & CTRL_PROTOCOLS) {
-            raop_set_protocols(s_raop, s_protocols);
         }
 
         if ((bits & CTRL_PAUSE) && !raop_remote_command(s_raop, "pause")) {
@@ -291,11 +276,6 @@ static void ctrl_task(void *arg) {
     }
 }
 
-static void protocols_settled(void *arg) {
-    (void)arg;
-    xTaskNotify(s_ctrl_task, CTRL_PROTOCOLS, eSetBits);
-}
-
 void airplay_init(void) {
     s_lock = xSemaphoreCreateMutex();
     s_art = artwork_slot_create();
@@ -307,8 +287,6 @@ void airplay_init(void) {
     BaseType_t art_ok = xTaskCreatePinnedToCore(art_task, "airplay_art", ART_STACK_SIZE, NULL, ART_TASK_PRIO,
                                                 &s_art_task, tskNO_AFFINITY);
     ESP_ERROR_CHECK(s_lock && s_art && ok == pdPASS && art_ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
-    const esp_timer_create_args_t timer = {.callback = protocols_settled, .name = "airplay_protocols"};
-    ESP_ERROR_CHECK(esp_timer_create(&timer, &s_protocols_timer));
 }
 
 void airplay_network_up(const uint8_t mac[6]) {
@@ -349,20 +327,6 @@ void airplay_adjust_volume(int steps) {
     set_volume((uint8_t)volume);
     s_pending_volume = (uint8_t)volume;
     xTaskNotify(s_ctrl_task, CTRL_VOLUME, eSetBits);
-}
-
-void airplay_set_protocols(bool airplay1, bool airplay2) {
-    s_protocols = (airplay1 ? RAOP_PROTOCOL_AIRPLAY1 : 0) | (airplay2 ? RAOP_PROTOCOL_AIRPLAY2 : 0);
-    esp_timer_stop(s_protocols_timer);
-    esp_timer_start_once(s_protocols_timer, PROTOCOLS_SETTLE_US);
-}
-
-bool airplay_supports_airplay2(void) {
-#if CONFIG_AK_AIRPLAY2
-    return true;
-#else
-    return false;
-#endif
 }
 
 void airplay_rename(void) {

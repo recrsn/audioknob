@@ -46,7 +46,7 @@ idf_build_set_property(COMPILE_OPTIONS "-I${CMAKE_SOURCE_DIR}/include" APPEND)
 
 # Sources include each other by bare file name, so every directory is on the
 # include path.
-set(AK_DIRS ui ui/assets device/core device/drivers device/net device/airplay device/airplay/shared device/ambience device/radio device/talk)
+set(AK_DIRS ui ui/assets device/core device/drivers device/net device/airplay device/airplay/shared device/airplay/v2 device/ambience device/radio device/talk)
 set(AK_INCLUDE_DIRS ${AK_DIRS})
 set(AK_SRCS "")
 foreach(dir ${AK_DIRS})
@@ -58,17 +58,6 @@ list(APPEND AK_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/main.c")
 # The device web page (device/net/web_settings.c), served as is.
 set(AK_EMBED_TXTFILES "device/net/web/index.html")
 
-if(CONFIG_AK_AIRPLAY2)
-    # AirPlay 2 after shairport-sync, which takes AirPlay 1 senders on the
-    # same port. Pairing is owntone's pair_ap, built from lib/ by PlatformIO.
-    file(GLOB AK_AIRPLAY2_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/device/airplay/v2/*.c")
-    list(APPEND AK_SRCS ${AK_AIRPLAY2_SRCS})
-    list(APPEND AK_INCLUDE_DIRS "device/airplay/v2")
-else()
-    # AirPlay 1 only: the RAOP receiver on its own port.
-    file(GLOB AK_AIRPLAY1_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/device/airplay/v1/*.c")
-    list(APPEND AK_SRCS ${AK_AIRPLAY1_SRCS})
-endif()
 
 idf_component_register(
     SRCS ${AK_SRCS}

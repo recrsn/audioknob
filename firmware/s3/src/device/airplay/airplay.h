@@ -30,15 +30,6 @@ const uint16_t *airplay_get_artwork(uint32_t *version);
 // session or it gave none.
 void airplay_get_client_name(char *out, size_t len);
 
-// Which AirPlay versions to take; neither turns AirPlay off. Applies once
-// the network is up, and live after that, dropping a session of a version
-// turned off. Non-blocking.
-void airplay_set_protocols(bool airplay1, bool airplay2);
-
-// Whether this build has the AirPlay 2 receiver (CONFIG_AK_AIRPLAY2);
-// without it, airplay2 above is ignored.
-bool airplay_supports_airplay2(void);
-
 // Re-advertises under the current device_name_get(). Non-blocking; a no-op
 // until the network is up (the receiver then starts with the new name).
 void airplay_rename(void);

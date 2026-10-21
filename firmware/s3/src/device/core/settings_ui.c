@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "airplay.h"
 #include "alarm_sound.h"
 #include "device_name.h"
 #include "esp_app_desc.h"
@@ -83,10 +82,6 @@ static void preview_timer_sound(void) {
     }
 }
 
-static void apply_airplay(void) {
-    airplay_set_protocols(s_settings.airplay & UI_AIRPLAY_1, s_settings.airplay & UI_AIRPLAY_2);
-}
-
 static void fill(ui_settings_t *out) {
     *out = (ui_settings_t){
         .brightness = s_settings.brightness,
@@ -98,8 +93,6 @@ static void fill(ui_settings_t *out) {
         .timer_sound = s_settings.timer_sound,
         .timer_volume = s_settings.timer_volume,
         .bluetooth = s_settings.bluetooth,
-        .airplay = s_settings.airplay,
-        .airplay2_available = airplay_supports_airplay2(),
         .air_show = s_settings.air_show,
         .ambience_sound = s_settings.ambience_sound,
         .ambience_volume = s_settings.ambience_volume,
@@ -168,10 +161,6 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         s_settings.bluetooth = value;
         uart_link_set_bluetooth(s_settings.bluetooth);
         break;
-    case UI_SETTING_AIRPLAY:
-        s_settings.airplay = (uint8_t)value;
-        apply_airplay();
-        break;
     case UI_SETTING_AIR_SHOW:
         s_settings.air_show = (uint8_t)value;
         break;
@@ -218,7 +207,6 @@ void settings_ui_init(void) {
     lcd_driver_set_brightness(s_settings.brightness);
     apply_timezone();
     uart_link_set_bluetooth(s_settings.bluetooth);
-    apply_airplay();
     focus_sound_set_volume(s_settings.ambience_volume);
     apply_timer_sound();
     const esp_timer_create_args_t args = {.callback = save_cb, .name = "settings_save"};

@@ -190,7 +190,6 @@ progress::-moz-progress-bar{background:var(--accent)}
   <div class="group card">
     <a class="row link" href="#wifi"><i class="ic" style="--c:#0a84ff"><svg viewBox="0 0 24 24"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8 3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4 2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg></i><span>Wi-Fi</span><span class="val" id="v-wifi"></span><span class="chev"></span></a>
     <a class="row link" href="#bluetooth"><i class="ic" style="--c:#0a84ff"><svg viewBox="0 0 24 24"><path d="M17.71 7.71 12 2h-1v7.59L6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 11 14.41V22h1l5.71-5.71-4.3-4.29 4.3-4.29zM13 5.83l1.88 1.88L13 9.59V5.83zm1.88 10.46L13 18.17v-3.76l1.88 1.88z"/></svg></i><span>Bluetooth</span><span class="val" id="v-bt"></span><span class="chev"></span></a>
-    <a class="row link" href="#airplay"><i class="ic" style="--c:#5e5ce6"><svg viewBox="0 0 24 24"><path d="M6 22h12l-6-6zM21 3H3c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h4v-2H3V5h18v12h-4v2h4c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg></i><span>AirPlay</span><span class="val" id="v-airplay"></span><span class="chev"></span></a>
   </div>
   <div class="group card">
     <a class="row link" href="#radio"><i class="ic" style="--c:#ff375f"><svg viewBox="0 0 24 24"><path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.89 2 2 2h16c1.11 0 2-.9 2-2V8c0-1.11-.89-2-2-2H8.3l8.26-3.34L15.88 1 3.24 6.15zM7 20c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm13-8h-2v-2h-2v2H4V8h16v4z"/></svg></i><span>Radio</span><span class="val" id="v-radio"></span><span class="chev"></span></a>
@@ -230,17 +229,6 @@ progress::-moz-progress-bar{background:var(--accent)}
       <button class="row action danger" id="unpair">Forget All Devices…</button>
     </div>
     <p class="foot">The knob shows a code to check against your phone's.</p>
-  </div>
-</section>
-
-<section class="page" id="p-airplay">
-  <div class="navbar"><a class="back" href="#">Settings</a><h2>AirPlay</h2></div>
-  <div class="group">
-    <div class="card">
-      <div class="row"><span>AirPlay 2</span><label class="sw"><input type="checkbox" id="ap2" aria-label="AirPlay 2"><i></i></label></div>
-      <div class="row" id="ap1row"><span>AirPlay 1</span><label class="sw"><input type="checkbox" id="ap1" aria-label="AirPlay 1"><i></i></label></div>
-    </div>
-    <p class="foot">Turn a version off to hide the device from senders that use it.</p>
   </div>
 </section>
 
@@ -573,11 +561,6 @@ function render(s) {
   $("tzmanual").hidden = s.tzAuto;
   setText("tzval", (s.tz || "Unknown").replace(/_/g, " "));
   if (zonesLoaded && document.activeElement !== $("tz")) $("tz").value = s.tz;
-  // Without the AirPlay 2 receiver built in, the one switch means AirPlay.
-  $("ap1row").hidden = !s.airplay2;
-  $("ap2").closest(".row").firstElementChild.textContent = s.airplay2 ? "AirPlay 2" : "AirPlay";
-  $("ap2").checked = s.airplay2 ? !!(s.airplay & 2) : !!(s.airplay & 1);
-  $("ap1").checked = !!(s.airplay & 1);
   $("bluetooth").checked = s.bluetooth;
   $("btactions").hidden = !s.bt;
   if (s.bt) {
@@ -603,8 +586,6 @@ function render(s) {
 function renderRoot(s) {
   setText("v-wifi", s.ssid || "Not connected");
   setText("v-bt", s.bluetooth ? "On" : "Off");
-  const ap = s.airplay2 ? [s.airplay & 2 && "2", s.airplay & 1 && "1"].filter(Boolean) : [s.airplay & 1 && "On"].filter(Boolean);
-  setText("v-airplay", !ap.length ? "Off" : s.airplay2 ? "AirPlay " + ap.join(" & ") : "On");
   setText("v-radio", stations.length === 1 ? "1 station" : `${stations.length} stations`);
   $("v-update").hidden = !(s.release.s3 || s.release.bluetooth);
 }
@@ -841,11 +822,6 @@ $("addform").onsubmit = async e => {
   }
 };
 
-function airplayMask() {
-  if (!state.airplay2) return $("ap2").checked ? 1 : 0;
-  return ($("ap1").checked ? 1 : 0) | ($("ap2").checked ? 2 : 0);
-}
-$("ap1").onchange = $("ap2").onchange = () => set("airplay", airplayMask());
 $("bluetooth").onchange = e => {
   set("bluetooth", +e.target.checked);
   toast(e.target.checked ? "Bluetooth is starting" : "Bluetooth is off");

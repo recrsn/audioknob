@@ -60,8 +60,6 @@ typedef enum {
     ROW_TIMEZONE,
     ROW_UNITS,
     ROW_AIR,
-    ROW_AIRPLAY2,
-    ROW_AIRPLAY1,
     ROW_BLUETOOTH,
     ROW_BT_PAIR,
     ROW_BT_FORGET,
@@ -97,8 +95,6 @@ static const struct {
     [ROW_TIMEZONE] = {"Timezone", KIND_VALUE},
     [ROW_UNITS] = {"Units", KIND_VALUE},
     [ROW_AIR] = {"Show air quality", KIND_VALUE},
-    [ROW_AIRPLAY2] = {"AirPlay 2", KIND_SWITCH},
-    [ROW_AIRPLAY1] = {"AirPlay 1", KIND_SWITCH},
     [ROW_BLUETOOTH] = {"Bluetooth", KIND_SWITCH},
     [ROW_BT_PAIR] = {"Pair a device", KIND_VALUE},
     [ROW_BT_FORGET] = {"Forget devices", KIND_VALUE},
@@ -133,8 +129,6 @@ static const struct {
     {NULL, ROW_UNITS},
     {NULL, ROW_AIR},
     HEADER("AUDIO"),
-    {NULL, ROW_AIRPLAY2},
-    {NULL, ROW_AIRPLAY1},
     {NULL, ROW_BLUETOOTH},
     {NULL, ROW_BT_PAIR},
     {NULL, ROW_BT_FORGET},
@@ -160,7 +154,6 @@ static ui_settings_t s_settings = {
     .timer_sound = UI_TIMER_SOUND_CHIME,
     .timer_volume = 60,
     .bluetooth = true,
-    .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
     .air_show = UI_AIR_SHOW_HIGH,
     .tz_auto = true,
     .location_auto = true,
@@ -201,11 +194,6 @@ static void emit(ui_setting_t setting, int value, const char *zone) {
 
 void ui_settings_change(ui_setting_t setting, int value) {
     emit(setting, value, NULL);
-}
-
-static bool row_visible(int row) {
-    // Without the AirPlay 2 receiver, the AirPlay 1 switch is all there is.
-    return row != ROW_AIRPLAY2 || s_settings.airplay2_available;
 }
 
 // "America/Argentina/Buenos_Aires" -> "Buenos Aires": the city is what
@@ -264,10 +252,6 @@ static bool switch_on(int row) {
         return s->haptics;
     case ROW_ART_COLORS:
         return s->art_colors;
-    case ROW_AIRPLAY2:
-        return s->airplay & UI_AIRPLAY_2;
-    case ROW_AIRPLAY1:
-        return s->airplay & UI_AIRPLAY_1;
     case ROW_BLUETOOTH:
         return s->bluetooth;
     case ROW_LOCATION:
@@ -389,8 +373,6 @@ static void render(void) {
     }
     lv_obj_set_style_text_color(st.names[ROW_FORGET], lv_color_hex(UI_COLOR_DANGER), 0);
     lv_obj_set_style_text_color(st.names[ROW_BT_FORGET], lv_color_hex(UI_COLOR_DANGER), 0);
-    lv_obj_set_style_text_color(st.names[ROW_AIRPLAY1], lv_color_hex(UI_COLOR_TEXT), 0);
-    ui_label_set_text(st.names[ROW_AIRPLAY1], s_settings.airplay2_available ? "AirPlay 1" : "AirPlay");
     lv_bar_set_value(st.level, s_settings.brightness, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(st.level, lv_color_hex(st.editing && st.selected == ROW_BRIGHTNESS ? UI_COLOR_ACCENT : UI_COLOR_TEXT),
                               LV_PART_INDICATOR);
@@ -445,7 +427,7 @@ static void center_row(int row, lv_anim_enable_t anim) {
 }
 
 static void select_row(int row, bool scroll) {
-    if (row < 0 || row >= ROW_COUNT || !row_visible(row)) {
+    if (row < 0 || row >= ROW_COUNT) {
         return;
     }
     if (row != st.selected) {
@@ -467,7 +449,7 @@ static int row_after(int row, int steps) {
     int dir = steps > 0 ? 1 : -1;
     for (int n = steps > 0 ? steps : -steps; n > 0; n--) {
         int next = pos + dir;
-        while (next >= 0 && next < (int)LAYOUT_COUNT && (k_layout[next].row < 0 || !row_visible(k_layout[next].row))) {
+        while (next >= 0 && next < (int)LAYOUT_COUNT && k_layout[next].row < 0) {
             next += dir;
         }
         if (next < 0 || next >= (int)LAYOUT_COUNT) {
@@ -552,15 +534,7 @@ void ui_update_settings(const ui_settings_t *settings) {
         return;
     }
     bool url_changed = strcmp(settings->ip, s_settings.ip) || strcmp(settings->hostname, s_settings.hostname);
-    bool layout_changed = settings->airplay2_available != s_settings.airplay2_available;
     s_settings = *settings;
-    if (layout_changed) {
-        lv_obj_set_flag(st.rows[ROW_AIRPLAY2], LV_OBJ_FLAG_HIDDEN, !row_visible(ROW_AIRPLAY2));
-        if (!row_visible(st.selected)) {
-            st.selected = ROW_AIRPLAY1;
-        }
-        center_row(st.selected, LV_ANIM_OFF);
-    }
     render();
     if (st.qr_overlay && url_changed) {
         // Dropped off WiFi: the code would point nowhere.
@@ -570,10 +544,6 @@ void ui_update_settings(const ui_settings_t *settings) {
             qr_show_url();
         }
     }
-}
-
-static void toggle_airplay(unsigned bit) {
-    emit(UI_SETTING_AIRPLAY, (s_settings.airplay ^ bit) & (UI_AIRPLAY_1 | UI_AIRPLAY_2), NULL);
 }
 
 // Covers the rows below the edited one, which is settled in place first so
@@ -682,12 +652,6 @@ static void activate(void) {
         }
         break;
     }
-    case ROW_AIRPLAY2:
-        toggle_airplay(UI_AIRPLAY_2);
-        break;
-    case ROW_AIRPLAY1:
-        toggle_airplay(UI_AIRPLAY_1);
-        break;
     case ROW_LOCATION:
         // A city can't be typed here, so turning it off sends the user to
         // the web page to pick one; turning it on is immediate.
@@ -766,9 +730,6 @@ static void list_scroll_end_cb(lv_event_t *e) {
     int best = st.selected;
     int32_t best_dist = INT32_MAX;
     for (int i = 0; i < ROW_COUNT; i++) {
-        if (!row_visible(i)) {
-            continue;
-        }
         lv_obj_get_coords(st.rows[i], &a);
         int32_t dist = LV_ABS((a.y1 + a.y2) / 2 - mid);
         if (dist < best_dist) {
@@ -941,7 +902,6 @@ void settings_page_build(lv_obj_t *screen) {
         st.items[i] = k_layout[i].row < 0 ? header_create(st.list, k_layout[i].header)
                                           : row_create(st.list, k_layout[i].row);
     }
-    lv_obj_set_flag(st.rows[ROW_AIRPLAY2], LV_OBJ_FLAG_HIDDEN, !row_visible(ROW_AIRPLAY2));
     edit_bar_create(screen);
     lv_obj_add_event_cb(screen, screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 

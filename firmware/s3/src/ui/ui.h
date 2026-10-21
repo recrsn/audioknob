@@ -275,8 +275,6 @@ typedef struct {
     uint8_t timer_sound;  // UI_TIMER_SOUND_*
     uint8_t timer_volume; // UI_TIMER_VOLUME_MIN-100 %
     bool bluetooth;
-    uint8_t airplay;   // UI_AIRPLAY_* mask; 0 = off
-    bool airplay2_available; // else only UI_AIRPLAY_1 means anything
     uint8_t air_show;  // ui_air_show_t: the clock face's air quality/UV chip
     bool tz_auto;      // following the location's zone
     bool location_auto; // following the IP-detected location
@@ -314,7 +312,6 @@ typedef enum {
     UI_SETTING_FORGET_WIFI,
     UI_SETTING_CHECK_UPDATES,
     UI_SETTING_BLUETOOTH,  // value: 0/1
-    UI_SETTING_AIRPLAY,    // value: UI_AIRPLAY_* mask
     UI_SETTING_SLEEP,      // value: seconds, 0-UI_SLEEP_MAX_S; 0 = never
     UI_SETTING_LOCATION,   // back to the IP-detected one; picking one is the web page's
     UI_SETTING_ART_COLORS, // value: 0/1
@@ -335,8 +332,6 @@ typedef enum {
 
 #define UI_TIMER_VOLUME_MIN 5
 
-#define UI_AIRPLAY_1 (1u << 0)
-#define UI_AIRPLAY_2 (1u << 1)
 
 #define UI_SLEEP_MAX_S 3600
 

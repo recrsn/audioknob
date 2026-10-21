@@ -51,3 +51,10 @@ CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
 # 64-byte D-cache lines halve the misses when streaming PSRAM (full-screen
 # image blits: the wallpaper and page-swipe snapshots) at no RAM cost.
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+# AirPlay 2: ChaCha20-Poly1305 for the encrypted RTSP channel and audio,
+# HKDF for its keys.
+CONFIG_MBEDTLS_CHACHA20_C=y
+CONFIG_MBEDTLS_POLY1305_C=y
+CONFIG_MBEDTLS_CHACHAPOLY_C=y
+CONFIG_MBEDTLS_HKDF_C=y

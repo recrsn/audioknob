@@ -16,7 +16,6 @@ typedef struct {
     uint8_t timer_sound;  // UI_TIMER_SOUND_*
     uint8_t timer_volume; // UI_TIMER_VOLUME_MIN-100 %
     bool bluetooth;
-    uint8_t airplay; // UI_AIRPLAY_* mask; 0 = off
     uint8_t air_show; // ui_air_show_t
     uint8_t ambience_sound;  // ui_ambience_t
     uint8_t ambience_volume; // 0-100

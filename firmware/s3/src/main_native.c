@@ -37,8 +37,6 @@ static ui_settings_t s_settings = {
     .timer_sound = UI_TIMER_SOUND_CHIME,
     .timer_volume = 60,
     .bluetooth = true,
-    .airplay = UI_AIRPLAY_1 | UI_AIRPLAY_2,
-    .airplay2_available = true,
     .air_show = UI_AIR_SHOW_HIGH,
     .ambience_sound = UI_AMBIENCE_RAIN,
     .ambience_volume = 40,
@@ -112,9 +110,6 @@ static void on_setting(ui_setting_t setting, int value, const char *zone) {
         break;
     case UI_SETTING_BLUETOOTH:
         s_settings.bluetooth = value;
-        break;
-    case UI_SETTING_AIRPLAY:
-        s_settings.airplay = (uint8_t)value;
         break;
     case UI_SETTING_AIR_SHOW:
         s_settings.air_show = (uint8_t)value;

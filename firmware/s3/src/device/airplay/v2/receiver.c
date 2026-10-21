@@ -53,7 +53,6 @@ static raop_ctx_t s_ctx;
 static char s_name[NAME_MAX_LEN + 1];
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static float s_volume_db = INITIAL_VOLUME_DB;
-static uint8_t s_protocols;
 
 static uint8_t s_mac[6];
 static char s_device_id[18];
@@ -346,15 +345,10 @@ static esp_err_t advertise_raop(const char *name) {
 }
 
 // AirPlay 2 senders find the receiver through _airplay, AirPlay 1 senders
-// through _raop. Only the protocols in the mask are touched: every
-// mdns_service_add() restarts probing and drops what is still queued from
-// the last one, so records that stay should be left alone.
-static void advertise(const char *name, uint8_t protocols) {
-    esp_err_t err = ESP_OK;
-    if (protocols & RAOP_PROTOCOL_AIRPLAY2) {
-        err = advertise_airplay(name);
-    }
-    if (err == ESP_OK && (protocols & RAOP_PROTOCOL_AIRPLAY1)) {
+// through _raop.
+static void advertise(const char *name) {
+    esp_err_t err = advertise_airplay(name);
+    if (err == ESP_OK) {
         err = advertise_raop(name);
     }
     if (err != ESP_OK) {
@@ -362,31 +356,13 @@ static void advertise(const char *name, uint8_t protocols) {
     }
 }
 
-static void unadvertise(uint8_t protocols) {
-    if (protocols & RAOP_PROTOCOL_AIRPLAY2) {
-        mdns_service_remove("_airplay", "_tcp");
-    }
-    if (protocols & RAOP_PROTOCOL_AIRPLAY1) {
-        mdns_service_remove("_raop", "_tcp");
-    }
-}
-
-bool ap2_protocol_enabled(uint8_t protocol) {
-    portENTER_CRITICAL(&s_lock);
-    bool enabled = s_protocols & protocol;
-    portEXIT_CRITICAL(&s_lock);
-    return enabled;
-}
-
 /* raop.h */
 
-raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], uint8_t protocols, raop_event_cb_t event_cb,
-                        raop_pcm_cb_t pcm_cb) {
+raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], raop_event_cb_t event_cb, raop_pcm_cb_t pcm_cb) {
     s_ctx.event_cb = event_cb;
     s_ctx.pcm_cb = pcm_cb;
     portENTER_CRITICAL(&s_lock);
     snprintf(s_name, sizeof(s_name), "%s", name);
-    s_protocols = protocols;
     portEXIT_CRITICAL(&s_lock);
 
     int64_t t0 = esp_timer_get_time();
@@ -401,7 +377,7 @@ raop_ctx_t *raop_create(const char *name, const uint8_t mac[6], uint8_t protocol
         return NULL;
     }
     ap2_log_heap();
-    advertise(name, protocols);
+    advertise(name);
     ESP_LOGI(TAG, "AirPlay 2 receiver \"%s\" (%s) up in %lld ms", name, s_device_id,
              (long long)((esp_timer_get_time() - t0) / 1000));
     return &s_ctx;
@@ -416,30 +392,6 @@ void raop_set_name(raop_ctx_t *ctx, const char *name) {
     snprintf(instance, sizeof(instance), "%s@%s", s_device_hex, name);
     mdns_service_instance_name_set("_airplay", "_tcp", name);
     mdns_service_instance_name_set("_raop", "_tcp", instance);
-}
-
-void raop_set_protocols(raop_ctx_t *ctx, uint8_t protocols) {
-    (void)ctx;
-    char name[NAME_MAX_LEN + 1];
-    portENTER_CRITICAL(&s_lock);
-    uint8_t dropped = s_protocols & ~protocols;
-    uint8_t added = protocols & ~s_protocols;
-    s_protocols = protocols;
-    snprintf(name, sizeof(name), "%s", s_name);
-    portEXIT_CRITICAL(&s_lock);
-    if (!dropped && !added) {
-        return;
-    }
-
-    unadvertise(dropped);
-    advertise(name, added);
-
-    // Idle connections go too; a sender just reconnects to what's left.
-    if (dropped & (session_is_airplay1() ? RAOP_PROTOCOL_AIRPLAY1 : RAOP_PROTOCOL_AIRPLAY2)) {
-        rtsp_disconnect_all();
-    }
-    ESP_LOGI(TAG, "AirPlay 1 %s, AirPlay 2 %s", protocols & RAOP_PROTOCOL_AIRPLAY1 ? "on" : "off",
-             protocols & RAOP_PROTOCOL_AIRPLAY2 ? "on" : "off");
 }
 
 void raop_abort(raop_ctx_t *ctx) {
