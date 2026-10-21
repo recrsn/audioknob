@@ -44,10 +44,13 @@ typedef int (*ota_read_fn)(void *ctx, char *buf, size_t len);
 // On failure, false with the reason in the status; playback is allowed again.
 bool ota_receive(size_t size, ota_read_fn read, void *ctx);
 
+// Reserves the receive slot for a download, so uploads and on-device
+// confirmation can't race it. False if an update is pending or busy.
+bool ota_download_reserve(ota_target_t target);
+// Runs a reserved HTTPS download into the same validation/confirmation path,
+// on the caller's task: it writes flash, so that task's stack must be internal.
 // Verifies the full download against the release asset SHA-256 before READY.
-// Starts a background HTTPS download into the same validation/confirmation path.
-// False if an update is pending/busy or the worker could not be started.
-bool ota_download(const char *url, size_t size, ota_target_t target, const uint8_t sha256[32]);
+void ota_download(const char *url, size_t size, ota_target_t target, const uint8_t sha256[32]);
 
 void ota_get_status(ota_status_t *out);
 

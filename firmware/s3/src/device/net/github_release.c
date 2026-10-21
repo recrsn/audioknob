@@ -24,6 +24,11 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static TaskHandle_t s_task;
 static github_release_status_t s_status;
 static release_manifest_t s_manifest;
+// Downloads run on the release task: its internal stack is already there,
+// where a new one may not fit once AirPlay has fragmented internal RAM.
+static release_asset_t s_download;
+static ota_target_t s_download_target;
+static bool s_download_pending;
 
 static void refresh_available(const hello_t *bluetooth) {
     s_status.s3_available =
@@ -111,6 +116,13 @@ static void release_task(void *arg) {
     int64_t next_check = 0;
     for (;;) {
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60000));
+        taskENTER_CRITICAL(&s_lock);
+        bool download = s_download_pending;
+        s_download_pending = false;
+        taskEXIT_CRITICAL(&s_lock);
+        if (download) {
+            ota_download(s_download.url, s_download.size, s_download_target, s_download.sha256);
+        }
         github_release_status_t status;
         github_release_get_status(&status);
         bool manual = status.checking;
@@ -186,12 +198,17 @@ bool github_release_download(ota_target_t target) {
                      (target == OTA_TARGET_S3 ? s_status.s3_available : s_status.bluetooth_available);
     asset = target == OTA_TARGET_S3 ? s_manifest.s3 : s_manifest.bluetooth;
     taskEXIT_CRITICAL(&s_lock);
-    if (!available || !ota_download(asset.url, asset.size, target, asset.sha256)) {
+    if (!available || !s_task || !ota_download_reserve(target)) {
         return false;
     }
     taskENTER_CRITICAL(&s_lock);
+    // The reservation keeps any other download out until this one finishes.
+    s_download = asset;
+    s_download_target = target;
+    s_download_pending = true;
     s_status.notice = RELEASE_QUIET;
     taskEXIT_CRITICAL(&s_lock);
+    xTaskNotifyGive(s_task);
     return true;
 }
 

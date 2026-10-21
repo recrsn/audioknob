@@ -232,62 +232,34 @@ bool ota_receive(size_t size, ota_read_fn read, void *ctx) {
     return start_receiving() && receive_image(size, read, ctx, NULL, NULL);
 }
 
-typedef struct {
-    char *url;
-    size_t size;
-    ota_target_t target;
-    uint8_t sha256[32];
-} download_t;
-
 static int read_download(void *ctx, char *buf, size_t len) {
     return esp_http_client_read(ctx, buf, len);
 }
 
-static void download_task(void *arg) {
-    download_t *download = arg;
-    int status;
-    esp_http_client_handle_t client = https_download_open(download->url, &status);
-    if (!client) {
-        fail("Couldn't download release (check WiFi/time)");
-    } else {
-        int64_t length = esp_http_client_get_content_length(client);
-        if (length > 0 && (uint64_t)length != download->size) {
-            fail("Release image size changed; check again");
-        } else {
-            receive_image(download->size, read_download, client, &download->target, download->sha256);
-        }
-        esp_http_client_cleanup(client);
-    }
-    free(download->url);
-    free(download);
-    vTaskDelete(NULL);
-}
-
-bool ota_download(const char *url, size_t size, ota_target_t target, const uint8_t sha256[32]) {
-    download_t *download = calloc(1, sizeof(*download));
-    if (!download) {
-        return false;
-    }
-    download->url = strdup(url);
-    download->size = size;
-    download->target = target;
-    memcpy(download->sha256, sha256, sizeof(download->sha256));
-    // Reserve before returning to the web task: uploads and on-device
-    // confirmation cannot race the TLS handshake or background download.
-    if (!download->url || !start_receiving()) {
-        free(download->url);
-        free(download);
+bool ota_download_reserve(ota_target_t target) {
+    if (!start_receiving()) {
         return false;
     }
     taskENTER_CRITICAL(&s_lock);
     s_status.target = target;
     taskEXIT_CRITICAL(&s_lock);
-    if (xTaskCreate(download_task, "ota_download", 8192, download, 3, NULL) != pdPASS) {
-        free(download->url);
-        free(download);
-        return fail("Out of memory");
-    }
     return true;
+}
+
+void ota_download(const char *url, size_t size, ota_target_t target, const uint8_t sha256[32]) {
+    int status;
+    esp_http_client_handle_t client = https_download_open(url, &status);
+    if (!client) {
+        fail("Couldn't download release (check WiFi/time)");
+        return;
+    }
+    int64_t length = esp_http_client_get_content_length(client);
+    if (length > 0 && (uint64_t)length != size) {
+        fail("Release image size changed; check again");
+    } else {
+        receive_image(size, read_download, client, &target, sha256);
+    }
+    esp_http_client_cleanup(client);
 }
 
 static void esp32_install_task(void *arg) {
