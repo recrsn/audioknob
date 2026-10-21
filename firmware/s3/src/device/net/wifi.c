@@ -445,7 +445,8 @@ bool wifi_get_station(char *ssid, size_t ssid_len, char *ip, size_t ip_len) {
     return true;
 }
 
-void wifi_forget(void) {
+static void forget_task(void *arg) {
+    (void)arg;
     nvs_handle_t nvs;
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
         nvs_erase_all(nvs);
@@ -454,6 +455,13 @@ void wifi_forget(void) {
     }
     ESP_LOGI(TAG, "credentials erased; restarting into setup");
     esp_restart();
+}
+
+// Its caller may be the LVGL task, whose PSRAM stack can't write flash.
+void wifi_forget(void) {
+    if (xTaskCreate(forget_task, "wifi_forget", 3072, NULL, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "no memory to forget credentials");
+    }
 }
 
 bool wifi_get_setup_info(wifi_setup_info_t *out) {

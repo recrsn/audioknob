@@ -51,8 +51,8 @@ bool ota_download(const char *url, size_t size, ota_target_t target, const uint8
 
 void ota_get_status(ota_status_t *out);
 
-// Installs the image waiting in OTA_READY. For the S3 it restarts, so it
-// doesn't return; for the ESP32 a background task takes over.
+// Installs the image waiting in OTA_READY on a background task: the S3
+// image by restarting into it, the ESP32 one by relaying it.
 void ota_install(void);
 void ota_decline(void);
 

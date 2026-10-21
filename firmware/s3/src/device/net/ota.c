@@ -302,6 +302,16 @@ static void esp32_install_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+static void s3_install_task(void *arg) {
+    (void)arg;
+    if (esp_ota_set_boot_partition(s_s3.part) == ESP_OK) {
+        ESP_LOGI(TAG, "restarting into %s", s_status.version);
+        esp_restart();
+    }
+    fail("Couldn't switch to the new firmware");
+    vTaskDelete(NULL);
+}
+
 void ota_install(void) {
     taskENTER_CRITICAL(&s_lock);
     ota_status_t status = s_status;
@@ -314,18 +324,13 @@ void ota_install(void) {
         return;
     }
     audio_source_suspend(true);
-    if (status.target == OTA_TARGET_ESP32) {
-        if (xTaskCreate(esp32_install_task, "esp32_fw", INSTALL_TASK_STACK, NULL, 3, NULL) != pdPASS) {
-            fail("Out of memory");
-        }
-        return;
+    // Both installs write flash, which a PSRAM stack (the LVGL task's)
+    // can't do, so they get a task of their own.
+    bool esp32 = status.target == OTA_TARGET_ESP32;
+    if (xTaskCreate(esp32 ? esp32_install_task : s3_install_task, esp32 ? "esp32_fw" : "s3_fw",
+                    INSTALL_TASK_STACK, NULL, 3, NULL) != pdPASS) {
+        fail("Out of memory");
     }
-    if (esp_ota_set_boot_partition(s_s3.part) != ESP_OK) {
-        fail("Couldn't switch to the new firmware");
-        return;
-    }
-    ESP_LOGI(TAG, "restarting into %s", status.version);
-    esp_restart();
 }
 
 void ota_decline(void) {

@@ -56,7 +56,10 @@
 // Core 1, away from WiFi/lwIP on core 0, and above the knob and UART tasks
 // so input-driven redraws aren't held up. Kept below AirPlay's RTP (8) and
 // player (15) tasks on the same core: a full-screen render takes ~27 ms,
-// and audio must never wait on it.
+// and audio must never wait on it. The stack is in PSRAM, leaving internal
+// RAM to audio and WiFi; so nothing on this task may touch flash, reads
+// included (the cache is off meanwhile): UI handlers hand that to a task
+// with an internal stack.
 #define LVGL_TASK_STACK 8192
 #define LVGL_TASK_PRIO 7
 #define LVGL_TASK_CORE 1
@@ -438,7 +441,10 @@ void lcd_driver_init(void) {
 
     touch_init(disp);
 
-    xTaskCreatePinnedToCore(lvgl_task, "lvgl", LVGL_TASK_STACK, NULL, LVGL_TASK_PRIO, NULL, LVGL_TASK_CORE);
+    ESP_ERROR_CHECK(xTaskCreatePinnedToCoreWithCaps(lvgl_task, "lvgl", LVGL_TASK_STACK, NULL, LVGL_TASK_PRIO, NULL,
+                                                    LVGL_TASK_CORE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS
+                        ? ESP_OK
+                        : ESP_ERR_NO_MEM);
 
     ESP_LOGI(TAG, "LCD + touch initialized (%dx%d, %d MHz QSPI)", LCD_H_RES, LCD_V_RES, CONFIG_AK_LCD_PCLK_MHZ);
 }
