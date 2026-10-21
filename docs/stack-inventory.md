@@ -230,3 +230,11 @@ callbacks run on the existing LVGL PSRAM stack. Its dedicated 3 KiB internal
 stack and TCB are gone; the ring and decoder state add static internal storage,
 so 3 KiB is the stack saving, not the total net RAM saving. No high-water-based
 stack trimming was performed. Physical encoder validation remains outstanding.
+
+
+`airplay_ctrl` now has USB-board measurements in
+[airplay-ctrl-stack-measurements.md](airplay-ctrl-stack-measurements.md):
+3,020 bytes estimated peak on its retained 6 KiB stack after a real Apple
+Music AirPlay 2 buffered-stream/MediaRemote test (AirPlay 1 previously reached
+2,748). Diagnostic logging is included; no reservation was reduced. A nonfatal
+AAC decoder CPU watchdog warning was also captured and documented separately.

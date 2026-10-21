@@ -230,8 +230,18 @@ static void start_receiver(void) {
     }
 }
 
+// ESP-IDF reports stack high-water marks in bytes. Keep the original
+// reservation while measuring startup/key parsing and live DACP traffic.
+// Later samples also include this logger's own stack use (conservative).
+static void ctrl_stack_log(const char *stage) {
+    unsigned free_bytes = (unsigned)uxTaskGetStackHighWaterMark(NULL);
+    ESP_LOGI(TAG, "airplay_ctrl stack: stage=%s reserved=%u min_free=%u peak_used=%u bytes",
+             stage, (unsigned)CTRL_STACK_SIZE, free_bytes, (unsigned)CTRL_STACK_SIZE - free_bytes);
+}
+
 static void ctrl_task(void *arg) {
     (void)arg;
+    ctrl_stack_log("task_start");
     for (;;) {
         uint32_t bits = 0;
         xTaskNotifyWait(0, UINT32_MAX, &bits, portMAX_DELAY);
@@ -242,38 +252,51 @@ static void ctrl_task(void *arg) {
             ESP_ERROR_CHECK(mdns_init());
             advertise_name(name);
             s_net_up = true;
+            ctrl_stack_log("mdns_start");
         }
         if (!s_net_up) {
             continue;
         }
         if (bits & CTRL_RENAME) {
             advertise_name(name);
+            ctrl_stack_log("advertise_rename");
         }
         if (!s_raop) {
             start_receiver();
+            ctrl_stack_log("receiver_create");
             continue;
         }
 
         if (bits & CTRL_RENAME) {
             raop_set_name(s_raop, name);
+            ctrl_stack_log("receiver_rename");
         }
 
-        if ((bits & CTRL_PAUSE) && !raop_remote_command(s_raop, "pause")) {
-            // No way to ask the sender to stop: drop it rather than leave it
-            // streaming into a DAC it no longer owns.
-            raop_abort(s_raop);
+        if (bits & CTRL_PAUSE) {
+            bool paused = raop_remote_command(s_raop, "pause");
+            ctrl_stack_log("remote_pause");
+            if (!paused) {
+                // No way to ask the sender to stop: drop it rather than leave it
+                // streaming into a DAC it no longer owns.
+                raop_abort(s_raop);
+                ctrl_stack_log("receiver_abort");
+            }
         }
         if (bits & CTRL_PLAY_PAUSE) {
             raop_remote_command(s_raop, "playpause");
+            ctrl_stack_log("remote_playpause");
         }
         if (bits & CTRL_NEXT) {
             raop_remote_command(s_raop, "nextitem");
+            ctrl_stack_log("remote_nextitem");
         }
         if (bits & CTRL_PREV) {
             raop_remote_command(s_raop, "previtem");
+            ctrl_stack_log("remote_previtem");
         }
         if (bits & CTRL_VOLUME) {
             raop_remote_volume(s_raop, s_pending_volume / 100.0f);
+            ctrl_stack_log("remote_volume");
         }
     }
 }
