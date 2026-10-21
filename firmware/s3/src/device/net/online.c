@@ -15,7 +15,6 @@
 #include "weather.h"
 
 #define BODY_CAP           8192
-#define LOCATION_REFRESH_S (12 * 3600)
 #define WEATHER_REFRESH_S  (15 * 60)
 #define RETRY_MIN_S        30
 #define RETRY_MAX_S        (10 * 60)
@@ -36,7 +35,10 @@ static struct {
     bool have_detected;
     geo_t manual;
     bool have_manual;
-    bool manual_dirty; // not yet written to NVS
+    bool detected_dirty; // not yet written to NVS
+    bool manual_dirty;
+    uint32_t detect_requested;
+    uint32_t detect_completed;
     uint32_t version;
 } s_loc = {.version = 1};
 static ui_weather_t s_weather;
@@ -59,54 +61,77 @@ static void load_cache(void) {
 }
 
 // NULL erases the key.
-static void save_blob(const char *key, const geo_t *geo) {
+static bool save_blob(const char *key, const geo_t *geo) {
     nvs_handle_t nvs;
     if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) != ESP_OK) {
         ESP_LOGW(TAG, "can't open NVS");
-        return;
+        return false;
     }
-    if (geo) {
-        nvs_set_blob(nvs, key, geo, sizeof(*geo));
-    } else {
-        nvs_erase_key(nvs, key);
+    esp_err_t err = geo ? nvs_set_blob(nvs, key, geo, sizeof(*geo)) : nvs_erase_key(nvs, key);
+    if (!geo && err == ESP_ERR_NVS_NOT_FOUND) {
+        err = ESP_OK;
     }
-    nvs_commit(nvs);
+    if (err == ESP_OK) {
+        err = nvs_commit(nvs);
+    }
     nvs_close(nvs);
+    return err == ESP_OK;
 }
 
 // Flash writes stall both cores' caches, so the UI and web handlers leave
-// them to this task.
-static void save_manual_if_dirty(void) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool dirty = s_loc.manual_dirty;
-    bool have = s_loc.have_manual;
-    geo_t manual = s_loc.manual;
-    s_loc.manual_dirty = false;
-    xSemaphoreGive(s_lock);
-    if (dirty) {
-        save_blob("manual", have ? &manual : NULL);
+// them to this task. Retain failed writes and changes arriving during a write.
+static bool save_cache(void) {
+    bool saved = true;
+    for (int i = 0; i < 2; i++) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        bool dirty = i ? s_loc.manual_dirty : s_loc.detected_dirty;
+        bool have = i ? s_loc.have_manual : s_loc.have_detected;
+        geo_t geo = i ? s_loc.manual : s_loc.detected;
+        xSemaphoreGive(s_lock);
+        if (!dirty) {
+            continue;
+        }
+        if (!save_blob(i ? "manual" : "detected", have ? &geo : NULL)) {
+            saved = false;
+            continue;
+        }
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        bool same = have == (i ? s_loc.have_manual : s_loc.have_detected) &&
+                    (!have || !memcmp(&geo, i ? &s_loc.manual : &s_loc.detected, sizeof(geo)));
+        if (same) {
+            if (i) {
+                s_loc.manual_dirty = false;
+            } else {
+                s_loc.detected_dirty = false;
+            }
+        } else {
+            saved = false;
+        }
+        xSemaphoreGive(s_lock);
     }
+    return saved;
 }
 
-static bool manual_active(void) {
+static bool detection_needed(uint32_t *request) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool manual = s_loc.have_manual;
+    *request = s_loc.detect_requested;
+    bool needed = s_loc.detect_requested != s_loc.detect_completed ||
+                  (!s_loc.have_manual && !s_loc.have_detected);
     xSemaphoreGive(s_lock);
-    return manual;
+    return needed;
 }
 
-static void set_detected(const geo_t *fresh) {
+static void set_detected(const geo_t *fresh, uint32_t request) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     bool moved = !s_loc.have_detected || memcmp(fresh, &s_loc.detected, sizeof(*fresh)) != 0;
     s_loc.detected = *fresh;
     s_loc.have_detected = true;
+    s_loc.detect_completed = request;
+    s_loc.detected_dirty |= moved;
     if (moved && !s_loc.have_manual) {
         s_loc.version++;
     }
     xSemaphoreGive(s_lock);
-    if (moved) {
-        save_blob("detected", fresh);
-    }
 }
 
 static void set_weather(const ui_weather_t *w) {
@@ -150,68 +175,77 @@ static void online_task(void *arg) {
     set_weather_status("Waiting for network");
     xSemaphoreTake(s_network_up, portMAX_DELAY);
 
-    bool located = false; // by IP since boot, not just from the cache
-    uint32_t weather_for = 0; // location version the forecast is for
+    uint32_t weather_for = 0;
+    uint32_t last_request = 0;
+    uint32_t last_location = 0;
     int64_t geo_due = 0;
     int64_t weather_due = 0;
-    int retry_s = RETRY_MIN_S;
+    int geo_retry_s = RETRY_MIN_S;
+    int weather_retry_s = RETRY_MIN_S;
 
     for (;;) {
-        save_manual_if_dirty();
         int64_t now = now_s();
-        bool failed = false;
-        bool manual = manual_active();
+        uint32_t request;
+        bool locate = detection_needed(&request);
         geo_t geo;
-
-        // A manual location needs no lookup; a cached one is refreshed.
-        if (!manual && now >= geo_due) {
-            bool known = online_get_location(&geo, NULL) != 0;
-            if (!known) {
+        uint32_t version = online_get_location(&geo, NULL);
+        // A fresh Settings request (or returning to auto without a cache)
+        // wakes a lookup immediately, including during a previous backoff.
+        if (request != last_request || version != last_location) {
+            geo_due = now;
+            geo_retry_s = RETRY_MIN_S;
+        }
+        last_request = request;
+        last_location = version;
+        if (locate && now >= geo_due) {
+            if (!version) {
                 set_weather_status("Locating\xE2\x80\xA6");
             }
             geo_t fresh = {0};
             if (geo_lookup(&fresh, buf, BODY_CAP)) {
-                set_detected(&fresh);
-                located = true;
-                geo_due = now + LOCATION_REFRESH_S;
-            } else if (known) {
-                // Keep the old location; a cached one is retried sooner.
-                geo_due = now + (located ? LOCATION_REFRESH_S : RETRY_MAX_S);
+                set_detected(&fresh, request);
+                geo_retry_s = RETRY_MIN_S;
+                geo_due = 0;
             } else {
                 set_weather_status("Can't find location");
-                failed = true;
+                geo_due = now_s() + geo_retry_s;
+                geo_retry_s = geo_retry_s * 2 > RETRY_MAX_S ? RETRY_MAX_S : geo_retry_s * 2;
             }
         }
 
-        uint32_t version = online_get_location(&geo, NULL);
+        bool saved = save_cache();
+        now = now_s();
+        version = online_get_location(&geo, NULL);
+        // Record the requested version even on failure, so another wakeup
+        // does not bypass the weather retry deadline.
         if (version != weather_for) {
+            weather_for = version;
             weather_due = now;
+            weather_retry_s = RETRY_MIN_S;
         }
         if (version && now >= weather_due) {
             ui_weather_t w = {.valid = true};
             snprintf(w.place, sizeof(w.place), "%s", geo.city);
             if (weather_fetch(geo.lat, geo.lon, &w, buf, BODY_CAP)) {
-                // Optional: without it the forecast still shows, and the next
-                // refresh tries again.
+                // Optional: retry air quality at the next weather refresh.
                 air_quality_fetch(geo.lat, geo.lon, &w, buf, BODY_CAP);
                 set_weather(&w);
-                weather_for = version;
-                weather_due = now + WEATHER_REFRESH_S;
+                weather_due = now_s() + WEATHER_REFRESH_S;
+                weather_retry_s = RETRY_MIN_S;
             } else {
                 set_weather_status("Weather unavailable");
-                failed = true;
+                weather_due = now_s() + weather_retry_s;
+                weather_retry_s = weather_retry_s * 2 > RETRY_MAX_S ? RETRY_MAX_S : weather_retry_s * 2;
             }
         }
 
-        if (failed) {
-            wait_s(retry_s);
-            retry_s = retry_s * 2 > RETRY_MAX_S ? RETRY_MAX_S : retry_s * 2;
-            continue;
-        }
-        retry_s = RETRY_MIN_S;
-        int64_t next = weather_due;
-        if (!manual_active() && geo_due < next) {
+        // Without selected coordinates there is no weather deadline yet.
+        int64_t next = version ? weather_due : now_s() + RETRY_MAX_S;
+        if (detection_needed(&request) && geo_due < next) {
             next = geo_due;
+        }
+        if (!saved && now_s() + RETRY_MIN_S < next) {
+            next = now_s() + RETRY_MIN_S;
         }
         wait_s(next - now_s());
     }
@@ -246,6 +280,13 @@ uint32_t online_get_location(geo_t *out, bool *manual) {
     uint32_t v = s_loc.have_manual || s_loc.have_detected ? s_loc.version : 0;
     xSemaphoreGive(s_lock);
     return v;
+}
+
+void online_detect_location(void) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_loc.detect_requested++;
+    xSemaphoreGive(s_lock);
+    xTaskNotifyGive(s_task);
 }
 
 void online_set_location(const geo_t *manual) {

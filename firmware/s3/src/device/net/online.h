@@ -24,5 +24,10 @@ uint32_t online_get_location(geo_t *out, bool *manual);
 uint32_t online_get_weather(ui_weather_t *out);
 
 // Pins the location (e.g. picked on the web page), or with NULL goes back to
-// the IP-detected one. Persisted, and the forecast follows at once.
+// the saved IP-detected one, without refreshing it. If neither location exists,
+// detection retries with backoff until successful. The forecast follows at once.
 void online_set_location(const geo_t *manual);
+
+// Explicit Settings action: refresh the detected cache, retrying on failure.
+// A manual selection continues to override it.
+void online_detect_location(void);

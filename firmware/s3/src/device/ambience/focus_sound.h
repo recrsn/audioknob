@@ -9,7 +9,10 @@
 // played through audio_out. Playing claims the DAC as audio_source's local
 // source -- pausing A2DP, preempting AirPlay -- and a stream that starts
 // meanwhile stops them at once ("last to start playing wins"). Safe from
-// any task.
+// any task, including Pomodoro: the ambience app owns the worker and state,
+// rather than restricting who may request playback. The worker, synth and
+// render buffers exist only on demand, through fade-out or source preemption.
+// Allocation failure logs a warning and clears playing; a later play can retry.
 
 void focus_sound_init(void);
 

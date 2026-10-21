@@ -57,6 +57,7 @@ typedef enum {
     ROW_TIMER_VOLUME,
     ROW_CLOCK,
     ROW_LOCATION,
+    ROW_DETECT_LOCATION,
     ROW_TIMEZONE,
     ROW_UNITS,
     ROW_AIR,
@@ -92,6 +93,7 @@ static const struct {
     [ROW_TIMER_VOLUME] = {"Timer volume", KIND_VALUE},
     [ROW_CLOCK] = {"Clock", KIND_VALUE},
     [ROW_LOCATION] = {"Auto location", KIND_SWITCH},
+    [ROW_DETECT_LOCATION] = {"Detect again", KIND_VALUE},
     [ROW_TIMEZONE] = {"Timezone", KIND_VALUE},
     [ROW_UNITS] = {"Units", KIND_VALUE},
     [ROW_AIR] = {"Show air quality", KIND_VALUE},
@@ -125,6 +127,7 @@ static const struct {
     HEADER("TIME AND WEATHER"),
     {NULL, ROW_CLOCK},
     {NULL, ROW_LOCATION},
+    {NULL, ROW_DETECT_LOCATION},
     {NULL, ROW_TIMEZONE},
     {NULL, ROW_UNITS},
     {NULL, ROW_AIR},
@@ -194,6 +197,10 @@ static void emit(ui_setting_t setting, int value, const char *zone) {
 
 void ui_settings_change(ui_setting_t setting, int value) {
     emit(setting, value, NULL);
+}
+
+static bool row_visible(int row) {
+    return row != ROW_DETECT_LOCATION || s_settings.location_auto;
 }
 
 // "America/Argentina/Buenos_Aires" -> "Buenos Aires": the city is what
@@ -427,7 +434,7 @@ static void center_row(int row, lv_anim_enable_t anim) {
 }
 
 static void select_row(int row, bool scroll) {
-    if (row < 0 || row >= ROW_COUNT) {
+    if (row < 0 || row >= ROW_COUNT || !row_visible(row)) {
         return;
     }
     if (row != st.selected) {
@@ -449,7 +456,7 @@ static int row_after(int row, int steps) {
     int dir = steps > 0 ? 1 : -1;
     for (int n = steps > 0 ? steps : -steps; n > 0; n--) {
         int next = pos + dir;
-        while (next >= 0 && next < (int)LAYOUT_COUNT && k_layout[next].row < 0) {
+        while (next >= 0 && next < (int)LAYOUT_COUNT && (k_layout[next].row < 0 || !row_visible(k_layout[next].row))) {
             next += dir;
         }
         if (next < 0 || next >= (int)LAYOUT_COUNT) {
@@ -534,7 +541,15 @@ void ui_update_settings(const ui_settings_t *settings) {
         return;
     }
     bool url_changed = strcmp(settings->ip, s_settings.ip) || strcmp(settings->hostname, s_settings.hostname);
+    bool layout_changed = settings->location_auto != s_settings.location_auto;
     s_settings = *settings;
+    if (layout_changed && st.list) {
+        lv_obj_set_flag(st.rows[ROW_DETECT_LOCATION], LV_OBJ_FLAG_HIDDEN, !row_visible(ROW_DETECT_LOCATION));
+        if (!row_visible(st.selected)) {
+            st.selected = ROW_LOCATION;
+        }
+        center_row(st.selected, LV_ANIM_OFF);
+    }
     render();
     if (st.qr_overlay && url_changed) {
         // Dropped off WiFi: the code would point nowhere.
@@ -661,6 +676,9 @@ static void activate(void) {
             qr_open(lv_obj_get_screen(st.list), "Set location on your phone");
         }
         break;
+    case ROW_DETECT_LOCATION:
+        emit(UI_SETTING_DETECT_LOCATION, 0, NULL);
+        break;
     case ROW_NAME:
     case ROW_WEB:
         if (s->ip[0]) {
@@ -730,6 +748,9 @@ static void list_scroll_end_cb(lv_event_t *e) {
     int best = st.selected;
     int32_t best_dist = INT32_MAX;
     for (int i = 0; i < ROW_COUNT; i++) {
+        if (!row_visible(i)) {
+            continue;
+        }
         lv_obj_get_coords(st.rows[i], &a);
         int32_t dist = LV_ABS((a.y1 + a.y2) / 2 - mid);
         if (dist < best_dist) {
@@ -902,6 +923,7 @@ void settings_page_build(lv_obj_t *screen) {
         st.items[i] = k_layout[i].row < 0 ? header_create(st.list, k_layout[i].header)
                                           : row_create(st.list, k_layout[i].row);
     }
+    lv_obj_set_flag(st.rows[ROW_DETECT_LOCATION], LV_OBJ_FLAG_HIDDEN, !row_visible(ROW_DETECT_LOCATION));
     edit_bar_create(screen);
     lv_obj_add_event_cb(screen, screen_unloaded_cb, LV_EVENT_SCREEN_UNLOADED, NULL);
 

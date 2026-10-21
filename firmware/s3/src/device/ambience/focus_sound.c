@@ -1,5 +1,7 @@
 #include "focus_sound.h"
 
+#include <stdlib.h>
+
 #include "audio_out.h"
 #include "audio_source.h"
 #include "esp_heap_caps.h"
@@ -28,6 +30,9 @@
 
 static const char *TAG = "focus_sound";
 
+// Serializes task publication/retirement with callers. Never held while
+// waiting for the audio write barrier or claiming/releasing a source.
+static SemaphoreHandle_t s_control;
 static TaskHandle_t s_task;
 static ambience_synth_t *s_synth;
 // Held around each chunk's render and write, so a preempting stream knows
@@ -65,7 +70,6 @@ static void on_preempted(void) {
     if (xSemaphoreTake(s_write_lock, pdMS_TO_TICKS(PREEMPT_WAIT_MS)) == pdTRUE) {
         xSemaphoreGive(s_write_lock);
     }
-    xTaskNotifyGive(s_task);
     if (was) {
         ESP_LOGI(TAG, "a stream started: stopping");
     }
@@ -126,12 +130,41 @@ static void start(player_t *p, ambience_kind_t kind) {
 
 static void player_task(void *arg) {
     (void)arg;
+    // Playback resources belong to this worker, including on allocation failure.
+    s_synth = ambience_synth_create(AUDIO_OUT_SAMPLE_RATE, esp_random());
+    s_buf = heap_caps_malloc(CHUNK_FRAMES * 2 * sizeof(*s_buf), MALLOC_CAP_SPIRAM);
+    s_pcm = heap_caps_malloc(CHUNK_FRAMES * 2 * sizeof(*s_pcm), MALLOC_CAP_SPIRAM);
+    if (!s_synth || !s_buf || !s_pcm) {
+        ESP_LOGW(TAG, "cannot allocate playback buffers");
+        focus_sound_stop();
+    }
     player_t p = {0};
     const float fs = AUDIO_OUT_SAMPLE_RATE;
 
     for (;;) {
         if (!p.running) {
-            ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+            xSemaphoreTake(s_control, portMAX_DELAY);
+            taskENTER_CRITICAL(&s_lock);
+            bool buffers_ok = s_synth && s_buf && s_pcm;
+            if (!buffers_ok) {
+                s_want = false;
+            }
+            bool retire = !s_want;
+            taskEXIT_CRITICAL(&s_lock);
+            if (retire) {
+                free(s_synth);
+                free(s_buf);
+                free(s_pcm);
+                s_synth = NULL;
+                s_buf = NULL;
+                s_pcm = NULL;
+                // No shared playback state may be touched after publication.
+                s_task = NULL;
+                xSemaphoreGive(s_control);
+                vTaskDelete(NULL);
+                return;
+            }
+            xSemaphoreGive(s_control);
         }
         taskENTER_CRITICAL(&s_lock);
         bool want = s_want, preempted = s_preempted;
@@ -185,30 +218,36 @@ static void player_task(void *arg) {
 }
 
 void focus_sound_init(void) {
-    s_synth = ambience_synth_create(AUDIO_OUT_SAMPLE_RATE, esp_random());
+    s_control = xSemaphoreCreateMutex();
     s_write_lock = xSemaphoreCreateMutex();
-    s_buf = heap_caps_malloc(CHUNK_FRAMES * 2 * sizeof(*s_buf), MALLOC_CAP_SPIRAM);
-    s_pcm = heap_caps_malloc(CHUNK_FRAMES * 2 * sizeof(*s_pcm), MALLOC_CAP_SPIRAM);
-    ESP_ERROR_CHECK(s_synth && s_write_lock && s_buf && s_pcm ? ESP_OK : ESP_ERR_NO_MEM);
+    ESP_ERROR_CHECK(s_control && s_write_lock ? ESP_OK : ESP_ERR_NO_MEM);
     audio_source_set_local_preempted(on_preempted);
-    BaseType_t ok = xTaskCreatePinnedToCore(player_task, "focus_sound", TASK_STACK, NULL, TASK_PRIO, &s_task,
-                                            TASK_CORE);
-    ESP_ERROR_CHECK(ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }
 
 void focus_sound_play(ambience_kind_t kind) {
+    if ((unsigned)kind >= AMBIENCE_COUNT) {
+        return;
+    }
+    xSemaphoreTake(s_control, portMAX_DELAY);
     taskENTER_CRITICAL(&s_lock);
     s_want = true;
     s_kind = kind;
     taskEXIT_CRITICAL(&s_lock);
-    xTaskNotifyGive(s_task);
+    if (!s_task && xTaskCreatePinnedToCore(player_task, "focus_sound", TASK_STACK, NULL,
+                                         TASK_PRIO, &s_task, TASK_CORE) != pdPASS) {
+        s_task = NULL;
+        taskENTER_CRITICAL(&s_lock);
+        s_want = false;
+        taskEXIT_CRITICAL(&s_lock);
+        ESP_LOGW(TAG, "cannot create playback worker");
+    }
+    xSemaphoreGive(s_control);
 }
 
 void focus_sound_stop(void) {
     taskENTER_CRITICAL(&s_lock);
     s_want = false;
     taskEXIT_CRITICAL(&s_lock);
-    xTaskNotifyGive(s_task);
 }
 
 void focus_sound_set_volume(uint8_t pct) {

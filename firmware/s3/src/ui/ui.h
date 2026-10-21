@@ -313,7 +313,7 @@ typedef enum {
     UI_SETTING_CHECK_UPDATES,
     UI_SETTING_BLUETOOTH,  // value: 0/1
     UI_SETTING_SLEEP,      // value: seconds, 0-UI_SLEEP_MAX_S; 0 = never
-    UI_SETTING_LOCATION,   // back to the IP-detected one; picking one is the web page's
+    UI_SETTING_LOCATION,   // back to the saved IP-detected one; picking one is the web page's
     UI_SETTING_ART_COLORS, // value: 0/1
     UI_SETTING_AIR_SHOW,   // value: ui_air_show_t
     UI_SETTING_AMBIENCE_SOUND,  // value: ui_ambience_t
@@ -321,6 +321,7 @@ typedef enum {
     UI_SETTING_FOCUS_SOUND,     // value: ui_ambience_t + 1, or 0 for none
     UI_SETTING_TIMER_SOUND,  // value: UI_TIMER_SOUND_*
     UI_SETTING_TIMER_VOLUME, // value: UI_TIMER_VOLUME_MIN-100
+    UI_SETTING_DETECT_LOCATION, // explicitly refresh the saved automatic location
 } ui_setting_t;
 
 typedef enum {
