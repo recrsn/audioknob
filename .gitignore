@@ -7,3 +7,4 @@ logs/
 .claude/
 # tools/dev_flash.py, for the length of a dev build
 firmware/s3/src/core/dev_local.h
+__pycache__/

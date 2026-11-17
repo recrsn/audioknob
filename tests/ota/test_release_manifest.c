@@ -92,7 +92,12 @@ int main(void) {
     assert(!release_version_newer("v1.9.9", "1.10.0"));
     assert(release_version_newer("v2.0.0", "1.99.99"));
     assert(!release_version_newer("v1.0.0", "2.0.0"));
-    assert(release_version_newer("v1.2.3", "abc1234-dirty"));
+    assert(!release_version_newer("v1.2.3", "abc1234-dirty"));
     assert(!release_version_newer("abc1234", "abc1234"));
+    assert(!release_version_newer("v0.1.6", "v0.1.6-16-gb9c4d53-dirty"));
+    assert(!release_version_newer("v0.1.6", "v0.1.6-dirty"));
+    assert(!release_version_newer("v0.1.5", "v0.1.6-2-gabc1234"));
+    assert(release_version_newer("v0.1.7", "v0.1.6-16-gb9c4d53-dirty"));
+    assert(!release_version_newer("v0.1.7-rc1", "0.1.6"));
     puts("Release manifest validation and version comparisons passed");
 }

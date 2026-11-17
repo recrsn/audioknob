@@ -7,7 +7,9 @@
 
 static const char *version(const char *s) { return s[0] == 'v' ? s + 1 : s; }
 
-static bool numeric_version(const char *s, unsigned long parts[3]) {
+/* X.Y.Z, optionally followed by a git-describe suffix ("-16-gb9c4d53-dirty") when
+ * `allow_suffix` is set. */
+static bool numeric_version(const char *s, unsigned long parts[3], bool allow_suffix) {
     s = version(s);
     for (unsigned i = 0; i < 3; i++) {
         if (*s < '0' || *s > '9') {
@@ -19,7 +21,7 @@ static bool numeric_version(const char *s, unsigned long parts[3]) {
             return false;
         }
         if (i == 2) {
-            return !*end;
+            return !*end || (allow_suffix && *end == '-');
         }
         if (*end != '.') {
             return false;
@@ -29,13 +31,12 @@ static bool numeric_version(const char *s, unsigned long parts[3]) {
     return false;
 }
 
+/* A dev build (commits past a tag, a dirty tree, or no tag at all) is never older than
+ * the release it was built from, so only a strictly higher release is offered to it. */
 bool release_version_newer(const char *release, const char *running) {
-    if (!strcmp(version(release), version(running))) {
-        return false;
-    }
     unsigned long a[3], b[3];
-    if (!numeric_version(release, a) || !numeric_version(running, b)) {
-        return true;
+    if (!numeric_version(release, a, false) || !numeric_version(running, b, true)) {
+        return false;
     }
     for (unsigned i = 0; i < 3; i++) {
         if (a[i] != b[i]) {
