@@ -40,6 +40,18 @@ static SemaphoreHandle_t s_write_lock;
 static audio_out_mix_t s_mix;
 static int32_t s_mix_buf[AUDIO_OUT_MIX_FRAMES * 2];
 
+// DMA buffers the driver sent with nothing new in them (auto_clear plays
+// silence): a writer that fell behind, or no writer at all.
+static volatile uint32_t s_dry_buffers;
+
+static bool IRAM_ATTR on_send_q_ovf(i2s_chan_handle_t handle, i2s_event_data_t *event, void *ctx) {
+    (void)handle;
+    (void)event;
+    (void)ctx;
+    s_dry_buffers++;
+    return false;
+}
+
 static bool IRAM_ATTR on_sent(i2s_chan_handle_t handle, i2s_event_data_t *event, void *ctx) {
     (void)handle;
     (void)ctx;
@@ -69,7 +81,7 @@ void audio_out_init(void) {
         },
     };
     ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_tx_chan, &std_cfg));
-    const i2s_event_callbacks_t callbacks = {.on_sent = on_sent};
+    const i2s_event_callbacks_t callbacks = {.on_sent = on_sent, .on_send_q_ovf = on_send_q_ovf};
     ESP_ERROR_CHECK(i2s_channel_register_event_callback(s_tx_chan, &callbacks, NULL));
     ESP_ERROR_CHECK(i2s_channel_enable(s_tx_chan));
     ESP_LOGI(TAG, "I2S TX ready (BCK=%d WS=%d DOUT=%d)", I2S_BCK_GPIO, I2S_WS_GPIO, I2S_DOUT_GPIO);
@@ -189,6 +201,10 @@ uint32_t audio_out_queued_us(int64_t *now_us) {
     // the one playing has already been heard.
     queued = queued > DMA_FRAME_NUM / 2 ? queued - DMA_FRAME_NUM / 2 : 0;
     return (uint32_t)(queued * 1000000 / s_rate);
+}
+
+uint32_t audio_out_dry_buffers(void) {
+    return s_dry_buffers;
 }
 
 uint32_t audio_out_underruns(void) {

@@ -116,10 +116,13 @@ lv_obj_t *ui_glyph_pill_create(lv_obj_t *parent, const char *icon, lv_color_t ti
     return label;
 }
 
-lv_obj_t *ui_marquee_label_create(lv_obj_t *parent, const lv_font_t *font, lv_color_t color) {
+// Not scrolled: a scrolling label redraws over the background every frame,
+// which cost the now-playing screen ~30% of core 1 for one long title.
+lv_obj_t *ui_line_label_create(lv_obj_t *parent, const lv_font_t *font, lv_color_t color) {
     lv_obj_t *label = lv_label_create(parent);
-    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_SCROLL_CIRCULAR);
-    lv_obj_set_width(label, UI_TEXT_W);
+    lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
+    // One line high, or the dots never come: the label would wrap instead.
+    lv_obj_set_size(label, UI_TEXT_W, lv_font_get_line_height(font));
     lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_font(label, font, 0);
     lv_obj_set_style_text_color(label, color, 0);
@@ -159,6 +162,40 @@ lv_obj_t *ui_round_button_create(lv_obj_t *parent, const char *symbol, int32_t s
 void ui_label_set_text(lv_obj_t *label, const char *text) {
     if (strcmp(lv_label_get_text(label), text) != 0) {
         lv_label_set_text(label, text);
+    }
+}
+
+static bool local_is(lv_obj_t *obj, lv_style_prop_t prop, int32_t num) {
+    lv_style_value_t v;
+    return lv_obj_get_local_style_prop(obj, prop, &v, 0) == LV_STYLE_RES_FOUND && v.num == num;
+}
+
+static bool local_color_is(lv_obj_t *obj, lv_style_prop_t prop, lv_color_t color) {
+    lv_style_value_t v;
+    return lv_obj_get_local_style_prop(obj, prop, &v, 0) == LV_STYLE_RES_FOUND && lv_color_eq(v.color, color);
+}
+
+void ui_image_set_src(lv_obj_t *img, const void *src) {
+    if (lv_image_get_src(img) != src) {
+        lv_image_set_src(img, src);
+    }
+}
+
+void ui_set_text_color(lv_obj_t *obj, lv_color_t color) {
+    if (!local_color_is(obj, LV_STYLE_TEXT_COLOR, color)) {
+        lv_obj_set_style_text_color(obj, color, 0);
+    }
+}
+
+void ui_set_image_recolor(lv_obj_t *obj, lv_color_t color) {
+    if (!local_color_is(obj, LV_STYLE_IMAGE_RECOLOR, color)) {
+        lv_obj_set_style_image_recolor(obj, color, 0);
+    }
+}
+
+void ui_set_opa(lv_obj_t *obj, lv_opa_t opa) {
+    if (!local_is(obj, LV_STYLE_OPA, opa)) {
+        lv_obj_set_style_opa(obj, opa, 0);
     }
 }
 

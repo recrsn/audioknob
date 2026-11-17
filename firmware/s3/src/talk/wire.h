@@ -3,10 +3,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Opus RTP (RFC 7587): payload 96, 48 kHz timestamp clock, mono PCM16k.
-#define TALK_PAYLOAD 1275
+// Opus RTP (RFC 7587): dynamic payload 96, 48 kHz timestamp clock, mono
+// 16 kHz PCM, 20 ms a packet, ~24 kbit/s.
+#define TALK_RTP_TYPE 96
 #define TALK_FRAME_SAMPLES 320
-#define TALK_JITTER_FRAMES 8
+#define TALK_RTP_TICKS 960
+#define TALK_PAYLOAD 1275
+#define TALK_JITTER_FRAMES 16
 #define TALK_RTP_HEADER 12
 typedef struct {
     uint32_t ssrc, timestamp;
@@ -27,3 +30,5 @@ typedef struct {
 void talk_jitter_init(talk_jitter_t *jitter, uint16_t first);
 bool talk_jitter_push(talk_jitter_t *jitter, const talk_packet_t *packet);
 size_t talk_jitter_pop(talk_jitter_t *jitter, uint8_t *payload);
+// Whether the next frame to pop has arrived.
+bool talk_jitter_ready(const talk_jitter_t *jitter);

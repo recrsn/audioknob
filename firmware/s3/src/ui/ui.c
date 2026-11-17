@@ -5,6 +5,7 @@
 #include "ui/now_playing/now_playing.h"
 #include "ui/now_playing/switch.h"
 #include "ui/shell/audio_chip.h"
+#include "ui/shell/volume_ring.h"
 #include "ui/shell/launcher.h"
 #include "ui/shell/nav.h"
 #include "ui/shell/sleep.h"
@@ -90,6 +91,8 @@ void ui_init(void) {
     home_build();
     np_build();
     switch_build();
+    // Below the chip and the launcher on lv_layer_top().
+    volume_ring_build();
     audio_chip_build();
     launcher_build(&(launcher_handlers_t){.open = nav_launcher_open,
                                           .dismissed = nav_go_home,
@@ -104,12 +107,13 @@ void ui_init(void) {
 }
 
 void ui_update_talk(const ui_talk_t *talk) {
-    static bool receiving;
-    bool incoming = talk->state == UI_TALK_RECEIVING;
+    static bool was_ringing;
+    bool ringing = talk->state == UI_TALK_RINGING;
     ui_talk_page_update(talk);
-    if (incoming && !receiving && !ui_firmware_visible() && !ui_pairing_visible() && !ui_tools_alerting()) {
+    // A ringing call brings its page forward to be answered.
+    if (ringing && !was_ringing && !ui_firmware_visible() && !ui_pairing_visible() && !ui_tools_alerting()) {
         ui_wake();
         nav_open_app(UI_APP_TALK);
     }
-    receiving = incoming;
+    was_ringing = ringing;
 }

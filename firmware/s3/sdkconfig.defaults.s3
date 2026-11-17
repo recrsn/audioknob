@@ -73,3 +73,7 @@ CONFIG_MBEDTLS_HKDF_C=y
 # SPIRAM_MALLOC_ALWAYSINTERNAL lowered from 16 KB: 4 KB freed nothing
 # measurable and sends the WiFi blob's plain mallocs to PSRAM.
 CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH=y
+
+# Per-task CPU use (core/task_stats.c logs it over each Talk call).
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y

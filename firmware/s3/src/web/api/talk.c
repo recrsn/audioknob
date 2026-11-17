@@ -17,6 +17,7 @@ esp_err_t web_api_talk_get(httpd_req_t *req) {
         cJSON_AddStringToObject(p, "name", state.peers[i].name);
     }
     cJSON_AddNumberToObject(json, "state", state.state);
+    cJSON_AddNumberToObject(json, "seconds", state.seconds);
     cJSON_AddNumberToObject(json, "volume", state.volume);
     cJSON_AddStringToObject(json, "peer", state.peer);
     return web_send_json(req, json);

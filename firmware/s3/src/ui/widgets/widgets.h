@@ -34,5 +34,6 @@ lv_obj_t *ui_status_label_create(lv_obj_t *row);
 // A chip of an icons_20 glyph plus a label, which is returned.
 lv_obj_t *ui_glyph_pill_create(lv_obj_t *parent, const char *icon, lv_color_t tint, lv_event_cb_t cb,
                                void *user_data);
-lv_obj_t *ui_marquee_label_create(lv_obj_t *parent, const lv_font_t *font, lv_color_t color);
+// One centered line, cut short with an ellipsis.
+lv_obj_t *ui_line_label_create(lv_obj_t *parent, const lv_font_t *font, lv_color_t color);
 lv_obj_t *ui_glance_label_create(lv_obj_t *parent, const lv_font_t *font, lv_opa_t opa);

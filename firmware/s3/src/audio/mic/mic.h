@@ -6,7 +6,7 @@
 
 // The PDM mic (MSM261D4030H1CPM, clock GPIO45, data GPIO46) read through
 // I2S0's PDM-to-PCM filter as 16 kHz mono, with DC removed. One user at a
-// time: push-to-talk now, a memo recorder or voice assistant later.
+// time: Talk calls now, a memo recorder or voice assistant later.
 
 #define MIC_SAMPLE_RATE 16000
 
@@ -22,6 +22,7 @@
 typedef struct {
     uint8_t gain_db;
     uint8_t noise_level; // 0 off, 1 mild, 2 medium, 3 aggressive
+    bool echo_cancel; // needs mic_reference()
     bool raw;
     bool right_slot;
 } mic_config_t;
@@ -38,6 +39,11 @@ void mic_stop(void);
 // Blocks for up to timeout_ms; returns the frames read. Processed capture
 // keeps partial 10 ms blocks across calls, so callers may request any size.
 size_t mic_read(int16_t *pcm, size_t frames, uint32_t timeout_ms);
+
+// What the speaker plays, 16 kHz mono, as it goes to the DAC, for a capture
+// started with echo_cancel; any task may call it. Processing runs on its
+// own task, which waits up to 30 ms for the reference matching each chunk.
+void mic_reference(const int16_t *pcm, size_t frames);
 
 // Cost of the latest capture, as a share of one core, excluding I2S waits.
 float mic_processing_cpu_pct(void);

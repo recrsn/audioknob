@@ -9,11 +9,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "audio/alarm_sound.h"
 #include "audio/out.h"
+#include "talk/playout.h"
 #include "audio/source.h"
 #include "core/device_name.h"
-#include "encoder/impl/esp_opus_enc.h"
+#include "core/task_stats.h"
 #include "decoder/impl/esp_opus_dec.h"
+#include "encoder/impl/esp_opus_enc.h"
+#include "esp_expression_with_stack.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -21,7 +25,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "freertos/queue.h"
 #include "freertos/idf_additions.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
@@ -32,51 +35,95 @@
 #include "net/wifi/wifi.h"
 #include "airplay/shared/http_util.h"
 
-#define SESSION_MAX_US (60LL * 1000000)
-#define RECEIVE_TIMEOUT_US 500000
-#define CONNECT_TIMEOUT_US 2000000
-#define PREFILL_US 60000
+// mDNS TXT v: 2 is two-way Opus calls; knobs on 1 (hold-to-talk) aren't
+// listed.
+#define TALK_VERSION "2"
+#define CALL_LOST_US 3000000
+#define DIAL_TIMEOUT_US ((TALK_RING_MS + 5000) * 1000LL)
+// Playout delay in frames: from 60 ms, growing by however late a packet
+// came (WiFi holds frames back in bursts), to at most 200 ms; after quiet on
+// that front it shrinks a frame at a time, dropping a silent frame.
+#define DELAY_MIN 3
+#define DELAY_MAX 10
+#define SHRINK_AFTER_US 10000000
+#define QUIET_LEVEL 25 // level() of a frame under -45 dBFS
+#define PREFILL_US (DELAY_MIN * 20000)
 #define VOLUME_SAVE_US 2000000
+#define IDLE_POLL_MS 20
+// Opus encoding used ~24 KB of it. Internal RAM the LCD's SPI DMA and the
+// mic need must stay free: a 30 KB stack once left the panel unable to draw.
+#define CALL_STACK 27648
+#define CALL_HEAP_RESERVE 32768
+#define STACK_FILL 0xa5 // what esp_execute_shared_stack_function() fills with
 static const char *TAG = "talk";
+static SemaphoreHandle_t s_stack_lock;
+static uint8_t *s_call_stack;
+static size_t s_call_stack_used;
+// Worker-only.
+static int s_sock = -1;
+static struct session *s_session;
 static SemaphoreHandle_t s_lock, s_write_lock;
 static ui_talk_t s_ui = {.volume = 70};
-static uint32_t s_requested_peer;
 static bool s_abort, s_network, s_renamed;
-static int64_t s_receive_end;
-static uint32_t s_request_epoch;
 static esp_timer_handle_t s_save_timer;
-static QueueHandle_t s_incoming, s_answer;
-typedef struct {
-    uint32_t ip;
-    uint16_t port, sequence;
-    char name[33];
-    int64_t deadline;
-} incoming_t;
 
-typedef struct {
-    ui_talk_state_t state;
+// Requests from the UI, consumed by the worker.
+static uint32_t s_dial;
+static bool s_accept, s_hang_up;
+
+// An incoming call, set up by the RTSP connection task. s_ring_call is its
+// id while the call rings or runs, 0 otherwise.
+static struct {
+    uint32_t ip;
+    uint16_t port;
+    char name[33];
+} s_ring;
+static uint32_t s_ring_call, s_ring_ended, s_last_call;
+static talk_answer_t s_ring_answer;
+static uint16_t s_answer_sequence;
+static uint32_t s_answer_timestamp;
+
+typedef struct session {
+    uint32_t call; // the incoming call's id, 0 for one we dialled
     struct sockaddr_in peer;
-    uint32_t id, epoch;
+    uint32_t ssrc, peer_ssrc;
     uint16_t sequence;
     uint32_t timestamp;
     int control;
-    bool mic;
-    int64_t started, last_received, last_open, play_at;
+    bool in_call, claimed, mic, playout, ringing;
+    int64_t started, answered, last_received, play_at;
     void *encoder, *decoder;
+    task_stats_t *stats; // CPU per task over the call
     int32_t gain;
-    pcm_resampler_t resampler;
     talk_jitter_t jitter;
     int16_t pcm[TALK_FRAME_SAMPLES * 2];
-    int16_t output[900 * 2];
+    int16_t far[TALK_FRAME_SAMPLES];
+    // For the end-of-call log.
+    uint32_t frames, rx, rx_foreign, rx_bad, rx_rejected, concealed;
+    // Rejected for arriving after their slot played, by how many frames
+    // late (1-3, 4-10, more); the longest silence between arrivals.
+    uint32_t late[3];
+    int64_t gap_max_us;
+    struct sockaddr_in foreign;
+    int64_t busy_us, busy_max_us;
+    // Playout delay (frames), frames still to insert to reach it, and when
+    // a packet last came too late for it.
+    int delay, hold, delay_max;
+    int64_t last_late;
 } session_t;
 
+static void log_internal(const char *step) {
+    ESP_LOGI(TAG, "internal RAM %s: %u free, largest %u", step,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+}
 static int64_t now_us(void) {
     return esp_timer_get_time();
 }
 static void set_state(ui_talk_state_t state, const char *peer, const char *message) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_ui.state = state;
-    s_ui.level = 0;
+    s_ui.seconds = 0;
     snprintf(s_ui.peer, sizeof(s_ui.peer), "%s", peer ? peer : "");
     snprintf(s_ui.message, sizeof(s_ui.message), "%s", message ? message : "");
     xSemaphoreGive(s_lock);
@@ -86,10 +133,20 @@ void talk_get_state(ui_talk_t *out) {
     *out = s_ui;
     xSemaphoreGive(s_lock);
 }
-void talk_press(uint32_t peer, bool held) {
+void talk_call(uint32_t peer) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_requested_peer = held ? peer : 0;
-    s_request_epoch++;
+    if (!peer)
+        s_hang_up = true;
+    else if (s_ui.state == UI_TALK_IDLE)
+        s_dial = peer;
+    xSemaphoreGive(s_lock);
+}
+void talk_answer(bool accept) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_ui.state == UI_TALK_RINGING) {
+        s_accept = accept;
+        s_hang_up = !accept;
+    }
     xSemaphoreGive(s_lock);
 }
 void talk_set_volume(uint8_t volume) {
@@ -104,8 +161,7 @@ void talk_preempt(void) {
         return;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_abort = true;
-    s_requested_peer = 0;
-    s_request_epoch++;
+    s_dial = 0;
     xSemaphoreGive(s_lock);
     // The worker checks cancellation under this same lock before each write.
     xSemaphoreTake(s_write_lock, portMAX_DELAY);
@@ -124,119 +180,539 @@ static bool cancelled(void) {
     xSemaphoreGive(s_lock);
     return abort || audio_source_suspended() || audio_source_active() != AUDIO_SOURCE_TALK;
 }
+
+// The RTSP connection task's side of an incoming call.
+// The caller's first sequence goes unused: the jitter buffer starts at the
+// first packet that arrives.
+static uint32_t ring(uint32_t ip, uint16_t port, uint16_t sequence, const char *name) {
+    (void)sequence;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    uint32_t call = 0;
+    if (s_ui.state == UI_TALK_IDLE && !s_dial && !s_ring_call && !audio_source_suspended()) {
+        if (!++s_last_call)
+            s_last_call = 1;
+        call = s_ring_call = s_last_call;
+        s_ring.ip = ip;
+        s_ring.port = port;
+        snprintf(s_ring.name, sizeof(s_ring.name), "%s", name);
+        s_ring_answer = TALK_ANSWER_PENDING;
+        s_ring_ended = 0;
+        s_accept = s_hang_up = false;
+        // Set here, not by the worker, so a dial can't slip in meanwhile.
+        s_ui.state = UI_TALK_RINGING;
+        s_ui.peer_id = ip;
+            s_ui.seconds = 0;
+        snprintf(s_ui.peer, sizeof(s_ui.peer), "%s", name);
+        s_ui.message[0] = '\0';
+    }
+    xSemaphoreGive(s_lock);
+    return call;
+}
+static talk_answer_t answer(uint32_t call, uint16_t *sequence, uint32_t *timestamp) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    talk_answer_t a = call == s_ring_call ? s_ring_answer : TALK_ANSWER_DECLINED;
+    *sequence = s_answer_sequence;
+    *timestamp = s_answer_timestamp;
+    xSemaphoreGive(s_lock);
+    return a;
+}
+static void ring_stop(uint32_t call) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (call == s_ring_call)
+        s_ring_ended = call;
+    xSemaphoreGive(s_lock);
+}
+static bool ring_active(uint32_t call) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool active = call == s_ring_call && s_ring_answer == TALK_ANSWER_ACCEPTED;
+    xSemaphoreGive(s_lock);
+    return active;
+}
+
 static void finish(session_t **session, const char *message) {
     session_t *s = *session;
-    if (s) {
-        talk_rtsp_end(s->control);
-        if (s->mic)
-            mic_stop();
-        if (s->encoder)
-            esp_opus_enc_close(s->encoder);
-        if (s->decoder)
-            esp_opus_dec_close(s->decoder);
-        audio_source_release(AUDIO_SOURCE_TALK);
-        free(s);
-        *session = NULL;
+    if (!s)
+        return;
+    if (s->in_call) {
+        log_internal("at the end of the call");
+        task_stats_end(s->stats, "call");
     }
+    if (s->ringing)
+        alarm_sound_stop();
+    talk_rtsp_end(s->control);
+    // Before the mic: it feeds the echo canceller.
+    if (s->playout)
+        talk_playout_stop();
+    if (s->mic)
+        mic_stop();
+    if (s->encoder)
+        esp_opus_enc_close(s->encoder);
+    if (s->decoder)
+        esp_opus_dec_close(s->decoder);
+    if (s->claimed)
+        audio_source_release(AUDIO_SOURCE_TALK);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s->call && s->call == s_ring_call) {
+        if (s_ring_answer == TALK_ANSWER_PENDING)
+            s_ring_answer = TALK_ANSWER_DECLINED;
+        s_ring_call = 0;
+    }
+    xSemaphoreGive(s_lock);
+    ESP_LOGI(TAG, "call over: %s", message ? message : "hung up");
+    if (s->frames) {
+        ESP_LOGI(TAG, "%lu frames, %lld us busy each (max %lld); rx %lu ok, %lu from %s:%u (want :%u), %lu bad, "
+                      "%lu rejected; %lu concealed",
+                 (unsigned long)s->frames, s->busy_us / s->frames, s->busy_max_us, (unsigned long)s->rx,
+                 (unsigned long)s->rx_foreign, inet_ntoa(s->foreign.sin_addr), ntohs(s->foreign.sin_port),
+                 ntohs(s->peer.sin_port), (unsigned long)s->rx_bad, (unsigned long)s->rx_rejected,
+                 (unsigned long)s->concealed);
+        ESP_LOGI(TAG, "late %lu/%lu/%lu (1-3/4-10/more frames), longest gap %lld ms; delay %d ms, at most %d",
+                 (unsigned long)s->late[0], (unsigned long)s->late[1], (unsigned long)s->late[2],
+                 s->gap_max_us / 1000, s->delay * 20, s->delay_max * 20);
+    }
+    free(s);
+    *session = NULL;
     set_state(UI_TALK_IDLE, NULL, message);
 }
-static session_t *create_session(const struct sockaddr_in *peer, uint32_t id, ui_talk_state_t state, const char *name,
-                                 uint32_t epoch) {
+static session_t *create_session(uint32_t ip, uint16_t port, uint32_t call) {
     session_t *s = heap_caps_calloc(1, sizeof(*s), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (!s)
         return NULL;
     s->control = -1;
-    s->peer = *peer;
-    s->id = id;
-    s->state = state;
-    s->started = s->last_received = now_us();
-    s->epoch = epoch;
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_abort = false;
-    s_receive_end = 0;
-    xSemaphoreGive(s_lock);
-    if (!audio_source_claim(AUDIO_SOURCE_TALK) || cancelled()) {
-        free(s);
-        audio_source_release(AUDIO_SOURCE_TALK);
-        return NULL;
-    }
-    set_state(state, name, NULL);
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_ui.peer_id = peer->sin_addr.s_addr;
-    xSemaphoreGive(s_lock);
+    s->peer = (struct sockaddr_in){.sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = ip};
+    s->call = call;
+    s->started = now_us();
+    s->ssrc = esp_random();
+    s->sequence = (uint16_t)esp_random();
+    s->timestamp = esp_random();
     return s;
 }
-static void level(const int16_t *pcm, size_t n) {
+// -60..0 dBFS as 0-100.
+static uint8_t level(const int16_t *pcm, size_t n) {
     double sum = 0;
     for (size_t i = 0; i < n; i++)
         sum += (double)pcm[i] * pcm[i];
-    // Show -60..0 dBFS across the level ring.
     float db = 20 * log10f((float)sqrt(sum / n) / 32768.f + 0.000001f);
     int pct = (int)((db + 60) * (100.f / 60));
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_ui.level = pct < 0 ? 0 : pct > 100 ? 100 : pct;
-    xSemaphoreGive(s_lock);
+    return pct < 0 ? 0 : pct > 100 ? 100 : pct;
 }
-static bool start_encoder(session_t *s) {
-    esp_opus_enc_config_t cfg = ESP_OPUS_ENC_CONFIG_DEFAULT();
-    cfg.sample_rate = 16000;
-    cfg.channel = 1;
-    cfg.bitrate = 24000;
-    cfg.complexity = 2;
-    cfg.enable_vbr = true;
-    if (esp_opus_enc_open(&cfg, sizeof(cfg), &s->encoder) != ESP_AUDIO_ERR_OK)
-        return false;
+static bool open_codecs(session_t *s) {
+    esp_opus_enc_config_t enc = ESP_OPUS_ENC_CONFIG_DEFAULT();
+    enc.sample_rate = 16000;
+    enc.channel = 1;
+    enc.bitrate = 24000;
+    enc.complexity = 0; // ~4 ms a frame on an internal stack; 2 took ~7
+    enc.enable_vbr = true;
     int input, output;
-    if (esp_opus_enc_get_frame_size(s->encoder, &input, &output) != ESP_AUDIO_ERR_OK ||
+    if (esp_opus_enc_open(&enc, sizeof(enc), &s->encoder) != ESP_AUDIO_ERR_OK ||
+        esp_opus_enc_get_frame_size(s->encoder, &input, &output) != ESP_AUDIO_ERR_OK ||
         input != TALK_FRAME_SAMPLES * 2 || output > TALK_PAYLOAD)
         return false;
-    for (int retry = 0; retry < 10 && !s->mic && !cancelled(); retry++) {
-        s->mic = mic_start(NULL);
+    esp_opus_dec_cfg_t dec = {.sample_rate = 16000,
+                              .channel = 1,
+                              .frame_duration = ESP_OPUS_DEC_FRAME_DURATION_20_MS,
+                              .self_delimited = false};
+    return esp_opus_dec_open(&dec, sizeof(dec), &s->decoder) == ESP_AUDIO_ERR_OK;
+}
+// The playout task's writer; talk_preempt() takes the same lock, so once it
+// returns nothing more reaches the DAC.
+static void write_audio(const int16_t *pcm, size_t frames) {
+    xSemaphoreTake(s_write_lock, portMAX_DELAY);
+    if (!cancelled()) {
+        audio_out_set_rate(AUDIO_OUT_SAMPLE_RATE);
+        audio_out_write16(pcm, frames);
+    }
+    xSemaphoreGive(s_write_lock);
+}
+
+// Both sides answered: take the DAC and open the mic. NULL, or why not.
+static const char *start_call(session_t *s) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_abort = false;
+    xSemaphoreGive(s_lock);
+    s->claimed = audio_source_claim(AUDIO_SOURCE_TALK);
+    if (!s->claimed || cancelled())
+        return "Speaker busy";
+    log_internal("with the DAC claimed");
+    if (!open_codecs(s))
+        return "Call failed";
+    log_internal("with Opus open");
+    static const mic_config_t mic = {
+        .gain_db = MIC_DEFAULT_GAIN_DB, .noise_level = MIC_DEFAULT_NOISE_LEVEL, .echo_cancel = true};
+    for (int retry = 0; retry < 10 && !s->mic; retry++) {
+        s->mic = mic_start(&mic);
         if (!s->mic)
             vTaskDelay(pdMS_TO_TICKS(20));
     }
     if (!s->mic)
-        return false;
-    s->state = UI_TALK_SENDING;
+        return "Microphone unavailable";
+    log_internal("in the call");
+    s->playout = talk_playout_start(write_audio);
+    if (!s->playout)
+        return "Call failed";
+    s->in_call = true;
+    s->stats = task_stats_begin();
+    s->answered = s->last_received = now_us();
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_ui.state = UI_TALK_SENDING;
+    s_ui.state = UI_TALK_IN_CALL;
+    s_ui.message[0] = '\0';
     xSemaphoreGive(s_lock);
-    return true;
+    ESP_LOGI(TAG, "in call with %s", inet_ntoa(s->peer.sin_addr));
+    return NULL;
 }
-static bool start_decoder(session_t *s) {
-    esp_opus_dec_cfg_t cfg = {.sample_rate = 16000,
-                              .channel = 1,
-                              .frame_duration = ESP_OPUS_DEC_FRAME_DURATION_20_MS,
-                              .self_delimited = false};
-    if (esp_opus_dec_open(&cfg, sizeof(cfg), &s->decoder) != ESP_AUDIO_ERR_OK)
-        return false;
-    pcm_resampler_init(&s->resampler, 16000, AUDIO_OUT_SAMPLE_RATE);
-    talk_jitter_init(&s->jitter, s->sequence);
-    return true;
-}
-static bool write_audio(session_t *s, size_t frames) {
+
+// Our side of an incoming call, once the connection task has rung.
+static session_t *answer_ringing(void) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    uint8_t volume = s_ui.volume;
+    uint32_t call = s_ring_call, ip = s_ring.ip;
+    uint16_t port = s_ring.port;
     xSemaphoreGive(s_lock);
-    pcm_apply_gain(s->output, frames, &s->gain, pcm_gain_for_volume(volume));
-    xSemaphoreTake(s_write_lock, portMAX_DELAY);
-    bool ok = !cancelled();
-    if (ok) {
-        audio_out_set_rate(AUDIO_OUT_SAMPLE_RATE);
-        audio_out_write16(s->output, frames);
+    session_t *s = create_session(ip, port, call);
+    if (!s) {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        s_ring_answer = TALK_ANSWER_DECLINED;
+        s_ring_call = 0;
+        xSemaphoreGive(s_lock);
+        set_state(UI_TALK_IDLE, NULL, "Missed call");
+        return NULL;
     }
-    xSemaphoreGive(s_write_lock);
-    return ok;
+    // Over whatever plays, which ducks under it; the DAC is only taken on
+    // answering.
+    alarm_sound_start(ALARM_SOUND_CALL);
+    s->ringing = true;
+    return s;
 }
-static void incoming_chime(session_t *s) {
-    // 20 ms, quiet arrival tone, on the same exclusive path as the voice.
-    for (size_t i = 0; i < 882; i++) {
-        float envelope = sinf((float)i * 3.14159265f / 882);
-        int16_t v = (int16_t)(2200 * envelope * sinf((float)i * 2 * 3.14159265f * 880 / AUDIO_OUT_SAMPLE_RATE));
-        s->output[2 * i] = s->output[2 * i + 1] = v;
+static void accept_ringing(session_t **session) {
+    session_t *s = *session;
+    alarm_sound_stop();
+    s->ringing = false;
+    const char *failure = start_call(s);
+    if (failure) {
+        finish(session, failure);
+        return;
     }
-    write_audio(s, 882);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_answer_sequence = s->sequence;
+    s_answer_timestamp = s->timestamp;
+    s_ring_answer = TALK_ANSWER_ACCEPTED;
+    xSemaphoreGive(s_lock);
 }
+static session_t *dial(uint32_t ip) {
+    char name[33] = "";
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (int i = 0; i < s_ui.count; i++)
+        if (s_ui.peers[i].id == ip)
+            snprintf(name, sizeof(name), "%s", s_ui.peers[i].name);
+    snprintf(s_ui.peer, sizeof(s_ui.peer), "%s", name);
+    s_ui.peer_id = ip;
+    xSemaphoreGive(s_lock);
+    session_t *s = name[0] ? create_session(ip, 0, 0) : NULL;
+    uint16_t port = 0;
+    if (s)
+        s->control = talk_rtsp_dial(ip, s->sequence, s->timestamp, &port);
+    if (!s || s->control < 0) {
+        if (s)
+            finish(&s, "Knob unavailable");
+        else
+            set_state(UI_TALK_IDLE, NULL, "Knob unavailable");
+        return NULL;
+    }
+    s->peer.sin_port = htons(port);
+    return s;
+}
+static void dialing(session_t **session) {
+    session_t *s = *session;
+    static const char *const k_outcome[] = {
+        [TALK_DIAL_BUSY] = "Busy",
+        [TALK_DIAL_DECLINED] = "Declined",
+        [TALK_DIAL_NO_ANSWER] = "No answer",
+        [TALK_DIAL_FAILED] = "Call failed",
+    };
+    uint16_t first;
+    talk_dial_t outcome = talk_rtsp_answer(s->control, &first);
+    if (outcome == TALK_DIAL_ANSWERED) {
+        const char *failure = start_call(s);
+        if (failure)
+            finish(session, failure);
+    } else if (outcome != TALK_DIAL_RINGING) {
+        finish(session, k_outcome[outcome]);
+    } else if (now_us() - s->started > DIAL_TIMEOUT_US) {
+        finish(session, "No answer");
+    }
+}
+
+// Queued datagrams into the call's jitter buffer; with no call, discarded.
+static void receive(int sock, session_t *s) {
+    // RTP reordering is bounded; control messages never enter this socket.
+    for (int i = 0; i < 16; i++) {
+        uint8_t wire[TALK_RTP_HEADER + TALK_PAYLOAD + 64];
+        struct sockaddr_in from;
+        socklen_t fromlen = sizeof(from);
+        int n = recvfrom(sock, wire, sizeof(wire), 0, (struct sockaddr *)&from, &fromlen);
+        if (n < 0)
+            return;
+        if (!s || !s->in_call)
+            continue;
+        if (from.sin_addr.s_addr != s->peer.sin_addr.s_addr || from.sin_port != s->peer.sin_port) {
+            s->rx_foreign++;
+            s->foreign = from;
+            continue;
+        }
+        talk_packet_t p;
+        if (!talk_rtp_decode(&p, wire, n)) {
+            s->rx_bad++;
+            continue;
+        }
+        // Starts at the first packet that arrives: any sent before this side
+        // took the call were dropped, and waiting for them would add delay.
+        if (!s->play_at) {
+            s->peer_ssrc = p.ssrc;
+            talk_jitter_init(&s->jitter, p.sequence);
+        }
+        int16_t ahead = (int16_t)(p.sequence - s->jitter.next);
+        if (p.ssrc != s->peer_ssrc || !talk_jitter_push(&s->jitter, &p)) {
+            s->rx_rejected++;
+            if (ahead < 0 && p.ssrc == s->peer_ssrc) {
+                s->late[-ahead <= 3 ? 0 : -ahead <= 10 ? 1 : 2]++;
+                s->last_late = now_us();
+                int grow = -ahead < DELAY_MAX - s->delay ? -ahead : DELAY_MAX - s->delay;
+                s->delay += grow;
+                s->hold += grow;
+                s->delay_max = s->delay > s->delay_max ? s->delay : s->delay_max;
+            }
+            continue;
+        }
+        s->rx++;
+        int64_t t = now_us();
+        if (s->play_at && t - s->last_received > s->gap_max_us)
+            s->gap_max_us = t - s->last_received;
+        s->last_received = t;
+        if (!s->play_at) {
+            s->play_at = s->last_received + PREFILL_US;
+            s->delay = s->delay_max = DELAY_MIN;
+            s->last_late = s->last_received;
+        }
+    }
+}
+static bool send_frame(int sock, session_t *s) {
+    talk_packet_t p = {.ssrc = s->ssrc, .sequence = s->sequence++, .timestamp = s->timestamp};
+    s->timestamp += TALK_RTP_TICKS;
+    esp_audio_enc_in_frame_t in = {.buffer = (uint8_t *)s->pcm, .len = TALK_FRAME_SAMPLES * 2};
+    esp_audio_enc_out_frame_t out = {.buffer = p.payload, .len = sizeof(p.payload)};
+    if (esp_opus_enc_process(s->encoder, &in, &out) != ESP_AUDIO_ERR_OK || !out.encoded_bytes)
+        return false;
+    p.length = out.encoded_bytes;
+    uint8_t wire[TALK_RTP_HEADER + TALK_PAYLOAD];
+    size_t n = talk_rtp_encode(wire, &p);
+    // A datagram WiFi drops is the far end's loss to conceal, not a reason
+    // to hang up.
+    if (n)
+        sendto(sock, wire, n, 0, (struct sockaddr *)&s->peer, sizeof(s->peer));
+    return n > 0;
+}
+// A packet into s->far; with none (n 0), Opus's concealment.
+static bool decode(session_t *s, uint8_t *raw, size_t n) {
+    esp_audio_dec_in_raw_t in = {
+        .buffer = raw, .len = n, .frame_recover = n ? ESP_AUDIO_DEC_RECOVERY_NONE : ESP_AUDIO_DEC_RECOVERY_PLC};
+    esp_audio_dec_out_frame_t out = {.buffer = (uint8_t *)s->far, .len = sizeof(s->far)};
+    esp_audio_dec_info_t info;
+    return esp_opus_dec_decode(s->decoder, &in, &out, &info) == ESP_AUDIO_ERR_OK &&
+           out.decoded_size == sizeof(s->far);
+}
+// Back to a shorter delay: a quiet frame just played gives way to the next.
+static void shrink_delay(session_t *s, uint8_t *raw) {
+    if (s->delay <= DELAY_MIN || s->hold || now_us() - s->last_late < SHRINK_AFTER_US ||
+        level(s->far, TALK_FRAME_SAMPLES) >= QUIET_LEVEL || !talk_jitter_ready(&s->jitter) ||
+        !decode(s, raw, talk_jitter_pop(&s->jitter, raw)))
+        return;
+    s->delay--;
+    s->last_late = now_us();
+}
+static void conceal(session_t *s) {
+    // esp_opus_dec refuses a NULL buffer even with nothing in it.
+    uint8_t none;
+    if (!decode(s, &none, 0))
+        memset(s->far, 0, sizeof(s->far));
+}
+// The far end's next 20 ms into s->far: a packet, Opus's concealment for one
+// missing or inserted to lengthen the delay, or silence before playback
+// starts.
+static void decode_frame(session_t *s) {
+    if (!s->play_at || now_us() < s->play_at) {
+        memset(s->far, 0, sizeof(s->far));
+        return;
+    }
+    if (s->hold) {
+        s->hold--;
+        conceal(s);
+        return;
+    }
+    uint8_t raw[TALK_PAYLOAD];
+    size_t n = talk_jitter_pop(&s->jitter, raw);
+    if (n && decode(s, raw, n)) {
+        shrink_delay(s, raw);
+        return;
+    }
+    s->concealed++;
+    conceal(s);
+}
+// One 20 ms frame each way. The mic paces the call; the DAC runs off the
+// same crystal, so its queue stays as deep as it started and the echo
+// canceller's reference keeps a fixed lead over the echo.
+static void call_frame(int sock, session_t **session) {
+    session_t *s = *session;
+    if (mic_read(s->pcm, TALK_FRAME_SAMPLES, 60) != TALK_FRAME_SAMPLES) {
+        finish(session, "Microphone stopped");
+        return;
+    }
+    int64_t started = now_us();
+    s->frames++;
+    if (!send_frame(sock, s)) {
+        finish(session, "Call failed");
+        return;
+    }
+    receive(sock, s);
+    decode_frame(s);
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    // -6 dB: the far end's mic gain makes speech near full scale, far
+    // louder than music at the same volume.
+    int32_t target = pcm_gain_for_volume(s_ui.volume) / 2;
+    s_ui.seconds = (uint32_t)((now_us() - s->answered) / 1000000);
+    xSemaphoreGive(s_lock);
+    // Volume goes on before the reference is taken, so the canceller hears
+    // what the speaker plays.
+    memcpy(s->pcm, s->far, sizeof(s->far));
+    pcm_to_stereo(s->pcm, TALK_FRAME_SAMPLES, 1);
+    pcm_apply_gain(s->pcm, TALK_FRAME_SAMPLES, &s->gain, target);
+    for (int i = 0; i < TALK_FRAME_SAMPLES; i++)
+        s->far[i] = s->pcm[2 * i];
+    talk_playout_push(s->far, TALK_FRAME_SAMPLES);
+    // Not counting the wait for the mic, whose processing mic_stop() logs.
+    int64_t busy = now_us() - started;
+    s->busy_us += busy;
+    s->busy_max_us = busy > s->busy_max_us ? busy : s->busy_max_us;
+}
+
+// Ends the session when either side has hung up or the call can't go on.
+static void check_ended(session_t **session, bool hang_up, uint32_t ended) {
+    session_t *s = *session;
+    if (hang_up)
+        finish(session, NULL);
+    else if (s->call && ended == s->call)
+        finish(session, s->in_call ? "Call ended" : "Missed call");
+    else if (!s->in_call && audio_source_suspended())
+        finish(session, s->call ? "Missed call" : NULL);
+    else if (s->in_call && cancelled())
+        finish(session, "Call ended");
+    else if (s->in_call && !s->call && !talk_rtsp_alive(s->control))
+        finish(session, "Call ended");
+    else if (s->in_call && now_us() - s->last_received > CALL_LOST_US)
+        finish(session, "Call lost");
+}
+// The stack grows down: count fill bytes from its low end.
+static size_t stack_untouched(const uint8_t *stack) {
+    size_t n = 0;
+    while (n < CALL_STACK && stack[n] == STACK_FILL)
+        n++;
+    return n;
+}
+// One pass of the worker: a call frame in a call, else a short poll.
+static void step(void) {
+    int sock = s_sock;
+    session_t *s = s_session;
+    {
+        xSemaphoreTake(s_lock, portMAX_DELAY);
+        bool network = s_network, hang_up = s_hang_up, accept = s_accept;
+        uint32_t ringing = s_ring_call, ended = s_ring_ended, peer = 0;
+        s_hang_up = s_accept = false;
+        if (!s && !ringing && s_dial) {
+            peer = s_dial;
+            // In the same hold as taking the request, so ring() turns
+            // callers away from here on.
+            s_ui.state = UI_TALK_CALLING;
+            s_ui.message[0] = '\0';
+        }
+        s_dial = 0;
+        xSemaphoreGive(s_lock);
+        if (sock < 0 && network) {
+            uint16_t port = TALK_RTP_PORT;
+            sock = bind_socket(&port, SOCK_DGRAM);
+            if (sock >= 0) {
+                int flags = fcntl(sock, F_GETFL, 0);
+                fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+            }
+        }
+        if (sock < 0) {
+            if (peer)
+                set_state(UI_TALK_IDLE, NULL, "Not on WiFi");
+            vTaskDelay(pdMS_TO_TICKS(100));
+            s_sock = sock;
+            return;
+        }
+
+        if (!s && ringing)
+            s = answer_ringing();
+        else if (!s && peer)
+            s = dial(peer);
+        // Also right after answer_ringing(): Decline may have come first.
+        if (s)
+            check_ended(&s, hang_up, ended);
+
+        if (s && !s->in_call) {
+            if (s->call && accept)
+                accept_ringing(&s);
+            else if (!s->call)
+                dialing(&s);
+        }
+        if (s && s->in_call) {
+            call_frame(sock, &s);
+        } else {
+            receive(sock, NULL);
+            vTaskDelay(pdMS_TO_TICKS(IDLE_POLL_MS));
+        }
+    }
+    s_sock = sock;
+    s_session = s;
+}
+static void call_passes(void) {
+    while (s_session)
+        step();
+    if (s_call_stack)
+        s_call_stack_used = CALL_STACK - stack_untouched(s_call_stack);
+}
+static void worker(void *arg) {
+    (void)arg;
+    for (;;) {
+        if (!s_session) {
+            step();
+            continue;
+        }
+        // Opus, the echo canceller and noise suppressor keep their work on
+        // the stack; on the task's PSRAM stack a frame took longer than 20 ms.
+        // Internal RAM for it is only taken while a call rings or runs, before
+        // the mic and codecs split the heap.
+        log_internal("before the call stack");
+        size_t free_internal = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        s_call_stack = free_internal >= CALL_STACK + CALL_HEAP_RESERVE
+                           ? heap_caps_malloc(CALL_STACK, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+                           : NULL;
+        if (!s_call_stack) {
+            ESP_LOGW(TAG, "no internal RAM for the call stack (%u free, largest %u), using PSRAM",
+                     (unsigned)free_internal,
+                     (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+            call_passes();
+            ESP_LOGI(TAG, "PSRAM stack: %u bytes never used", (unsigned)uxTaskGetStackHighWaterMark(NULL));
+            continue;
+        }
+        log_internal("with the call stack");
+        esp_execute_shared_stack_function(s_stack_lock, s_call_stack, CALL_STACK, call_passes);
+        ESP_LOGI(TAG, "call stack: %u of %u bytes used", (unsigned)s_call_stack_used, (unsigned)CALL_STACK);
+        free(s_call_stack);
+        s_call_stack = NULL;
+    }
+}
+
 // Runs on the esp_timer task, whose internal stack may write flash.
 static void save_volume(void *arg) {
     (void)arg;
@@ -250,199 +726,6 @@ static void save_volume(void *arg) {
         nvs_close(nvs);
     }
 }
-static void consume_request(uint32_t epoch) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (s_request_epoch == epoch)
-        s_requested_peer = 0;
-    xSemaphoreGive(s_lock);
-}
-static bool incoming_start(uint32_t ip, uint16_t port, uint16_t sequence, const char *name) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool idle = s_ui.state == UI_TALK_IDLE && !s_requested_peer;
-    xSemaphoreGive(s_lock);
-    if (!idle || audio_source_suspended())
-        return false;
-    incoming_t in = {.ip = ip, .port = port, .sequence = sequence, .deadline = now_us() + 1000000};
-    snprintf(in.name, sizeof(in.name), "%s", name);
-    bool stale;
-    while (xQueueReceive(s_answer, &stale, 0) == pdTRUE) {
-    }
-    if (xQueueSend(s_incoming, &in, 0) != pdTRUE)
-        return false;
-    bool answer = false;
-    if (xQueueReceive(s_answer, &answer, pdMS_TO_TICKS(1500)) != pdTRUE)
-        return false;
-    return answer;
-}
-static bool incoming_active(void) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    bool active = s_ui.state == UI_TALK_RECEIVING;
-    xSemaphoreGive(s_lock);
-    return active;
-}
-static void incoming_stop(void) {
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (s_ui.state == UI_TALK_RECEIVING)
-        s_receive_end = now_us() + 100000;
-    xSemaphoreGive(s_lock);
-}
-static void worker(void *arg) {
-    (void)arg;
-    int sock = -1;
-    session_t *s = NULL;
-    for (;;) {
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        uint32_t requested = s_requested_peer, epoch = s_request_epoch;
-        bool network = s_network;
-        xSemaphoreGive(s_lock);
-        if (sock < 0 && network) {
-            uint16_t port = TALK_RTP_PORT;
-            sock = bind_socket(&port, SOCK_DGRAM);
-            if (sock >= 0) {
-                int flags = fcntl(sock, F_GETFL, 0);
-                fcntl(sock, F_SETFL, flags | O_NONBLOCK);
-            }
-        }
-        if (sock < 0) {
-            vTaskDelay(pdMS_TO_TICKS(100));
-            continue;
-        }
-        if (s && (cancelled() || now_us() - s->started > SESSION_MAX_US ||
-                  (s->state != UI_TALK_RECEIVING &&
-                   (!requested || epoch != s->epoch || (s->control >= 0 && !talk_rtsp_alive(s->control)))))) {
-            consume_request(s->epoch);
-            requested = 0;
-            finish(&s, NULL);
-        }
-        incoming_t incoming;
-        if (xQueueReceive(s_incoming, &incoming, 0) == pdTRUE) {
-            bool accepted = false;
-            if (!s && !requested && now_us() < incoming.deadline && !audio_source_suspended()) {
-                struct sockaddr_in peer = {
-                    .sin_family = AF_INET, .sin_port = htons(incoming.port), .sin_addr.s_addr = incoming.ip};
-                s = create_session(&peer, 0, UI_TALK_RECEIVING, incoming.name, epoch);
-                if (s) {
-                    s->sequence = incoming.sequence;
-                    accepted = start_decoder(s);
-                }
-                if (accepted)
-                    incoming_chime(s);
-                else
-                    finish(&s, "Voice unavailable");
-            }
-            xQueueOverwrite(s_answer, &accepted);
-        }
-        if (!s && requested && !audio_source_suspended()) {
-            char name[33] = "";
-            xSemaphoreTake(s_lock, portMAX_DELAY);
-            for (int i = 0; i < s_ui.count; i++)
-                if (s_ui.peers[i].id == requested)
-                    snprintf(name, sizeof(name), "%s", s_ui.peers[i].name);
-            xSemaphoreGive(s_lock);
-            struct sockaddr_in peer = {.sin_family = AF_INET, .sin_addr.s_addr = requested};
-            if (name[0])
-                s = create_session(&peer, esp_random(), UI_TALK_CONNECTING, name, epoch);
-            if (s) {
-                s->sequence = (uint16_t)esp_random();
-                s->timestamp = esp_random();
-                uint16_t peer_port;
-                s->control = talk_rtsp_begin(requested, s->sequence, s->timestamp, &peer_port);
-                xSemaphoreTake(s_lock, portMAX_DELAY);
-                bool held = s_requested_peer == requested && s_request_epoch == epoch;
-                xSemaphoreGive(s_lock);
-                if (s->control >= 0 && held && !cancelled()) {
-                    s->peer.sin_port = htons(peer_port);
-                    if (!start_encoder(s)) {
-                        consume_request(epoch);
-                        finish(&s, "Microphone unavailable");
-                    }
-                } else {
-                    consume_request(epoch);
-                    finish(&s, held ? "Peer unavailable or busy" : NULL);
-                }
-            } else {
-                consume_request(epoch);
-                set_state(UI_TALK_IDLE, NULL, "Peer unavailable");
-            }
-        }
-        // RTP reordering is bounded; control messages never enter this socket.
-        for (int i = 0; i < 16; i++) {
-            uint8_t wire[TALK_RTP_HEADER + TALK_PAYLOAD + 64];
-            struct sockaddr_in from;
-            socklen_t fromlen = sizeof(from);
-            int n = recvfrom(sock, wire, sizeof(wire), 0, (struct sockaddr *)&from, &fromlen);
-            if (n < 0)
-                break;
-            if (!s || s->state != UI_TALK_RECEIVING || from.sin_addr.s_addr != s->peer.sin_addr.s_addr ||
-                from.sin_port != s->peer.sin_port)
-                continue;
-            talk_packet_t p;
-            if (!talk_rtp_decode(&p, wire, n))
-                continue;
-            if (!s->play_at)
-                s->id = p.ssrc;
-            if (p.ssrc != s->id)
-                continue;
-            if (talk_jitter_push(&s->jitter, &p)) {
-                s->last_received = now_us();
-                if (!s->play_at)
-                    s->play_at = now_us() + PREFILL_US;
-            }
-        }
-        if (s && s->state == UI_TALK_SENDING) {
-            size_t frames = mic_read(s->pcm, TALK_FRAME_SAMPLES, 60);
-            if (frames != TALK_FRAME_SAMPLES || cancelled()) {
-                consume_request(s->epoch);
-                finish(&s, "Microphone stopped");
-            } else {
-                level(s->pcm, frames);
-                talk_packet_t p = {.ssrc = s->id, .sequence = s->sequence++, .timestamp = s->timestamp};
-                s->timestamp += 960;
-                esp_audio_enc_in_frame_t in = {.buffer = (uint8_t *)s->pcm, .len = frames * 2};
-                esp_audio_enc_out_frame_t out = {.buffer = p.payload, .len = sizeof(p.payload)};
-                uint8_t wire[TALK_RTP_HEADER + TALK_PAYLOAD];
-                bool ok = esp_opus_enc_process(s->encoder, &in, &out) == ESP_AUDIO_ERR_OK && out.encoded_bytes;
-                if (ok) {
-                    p.length = out.encoded_bytes;
-                    size_t n = talk_rtp_encode(wire, &p);
-                    ok = n && sendto(sock, wire, n, 0, (struct sockaddr *)&s->peer, sizeof(s->peer)) == (int)n;
-                }
-                if (!ok) {
-                    consume_request(s->epoch);
-                    finish(&s, "Voice send failed");
-                }
-            }
-        }
-        if (s && s->state == UI_TALK_RECEIVING) {
-            xSemaphoreTake(s_lock, portMAX_DELAY);
-            int64_t end = s_receive_end;
-            xSemaphoreGive(s_lock);
-            if ((end && now_us() >= end) || now_us() - s->last_received > RECEIVE_TIMEOUT_US)
-                finish(&s, NULL);
-            else if (s->play_at && now_us() >= s->play_at) {
-                uint8_t encoded[TALK_PAYLOAD];
-                size_t n = talk_jitter_pop(&s->jitter, encoded);
-                esp_audio_dec_in_raw_t raw = {.buffer = encoded,
-                                              .len = n,
-                                              .frame_recover =
-                                                  n ? ESP_AUDIO_DEC_RECOVERY_NONE : ESP_AUDIO_DEC_RECOVERY_PLC};
-                esp_audio_dec_out_frame_t out = {.buffer = (uint8_t *)s->pcm, .len = TALK_FRAME_SAMPLES * 2};
-                esp_audio_dec_info_t info;
-                if (esp_opus_dec_decode(s->decoder, &raw, &out, &info) != ESP_AUDIO_ERR_OK ||
-                    out.decoded_size != TALK_FRAME_SAMPLES * 2)
-                    memset(s->pcm, 0, TALK_FRAME_SAMPLES * 2);
-                level(s->pcm, TALK_FRAME_SAMPLES);
-                pcm_to_stereo(s->pcm, TALK_FRAME_SAMPLES, 1);
-                write_audio(s, pcm_resample(&s->resampler, s->pcm, TALK_FRAME_SAMPLES, s->output));
-                s->play_at += 20000;
-                if (now_us() - s->play_at > 100000)
-                    finish(&s, "Voice interrupted");
-            }
-        }
-        vTaskDelay(pdMS_TO_TICKS(s ? 2 : 10));
-    }
-}
-
 static void discovery(void *arg) {
     (void)arg;
     bool advertised = false;
@@ -458,7 +741,7 @@ static void discovery(void *arg) {
         if (!advertised) {
             char name[33];
             device_name_get(name, sizeof(name));
-            mdns_txt_item_t txt[] = {{"v", "1"}, {"name", name}};
+            mdns_txt_item_t txt[] = {{"v", TALK_VERSION}, {"name", name}};
             // AirPlay owns mdns_init(). Retry until that task has initialized it;
             // add our service once, well after its initial probing settles.
             if (mdns_service_add(NULL, "_audioknob", "_tcp", TALK_RTSP_PORT, txt, 2) != ESP_OK)
@@ -483,7 +766,7 @@ static void discovery(void *arg) {
             for (size_t i = 0; i < r->txt_count; i++) {
                 if (!strcmp(r->txt[i].key, "name"))
                     name = r->txt[i].value;
-                if (!strcmp(r->txt[i].key, "v") && !strcmp(r->txt[i].value, "1"))
+                if (!strcmp(r->txt[i].key, "v") && !strcmp(r->txt[i].value, TALK_VERSION))
                     version = true;
             }
             if (!version || !name || r->port != TALK_RTSP_PORT)
@@ -513,7 +796,8 @@ static void discovery(void *arg) {
 void talk_init(void) {
     s_lock = xSemaphoreCreateMutex();
     s_write_lock = xSemaphoreCreateMutex();
-    ESP_ERROR_CHECK(s_lock && s_write_lock ? ESP_OK : ESP_ERR_NO_MEM);
+    s_stack_lock = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(s_lock && s_write_lock && s_stack_lock ? ESP_OK : ESP_ERR_NO_MEM);
     nvs_handle_t nvs;
     if (nvs_open("talk", NVS_READONLY, &nvs) == ESP_OK) {
         uint8_t volume;
@@ -523,13 +807,12 @@ void talk_init(void) {
     }
     const esp_timer_create_args_t timer = {.callback = save_volume, .name = "talk_volume"};
     ESP_ERROR_CHECK(esp_timer_create(&timer, &s_save_timer));
-    s_incoming = xQueueCreate(1, sizeof(incoming_t));
-    s_answer = xQueueCreate(1, sizeof(bool));
-    ESP_ERROR_CHECK(s_incoming && s_answer ? ESP_OK : ESP_ERR_NO_MEM);
     // Espressif documents up to 40 KB codec stack. Keep it in PSRAM; this
     // task never writes flash (volume persistence runs on the esp_timer task).
+    // Core 1, above LVGL: on core 0 WiFi took enough that a 20 ms frame
+    // overran; a call has preempted AirPlay's core 1 tasks.
     BaseType_t w =
-        xTaskCreatePinnedToCoreWithCaps(worker, "talk", 40960, NULL, 8, NULL, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        xTaskCreatePinnedToCoreWithCaps(worker, "talk", 40960, NULL, 8, NULL, 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     BaseType_t d =
         xTaskCreateWithCaps(discovery, "talk_discovery", 4096, NULL, 3, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     ESP_ERROR_CHECK(w == pdPASS && d == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
@@ -542,8 +825,7 @@ void talk_network_up(void) {
     // WiFi brings lwIP up after talk_init(). Opening a socket before then
     // asserts in tcpip_send_msg_wait_sem. Keep one listener across reconnects.
     if (first) {
-        talk_rtsp_init(&(talk_rtsp_ops_t){
-            .start = incoming_start, .stop = incoming_stop, .active = incoming_active});
+        talk_rtsp_init(&(talk_rtsp_ops_t){.ring = ring, .answer = answer, .stop = ring_stop, .active = ring_active});
         ESP_LOGI(TAG, "LAN voice ready, RTSP %d / RTP %d", TALK_RTSP_PORT, TALK_RTP_PORT);
     }
 }

@@ -9,6 +9,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 #include "airplay/artwork/artwork.h"
 #include "esp_heap_caps.h"
 #include "protocol.h"
@@ -263,7 +264,12 @@ void uart_link_start(void) {
     ESP_ERROR_CHECK(uart_set_pin(UART_PORT, UART_TX_GPIO, UART_RX_GPIO, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
 
     ESP_LOGI(TAG, "inter-MCU UART ready (TX=%d RX=%d)", UART_TX_GPIO, UART_RX_GPIO);
-    xTaskCreate(uart_rx_task, "uart_rx", RX_TASK_STACK, NULL, 4, NULL);
+    // Parses frames into shared state and never touches flash, so its stack
+    // can live in PSRAM, sparing internal RAM.
+    ESP_ERROR_CHECK(xTaskCreateWithCaps(uart_rx_task, "uart_rx", RX_TASK_STACK, NULL, 4, NULL,
+                                        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) == pdPASS
+                        ? ESP_OK
+                        : ESP_ERR_NO_MEM);
 }
 
 bool uart_link_get_latest(wireless_state_t *out) {

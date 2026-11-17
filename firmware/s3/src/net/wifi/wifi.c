@@ -67,6 +67,14 @@ static uint8_t s_reconnects;
 
 // --- Credentials -----------------------------------------------------------
 
+// The default fast scan joins the first AP it finds with the SSID, lowest
+// channel first; on a mesh that can be a far one at -75 dBm. Scanning every
+// channel costs about a second per connect.
+static void prefer_strongest_ap(wifi_config_t *cfg) {
+    cfg->sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    cfg->sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+}
+
 static bool load_credentials(wifi_config_t *cfg) {
     memset(cfg, 0, sizeof(*cfg));
 
@@ -78,6 +86,7 @@ static bool load_credentials(wifi_config_t *cfg) {
                   nvs_get_str(nvs, NVS_KEY_PASSWORD, (char *)cfg->sta.password, &pass_len) == ESP_OK;
         nvs_close(nvs);
         if (ok && cfg->sta.ssid[0]) {
+            prefer_strongest_ap(cfg);
             return true;
         }
         memset(cfg, 0, sizeof(*cfg));
@@ -87,6 +96,7 @@ static bool load_credentials(wifi_config_t *cfg) {
     if (CONFIG_AK_WIFI_SSID[0]) {
         snprintf((char *)cfg->sta.ssid, sizeof(cfg->sta.ssid), "%s", CONFIG_AK_WIFI_SSID);
         snprintf((char *)cfg->sta.password, sizeof(cfg->sta.password), "%s", CONFIG_AK_WIFI_PASSWORD);
+        prefer_strongest_ap(cfg);
         return true;
     }
     return false;
@@ -213,6 +223,7 @@ static void portal_submit(const char *ssid, const char *password) {
     wifi_config_t cfg = {0};
     snprintf((char *)cfg.sta.ssid, sizeof(cfg.sta.ssid), "%s", ssid);
     snprintf((char *)cfg.sta.password, sizeof(cfg.sta.password), "%s", password);
+    prefer_strongest_ap(&cfg);
     esp_wifi_disconnect();
     esp_wifi_set_config(WIFI_IF_STA, &cfg);
     esp_wifi_connect();

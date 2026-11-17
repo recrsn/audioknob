@@ -13,7 +13,7 @@ typedef enum {
     AUDIO_SOURCE_AIRPLAY,  // RAOP on this MCU
     AUDIO_SOURCE_LOCAL,    // synthesized ambience on this MCU
     AUDIO_SOURCE_RADIO,    // internet radio on this MCU
-    AUDIO_SOURCE_TALK,     // half-duplex LAN voice on this MCU
+    AUDIO_SOURCE_TALK,     // LAN calls on this MCU
 } audio_source_t;
 
 // Drives GPIO0 (call only after boot -- it is a strap pin) and starts

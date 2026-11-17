@@ -343,20 +343,22 @@ typedef enum {
 // The handler applies and persists it, then pushes ui_update_settings().
 void ui_set_settings_handler(void (*handler)(ui_setting_t setting, int value, const char *zone));
 
-// Half-duplex LAN voice. Peer IDs stay stable as discovery results change.
+// LAN calls between knobs. Peer IDs stay stable as discovery results change.
 #define UI_TALK_MAX 8
-typedef enum { UI_TALK_IDLE, UI_TALK_CONNECTING, UI_TALK_SENDING, UI_TALK_RECEIVING } ui_talk_state_t;
+typedef enum { UI_TALK_IDLE, UI_TALK_CALLING, UI_TALK_RINGING, UI_TALK_IN_CALL } ui_talk_state_t;
 typedef struct {
     uint32_t id;
     char name[33];
 } ui_talk_peer_t;
 typedef struct {
     ui_talk_peer_t peers[UI_TALK_MAX];
-    uint8_t count, volume, level;
+    uint8_t count, volume;
     ui_talk_state_t state;
+    uint32_t seconds; // in the call so far
     char peer[33];
     uint32_t peer_id;
     char message[48];
 } ui_talk_t;
 void ui_update_talk(const ui_talk_t *talk);
-void ui_set_talk_handler(void (*press)(uint32_t peer, bool held), void (*volume)(uint8_t pct));
+// call(peer) dials; call(0) hangs up. answer() takes or turns down a ringing call.
+void ui_set_talk_handler(void (*call)(uint32_t peer), void (*answer)(bool accept), void (*volume)(uint8_t pct));

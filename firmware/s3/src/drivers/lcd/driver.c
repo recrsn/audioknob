@@ -52,6 +52,10 @@
 // lower-priority tasks, the ceiling keeps touch polling responsive.
 #define LVGL_TASK_MIN_DELAY_MS 2
 #define LVGL_TASK_MAX_DELAY_MS 10
+// Every this often, if LVGL's timers took more than LOAD_LOG_PCT of it, log
+// how much and how much it drew.
+#define LOAD_LOG_US  10000000
+#define LOAD_LOG_PCT 10
 
 // Core 1, away from WiFi/lwIP on core 0, and above the knob and UART tasks
 // so input-driven redraws aren't held up. Kept below AirPlay's RTP (8) and
@@ -107,7 +111,17 @@ static void lvgl_flush_wait_cb(lv_display_t *disp) {
     xSemaphoreTake(s_flush_done, portMAX_DELAY);
 }
 
+static struct {
+    int64_t since, handler_us, touch_us;
+    uint32_t flushes, pixels;
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+    configRUN_TIME_COUNTER_TYPE cpu_since;
+#endif
+} s_load;
+
 static void lvgl_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map) {
+    s_load.flushes++;
+    s_load.pixels += lv_area_get_size(area);
     esp_lcd_panel_handle_t panel = (esp_lcd_panel_handle_t)lv_display_get_user_data(disp);
     esp_lcd_panel_draw_bitmap(panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, px_map);
     // During startup, finish every strip before returning so the first UI
@@ -239,6 +253,38 @@ static void perf_init(lv_display_t *disp) {
 }
 #endif
 
+// Includes main.c's state poll and any wait for a flush to finish.
+static void log_load(int64_t start) {
+    int64_t now = esp_timer_get_time();
+    s_load.handler_us += now - start;
+    if (!s_load.since) {
+        s_load.since = now;
+    }
+    int64_t span = now - s_load.since;
+    if (span < LOAD_LOG_US) {
+        return;
+    }
+    // Wall time includes waits (flush DMA, the touch's I2C) and preemption;
+    // the run-time counter is what the task itself used.
+    long long cpu_pct = -1;
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+    TaskStatus_t self;
+    vTaskGetInfo(NULL, &self, pdFALSE, eRunning);
+    configRUN_TIME_COUNTER_TYPE cpu = self.ulRunTimeCounter;
+    cpu_pct = s_load.cpu_since ? (long long)(cpu - s_load.cpu_since) * 100 / span : -1;
+#endif
+    if (s_load.handler_us * 100 > span * LOAD_LOG_PCT) {
+        ESP_LOGI(TAG, "LVGL busy %lld%% of %lld s (CPU %lld%%, touch %lld%%): %lu flushes, %lu kpx (%lu full screens)",
+                 s_load.handler_us * 100 / span, span / 1000000, cpu_pct, s_load.touch_us * 100 / span,
+                 (unsigned long)s_load.flushes, (unsigned long)(s_load.pixels / 1000),
+                 (unsigned long)(s_load.pixels / (LCD_H_RES * LCD_V_RES)));
+    }
+    s_load = (typeof(s_load)){.since = now};
+#if CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS
+    s_load.cpu_since = cpu;
+#endif
+}
+
 static void lvgl_task(void *arg) {
     (void)arg;
     while (1) {
@@ -246,7 +292,9 @@ static void lvgl_task(void *arg) {
 #if CONFIG_AK_LVGL_PERF_LOG
         lv_obj_invalidate(lv_screen_active());
 #endif
+        int64_t start = esp_timer_get_time();
         uint32_t idle_ms = lv_timer_handler();
+        log_load(start);
         if (s_show_ui) {
             // Rendering needs this task's stack, not app_main()'s smaller
             // stack. Startup flushes wait for DMA before we light the panel.
@@ -265,15 +313,34 @@ static void lvgl_task(void *arg) {
     }
 }
 
+// Set by the controller's INT line. An I2C read takes ~3 ms with the LVGL
+// lock held, so idle reads wait for it; while touched, every read goes
+// through so a release is seen even if no pulse marks it.
+static volatile bool s_touch_irq = true;
+static bool s_touch_down;
+
+static void IRAM_ATTR touch_isr(esp_lcd_touch_handle_t tp) {
+    (void)tp;
+    s_touch_irq = true;
+}
+
 static void touch_read_cb(lv_indev_t *indev, lv_indev_data_t *data) {
     (void)indev;
+    if (!s_touch_irq && !s_touch_down) {
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+    s_touch_irq = false;
+    int64_t start = esp_timer_get_time();
     esp_lcd_touch_read_data(s_touch_handle);
+    s_load.touch_us += esp_timer_get_time() - start;
 
     uint16_t x, y;
     uint8_t count = 0;
     bool pressed = esp_lcd_touch_get_coordinates(s_touch_handle, &x, &y, NULL, &count, 1);
+    s_touch_down = pressed && count > 0;
 
-    if (pressed && count > 0) {
+    if (s_touch_down) {
         data->state = LV_INDEV_STATE_PRESSED;
         data->point.x = x;
         data->point.y = y;
@@ -380,6 +447,7 @@ static void touch_init(lv_display_t *disp) {
         .levels = {.reset = 0, .interrupt = 0},
         // Matches the panel's 180° rotation in lcd_driver_init().
         .flags = {.swap_xy = 0, .mirror_x = 1, .mirror_y = 1},
+        .interrupt_callback = touch_isr,
     };
     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_cst816s(tp_io_handle, &tp_cfg, &s_touch_handle));
 

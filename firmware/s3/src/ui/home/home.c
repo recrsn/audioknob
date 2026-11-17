@@ -1,6 +1,7 @@
 #include "ui/home/home.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 #include "ui/assets/fonts.h"
@@ -160,9 +161,18 @@ void home_build(void) {
 // Out of the column's layout, so it follows the time by hand: after the
 // time's text changes, and whenever the column reflows around it.
 static void ampm_place(void) {
+    // The layout pass is the costly part, and the time label only changes
+    // width when its text does.
+    static char placed[8];
     if (lv_obj_has_flag(idle_screen.ampm_label, LV_OBJ_FLAG_HIDDEN)) {
+        placed[0] = '\0';
         return;
     }
+    const char *time = lv_label_get_text(idle_screen.time_label);
+    if (strcmp(placed, time) == 0) {
+        return;
+    }
+    snprintf(placed, sizeof(placed), "%s", time);
     lv_obj_update_layout(idle_screen.time_label);
     lv_obj_align_to(idle_screen.ampm_label, idle_screen.time_label, LV_ALIGN_OUT_RIGHT_BOTTOM, UI_SPACE_XS,
                     -(UI_FONT_CLOCK->base_line - UI_FONT_TITLE->base_line));
@@ -185,8 +195,7 @@ static void weather_air_refresh(bool have_weather) {
         char buf[8];
         snprintf(buf, sizeof(buf), "%d", r[i].value);
         ui_label_set_text(idle_screen.weather_air[i], buf);
-        lv_obj_set_style_text_color(idle_screen.weather_air_icon[i],
-                                    lv_color_hex(r[i].high ? r[i].color : UI_TINT_WEATHER), 0);
+        ui_set_text_color(idle_screen.weather_air_icon[i], lv_color_hex(r[i].high ? r[i].color : UI_TINT_WEATHER));
     }
     ui_set_visible(idle_screen.weather_air_row, show[0] || show[1]);
 }

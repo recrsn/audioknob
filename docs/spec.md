@@ -103,7 +103,7 @@ Both sub-sources are always available; there is no manual sub-source toggle. **L
 |---|---|---|
 | DRV2605 haptic driver | I2C (`HAPTIC_SCL/SDA/TRIG/EN`, shares S3's touch I2C bus) | Mode-switch confirm tap, connect/disconnect event, timer-complete buzz |
 | Battery ADC | `BATT_ADC` → ESP32-S3 GPIO01, resistor divider (R62/R63, 10K/10K) | Battery icon in status bar (relevant mainly for untethered wireless-only use — USB mode implies wired anyway) |
-| PDM mic | MSM261D4030H1CPM, `PDM_MIC_SCK` GPIO45 / `PDM_MIC_DATA` GPIO46 (both strapping pins, sampled before firmware runs) | Voice: push-to-talk between knobs, later a memo recorder / voice assistant. Read on I2S0, the S3's only port with PDM RX (so the DAC output is on I2S1), through the PDM-to-PCM filter at 16 kHz mono, 2.048 MHz clock. Not the spectrum analyzer's source, which taps the live audio buffer |
+| PDM mic | MSM261D4030H1CPM, `PDM_MIC_SCK` GPIO45 / `PDM_MIC_DATA` GPIO46 (both strapping pins, sampled before firmware runs) | Voice: Talk calls between knobs, later a memo recorder / voice assistant. Read on I2S0, the S3's only port with PDM RX (so the DAC output is on I2S1), through the PDM-to-PCM filter at 16 kHz mono, 2.048 MHz clock. Not the spectrum analyzer's source, which taps the live audio buffer |
 | microSD | SDMMC bus | Reserved, not required for MVP |
 ---
 ## 6. Non-Functional Notes
@@ -215,12 +215,15 @@ Per the CH445P datasheet, `EN#`=0 and `IN`=0 selects S1, `IN`=1 selects S2 — s
 - squeezelite-esp32 ESP32-S3 support discussion: https://github.com/sle118/squeezelite-esp32/discussions/236
 
 ## 9. LAN voice
-The Talk app uses half-duplex hold-to-talk between knobs on the LAN. Discovery
-is `_audioknob._tcp`; control uses RTSP/1.0 sharing the AirPlay request helpers,
-and media is Opus 16 kHz mono in 20 ms frames over RTP/UDP, resampled to the
-44.1 kHz DAC path. Incoming speech preempts the current source. The knob has no
-physical press available for this feature: all start/stop actions use touch.
-Speech is live only: there are no text messages, voice notes or inbox. See
+The Talk app places two-way calls between knobs on the LAN. Discovery is
+`_audioknob._tcp`; control uses RTSP/1.0 sharing the AirPlay request helpers,
+with RECORD answered only once the callee's user accepts; media is Opus 16 kHz
+mono in 20 ms frames over RTP/UDP both ways, resampled to the 44.1 kHz DAC
+path. The mic capture runs ESP-SR's echo canceller against what the speaker
+plays. An incoming call rings over the current source; answering preempts it.
+The knob has no physical press available for this feature: call, answer and
+hang up use touch. Speech is live only: there are no text messages, voice notes
+or inbox. See
 [lan-talk.md](lan-talk.md) for the API and implementation/testing status.
 
 The S3 partition table still reserves 6.8125 MiB for `user_data` (SPIFFS),

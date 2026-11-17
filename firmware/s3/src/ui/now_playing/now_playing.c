@@ -11,6 +11,7 @@
 #include "ui/now_playing/switch.h"
 #include "ui/shell/audio_chip.h"
 #include "ui/shell/nav.h"
+#include "ui/shell/volume_ring.h"
 #include "ui/widgets/widgets.h"
 
 #define ART_TILE_SIZE 132
@@ -49,13 +50,10 @@ _Static_assert(USB_TILE_Y == UI_BG_USB_TILE_Y, "regenerate backgrounds");
 
 #define TRANSPORT_GAP UI_SPACE_L
 
-#define RING_VISIBLE_MS 1400
-#define RING_FADE_MS    300
 
 typedef struct {
     lv_obj_t *screen;
     ui_now_playing_bg_t bg;
-    lv_obj_t *ring;
     lv_obj_t *source_icon;
     lv_obj_t *source_label;
     // The top pill shows the time and source, unless something else wants
@@ -89,7 +87,6 @@ typedef struct {
 typedef struct {
     lv_obj_t *screen;
     ui_now_playing_bg_t bg;
-    lv_obj_t *ring;
     lv_obj_t *prev_icon;
     lv_obj_t *play_icon;
     lv_obj_t *next_icon;
@@ -229,55 +226,6 @@ bool ui_stream_playing(void) {
     return s_audio.wireless_playing;
 }
 
-static void ring_opa_exec(void *obj, int32_t v) {
-    lv_obj_set_style_opa(obj, (lv_opa_t)v, 0);
-}
-
-// The ring is a HUD, not chrome (mock-react's .ring-svg.volume): it appears
-// for a beat only when the volume moves, then fades so
-// the full circle belongs to the art.
-static void ring_flash(lv_obj_t *ring) {
-    lv_anim_delete(ring, ring_opa_exec);
-    lv_obj_set_style_opa(ring, LV_OPA_COVER, 0);
-
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, ring);
-    lv_anim_set_exec_cb(&a, ring_opa_exec);
-    lv_anim_set_values(&a, LV_OPA_COVER, LV_OPA_TRANSP);
-    lv_anim_set_delay(&a, RING_VISIBLE_MS);
-    lv_anim_set_duration(&a, RING_FADE_MS);
-    lv_anim_start(&a);
-}
-
-static void ring_set_volume(lv_obj_t *ring, uint8_t volume) {
-    if (lv_arc_get_value(ring) != volume) {
-        lv_arc_set_value(ring, volume);
-        ring_flash(ring);
-    }
-    // A zero-length arc still paints its round cap as a stray dot.
-    lv_obj_set_style_arc_opa(ring, volume ? LV_OPA_COVER : LV_OPA_TRANSP, LV_PART_INDICATOR);
-}
-
-// Perimeter volume gauge: read-only (volume authority lives off-screen), a
-// full ring except a bottom gap for the home swipe zone.
-static lv_obj_t *volume_ring_create(lv_obj_t *parent, lv_color_t tint) {
-    lv_obj_t *arc = lv_arc_create(parent);
-    lv_obj_set_size(arc, UI_RING_SIZE, UI_RING_SIZE);
-    lv_arc_set_rotation(arc, 135);
-    lv_arc_set_bg_angles(arc, 0, 270);
-    lv_arc_set_range(arc, 0, 100);
-    lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
-    lv_obj_set_style_arc_width(arc, UI_RING_W, LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(arc, UI_RING_W, LV_PART_MAIN);
-    lv_obj_set_style_arc_color(arc, lv_color_hex(UI_COLOR_SURFACE), LV_PART_MAIN);
-    lv_obj_set_style_arc_color(arc, tint, LV_PART_INDICATOR);
-    lv_obj_set_style_opa(arc, LV_OPA_TRANSP, 0);
-    lv_obj_center(arc);
-    return arc;
-}
-
 static void wait_chip_click_cb(lv_event_t *e) {
     (void)e;
     if (wireless_screen.bluetooth) {
@@ -285,12 +233,6 @@ static void wait_chip_click_cb(lv_event_t *e) {
     }
 }
 
-// The volume ring takes the wash's tint, the art's colour while there's art.
-static void wireless_tint_cb(uint32_t tint) {
-    if (wireless_screen.ring) {
-        lv_obj_set_style_arc_color(wireless_screen.ring, lv_color_hex(tint), LV_PART_INDICATOR);
-    }
-}
 
 static void source_chip_cb(lv_event_t *e) {
     (void)e;
@@ -303,11 +245,13 @@ static void source_chip_cb(lv_event_t *e) {
     }
 }
 
+static void wireless_loaded_cb(lv_event_t *e);
+
 static void wireless_screen_build(void) {
     wireless_screen.screen = ui_screen_create();
+    lv_obj_add_event_cb(wireless_screen.screen, wireless_loaded_cb, LV_EVENT_SCREEN_LOAD_START, NULL);
     ui_now_playing_bg_create(&wireless_screen.bg, wireless_screen.screen, UI_BG_WIRELESS, UI_TINT_AIRPLAY,
-                             wireless_tint_cb);
-    wireless_screen.ring = volume_ring_create(wireless_screen.screen, lv_color_hex(UI_TINT_AIRPLAY));
+                             NULL);
 
     // Y is set per-update (WIRELESS_STATUS_ROW_Y_CONNECTED vs. _WAITING) --
     // the mock's flex column re-centers around whichever block is showing.
@@ -339,10 +283,11 @@ static void wireless_screen_build(void) {
     lv_obj_set_style_text_color(wireless_screen.wait_title, lv_color_hex(UI_COLOR_TEXT), 0);
     lv_obj_align(wireless_screen.wait_title, LV_ALIGN_CENTER, 0, WIRELESS_WAIT_TITLE_Y);
 
-    // Montserrat runs wider than the mock's SF, so the longest hint doesn't
-    // fit in one line; scrolling keeps the mock's single-line layout.
+    // The longest hint doesn't fit in one line, and an ellipsis would cut it.
     wireless_screen.wait_subtitle =
-        ui_marquee_label_create(wireless_screen.screen, UI_FONT_BODY, lv_color_hex(UI_COLOR_TEXT_DIM));
+        ui_line_label_create(wireless_screen.screen, UI_FONT_BODY, lv_color_hex(UI_COLOR_TEXT_DIM));
+    lv_label_set_long_mode(wireless_screen.wait_subtitle, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_height(wireless_screen.wait_subtitle, LV_SIZE_CONTENT);
     lv_obj_align(wireless_screen.wait_subtitle, LV_ALIGN_CENTER, 0, WIRELESS_WAIT_SUBTITLE_Y);
 
     // -- connected / now-playing state --
@@ -373,13 +318,13 @@ static void wireless_screen_build(void) {
     }
 
     wireless_screen.title_label =
-        ui_marquee_label_create(wireless_screen.screen, UI_FONT_TITLE, lv_color_hex(UI_COLOR_TEXT));
+        ui_line_label_create(wireless_screen.screen, UI_FONT_TITLE, lv_color_hex(UI_COLOR_TEXT));
     lv_obj_align(wireless_screen.title_label, LV_ALIGN_CENTER, 0, WIRELESS_TITLE_Y);
 
     // .np-subtitle is 12.5px in the mock; LVGL's bundled Montserrat only ships
     // even sizes, so 12 is the closer of the two neighbors (vs. 14).
     wireless_screen.subtitle_label =
-        ui_marquee_label_create(wireless_screen.screen, UI_FONT_BODY, lv_color_hex(UI_COLOR_TEXT_DIM));
+        ui_line_label_create(wireless_screen.screen, UI_FONT_BODY, lv_color_hex(UI_COLOR_TEXT_DIM));
     lv_obj_align(wireless_screen.subtitle_label, LV_ALIGN_CENTER, 0, WIRELESS_SUBTITLE_Y);
 
     ui_home_zone_create(wireless_screen.screen, nav_swipe_home_cb);
@@ -393,7 +338,6 @@ static void wireless_screen_build(void) {
 static void usb_screen_build(void) {
     usb_screen.screen = ui_screen_create();
     ui_now_playing_bg_create(&usb_screen.bg, usb_screen.screen, UI_BG_USB, UI_TINT_USB, NULL);
-    usb_screen.ring = volume_ring_create(usb_screen.screen, lv_color_hex(UI_TINT_USB));
 
     lv_obj_t *row = ui_status_pill_create(usb_screen.screen, NULL);
     ui_chip_align_top(row);
@@ -489,7 +433,7 @@ static void wireless_pill_refresh(bool waiting) {
     ui_set_visible(wireless_screen.pill_glyph, other);
     if (other) {
         ui_label_set_text(wireless_screen.pill_glyph, item.icon);
-        lv_obj_set_style_text_color(wireless_screen.pill_glyph, item.tint, 0);
+        ui_set_text_color(wireless_screen.pill_glyph, item.tint);
         ui_label_set_text(wireless_screen.source_label, item.text);
         return;
     }
@@ -507,20 +451,27 @@ void np_pill_refresh(void) {
     wireless_pill_refresh(!s_audio.wireless_connected);
 }
 
-void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *track) {
-    static nav_surface_t surface;
-    ui_source_t source = source_of(state->source);
-    lv_color_t tint = lv_color_hex(k_sources[source].tint);
-    s_current_source = source;
+// The last state pushed, drawn when the screen shows: hidden, its widgets
+// would only be restyled and invalidated for nothing on every poll.
+static struct {
+    wireless_state_t state;
+    ui_track_info_t track;
+    bool has_track_info;
+    bool drawn;
+} s_last;
 
-    ring_set_volume(wireless_screen.ring, state->volume);
-    lv_image_set_src(wireless_screen.source_icon, k_sources[source].icon);
-    lv_obj_set_style_image_recolor(wireless_screen.source_icon, tint, 0);
+static void wireless_render(void) {
+    const wireless_state_t *state = &s_last.state;
+    const ui_track_info_t *track = s_last.has_track_info ? &s_last.track : NULL;
+    ui_source_t source = s_current_source;
+    lv_color_t tint = lv_color_hex(k_sources[source].tint);
+    s_last.drawn = true;
+
+    ui_image_set_src(wireless_screen.source_icon, k_sources[source].icon);
+    ui_set_image_recolor(wireless_screen.source_icon, tint);
     // A station has no art; its tile carries the radio glyph instead.
     const lv_image_dsc_t *tile = source == UI_SOURCE_RADIO ? &icon_radio : &icon_music_note;
-    if (lv_image_get_src(wireless_screen.tile_icon) != tile) {
-        lv_image_set_src(wireless_screen.tile_icon, tile);
-    }
+    ui_image_set_src(wireless_screen.tile_icon, tile);
 
     // Unconnected, there's no tile/track to show yet, nor a volume.
     bool waiting = !state->connected;
@@ -528,7 +479,6 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     uint32_t art_tint = track && track->art && ui_settings_current()->art_colors ? track->art_tint : 0;
     ui_now_playing_bg_set_tint(&wireless_screen.bg, art_tint ? art_tint : k_sources[source].tint,
                                !waiting && lv_screen_active() == wireless_screen.screen);
-    wireless_screen.bluetooth = source == UI_SOURCE_BLUETOOTH;
     lv_obj_set_flag(wireless_screen.wait_chip, LV_OBJ_FLAG_CLICKABLE, wireless_screen.bluetooth);
     lv_obj_t *status_row = lv_obj_get_parent(wireless_screen.source_icon);
     // Connected, it's a chip like any other; waiting, it heads the centered
@@ -539,7 +489,6 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
         ui_chip_align_top(status_row);
     }
 
-    ui_set_visible(wireless_screen.ring, !waiting);
     ui_set_visible(wireless_screen.bg.img, !waiting);
     ui_set_visible(wireless_screen.wait_chip, waiting);
     ui_set_visible(wireless_screen.wait_title, waiting);
@@ -557,20 +506,58 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
     const char *idle_title = peer[0] ? peer : source_name;
 
     if (waiting) {
-        lv_image_set_src(wireless_screen.wait_icon, k_sources[source].icon);
+        ui_image_set_src(wireless_screen.wait_icon, k_sources[source].icon);
         ui_label_set_text(wireless_screen.wait_title, k_sources[source].wait_title);
         ui_label_set_text(wireless_screen.wait_subtitle, k_sources[source].wait_hint);
     } else {
         ui_label_set_text(wireless_screen.play_icon,
                            state->muted ? LV_SYMBOL_MUTE : (state->playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));
-        lv_obj_set_style_text_color(wireless_screen.play_icon, lv_color_hex(state->muted ? UI_COLOR_DANGER : UI_COLOR_TEXT), 0);
+        ui_set_text_color(wireless_screen.play_icon, lv_color_hex(state->muted ? UI_COLOR_DANGER : UI_COLOR_TEXT));
         ui_label_set_text(wireless_screen.title_label, has_track ? track->title : idle_title);
         ui_label_set_text(wireless_screen.subtitle_label, subtitle);
-        update_artwork(track);
     }
     ui_set_visible(wireless_screen.tile_icon, !waiting && !wireless_screen.art_version);
     ui_set_visible(wireless_screen.art, !waiting && wireless_screen.art_version);
+}
 
+static void wireless_loaded_cb(lv_event_t *e) {
+    (void)e;
+    if (!s_last.drawn) {
+        wireless_render();
+    }
+}
+
+void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *track) {
+    static nav_surface_t surface;
+    ui_source_t source = source_of(state->source);
+    s_current_source = source;
+    wireless_screen.bluetooth = source == UI_SOURCE_BLUETOOTH;
+
+    bool changed = memcmp(&s_last.state, state, sizeof(*state)) != 0 || s_last.has_track_info != (track != NULL) ||
+                   (track && memcmp(&s_last.track, track, sizeof(*track)) != 0);
+    if (changed) {
+        s_last.state = *state;
+        s_last.has_track_info = track != NULL;
+        if (track) {
+            s_last.track = *track;
+        }
+        s_last.drawn = false;
+    }
+    // Over every screen, the home screen's too: the knob there turns this.
+    uint32_t art_tint = track && track->art && ui_settings_current()->art_colors ? track->art_tint : 0;
+    volume_ring_set_tint(art_tint ? art_tint : k_sources[source].tint);
+    volume_ring_update(source, state->connected, state->volume);
+    // The clock's card shows the art too, so it's taken in whatever shows.
+    if (state->connected) {
+        update_artwork(track);
+    }
+    if (!s_last.drawn && lv_screen_active() == wireless_screen.screen) {
+        wireless_render();
+    }
+
+    bool has_track = track && track->title[0];
+    const char *peer = track ? track->peer : "";
+    const char *idle_title = peer[0] ? peer : k_sources[source].label;
     s_audio.wireless_connected = state->connected;
     s_audio.wireless_playing = state->playing;
     s_audio.wireless_has_track = has_track;
@@ -586,10 +573,12 @@ void ui_update_wireless(const wireless_state_t *state, const ui_track_info_t *tr
 #ifdef AK_USB_AUDIO
 void ui_update_usb(uint8_t volume, bool muted, bool playing) {
     static nav_surface_t surface;
-    ring_set_volume(usb_screen.ring, volume);
+    // Any key apart from the wireless sources' ui_source_t values.
+    volume_ring_update(-2, true, volume);
+    volume_ring_set_tint(UI_TINT_USB);
 
     ui_label_set_text(usb_screen.play_icon, muted ? LV_SYMBOL_MUTE : (playing ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY));
-    lv_obj_set_style_text_color(usb_screen.play_icon, lv_color_hex(muted ? UI_COLOR_DANGER : UI_COLOR_TEXT), 0);
+    ui_set_text_color(usb_screen.play_icon, lv_color_hex(muted ? UI_COLOR_DANGER : UI_COLOR_TEXT));
 
     s_audio.usb_playing = playing;
     nav_surface(usb_screen.screen, playing, false, &surface);

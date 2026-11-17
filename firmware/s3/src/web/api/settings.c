@@ -4,6 +4,7 @@
 #include <string.h>
 #include "airplay/airplay.h"
 #include "cJSON.h"
+#include "core/dev.h"
 #include "core/device_name.h"
 #include "core/now_playing.h"
 #include "core/settings/ui.h"
@@ -119,6 +120,10 @@ esp_err_t web_api_state(httpd_req_t *req) {
     hello_t esp32;
     uart_link_get_esp32_firmware(&esp32);
     cJSON_AddStringToObject(json, "btVersion", esp32.version);
+#ifdef AK_DEV_AUTO_ACCEPT
+    // tools/dev_flash.py reads it to know nobody needs to press anything.
+    cJSON_AddBoolToObject(json, "devAutoAccept", true);
+#endif
     cJSON_AddNumberToObject(json, "freeInternalKb", s.free_internal_kb);
     cJSON_AddNumberToObject(json, "freePsramKb", s.free_psram_kb);
     cJSON_AddNumberToObject(json, "brightness", s.brightness);

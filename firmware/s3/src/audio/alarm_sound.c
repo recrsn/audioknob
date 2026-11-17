@@ -34,6 +34,9 @@
 // A preview fades out after one period rather than ringing on, since
 // AirPlay stays ducked until it ends.
 #define PREVIEW_RELEASE_S 0.4f
+// A ring has to be heard across the room whatever the timer volume is; about
+// 80 % on the cubic volume curve.
+#define CALL_GAIN    0.5f
 #define DUCK_GAIN    0.15f // AirPlay under the chime, about -16 dB
 #define DUCK_S       0.15f
 #define GAIN_SMOOTH  0.001f // one-pole step towards a new volume, per sample
@@ -112,11 +115,14 @@ static const timbre_t k_timbres[] = {
 static const note_t k_timer_notes[] = {{0, E6}, {420, C6}};
 static const note_t k_focus_notes[] = {{0, G5}, {320, E5}, {640, C5}};
 static const note_t k_break_notes[] = {{0, C5}, {180, G5}, {360, C6}};
+// A phone's double ring, as four quick strikes.
+static const note_t k_call_notes[] = {{0, E5}, {140, G5}, {420, E5}, {560, G5}};
 
 static const pattern_t k_patterns[] = {
     [ALARM_SOUND_TIMER] = {k_timer_notes, 2, 2000},
     [ALARM_SOUND_FOCUS_END] = {k_focus_notes, 3, 3000},
     [ALARM_SOUND_BREAK_END] = {k_break_notes, 3, 2400},
+    [ALARM_SOUND_CALL] = {k_call_notes, 4, 3000},
 };
 
 static const char *TAG = "alarm_sound";
@@ -309,7 +315,7 @@ static void mix(int32_t *pcm, size_t frames, uint32_t rate) {
     bool finished = h.releasing && h.release <= 0;
     float duck_to = finished ? 1.0f : DUCK_GAIN;
     float duck_step = (1.0f - DUCK_GAIN) / (DUCK_S * h.rate);
-    float gain_target = s_gain_target;
+    float gain_target = h.pattern == &k_patterns[ALARM_SOUND_CALL] ? CALL_GAIN : s_gain_target;
 
     for (size_t n = 0; n < frames; n++) {
         seq_step();

@@ -370,11 +370,33 @@ static void push_radio(void) {
 }
 
 static ui_talk_t s_talk = {.count = 2, .volume = 70, .peers = {{1, "AudioKnob-Priya-Desk"}, {2, "Kitchen"}}};
-static void on_talk(uint32_t peer, bool held) {
-    s_talk.state = held ? UI_TALK_SENDING : UI_TALK_IDLE;
-    s_talk.level = held ? 65 : 0;
-    snprintf(s_talk.peer, sizeof(s_talk.peer), "%s", peer == 1 ? "AudioKnob-Priya-Desk" : "Kitchen");
+static uint32_t s_talk_called;
+static void talk_set(ui_talk_state_t state, uint32_t peer) {
+    s_talk.state = state;
+    s_talk.peer_id = state == UI_TALK_IDLE ? 0 : peer;
+    s_talk.seconds = 0;
+    snprintf(s_talk.peer, sizeof(s_talk.peer), "%s",
+             state == UI_TALK_IDLE ? "" : peer == 1 ? "AudioKnob-Priya-Desk" : "Kitchen");
     ui_update_talk(&s_talk);
+}
+// A dialled sample knob answers after 2 s; a call's clock ticks once a second.
+static void talk_tick(lv_timer_t *t) {
+    (void)t;
+    if (s_talk.state == UI_TALK_CALLING && lv_tick_elaps(s_talk_called) >= 2000) {
+        talk_set(UI_TALK_IN_CALL, s_talk.peer_id);
+    } else if (s_talk.state == UI_TALK_IN_CALL) {
+        s_talk.seconds++;
+        ui_update_talk(&s_talk);
+    }
+}
+static void on_talk_call(uint32_t peer) {
+    if (peer) {
+        s_talk_called = lv_tick_get();
+    }
+    talk_set(peer ? UI_TALK_CALLING : UI_TALK_IDLE, peer);
+}
+static void on_talk_answer(bool accept) {
+    talk_set(accept ? UI_TALK_IN_CALL : UI_TALK_IDLE, s_talk.peer_id);
 }
 static void on_talk_volume(uint8_t v) {
     s_talk.volume = v;
@@ -502,8 +524,7 @@ static void knob_key_cb(lv_event_t *e) {
     if (key == 'p' || key == 'P') {
         cycle_sample_playback();
     } else if (key == 't' || key == 'T') {
-        s_talk.state = s_talk.state == UI_TALK_RECEIVING ? UI_TALK_IDLE : UI_TALK_RECEIVING;
-        snprintf(s_talk.peer, sizeof(s_talk.peer), "AudioKnob-Priya-Desk"); s_talk.peer_id = 1; s_talk.level = 55; ui_update_talk(&s_talk);
+        talk_set(s_talk.state == UI_TALK_IDLE ? UI_TALK_RINGING : UI_TALK_IDLE, 1);
     } else if (key == 'u' || key == 'U') {
         start_sample_update();
     } else if (key == 'a' || key == 'A') {
@@ -558,7 +579,8 @@ int main(void) {
     ui_set_firmware_handler(on_firmware);
     lv_timer_create(firmware_tick_cb, SIM_FW_TICK_MS, NULL);
     ui_set_radio_handler(on_radio);
-    ui_set_talk_handler(on_talk, on_talk_volume); ui_update_talk(&s_talk);
+    ui_set_talk_handler(on_talk_call, on_talk_answer, on_talk_volume); ui_update_talk(&s_talk);
+    lv_timer_create(talk_tick, 1000, NULL);
     ui_set_transport_handler(on_transport);
     ui_update_radio(&s_radio);
     lv_timer_create(radio_tick_cb, 500, NULL);

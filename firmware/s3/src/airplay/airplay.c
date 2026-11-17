@@ -299,8 +299,10 @@ void airplay_init(void) {
     airplay_player_init();
     airplay_player_set_volume(s_state.volume);
 
-    BaseType_t ok =
-        xTaskCreatePinnedToCore(ctrl_task, "airplay_ctrl", CTRL_STACK_SIZE, NULL, CTRL_TASK_PRIO, &s_ctrl_task, 0);
+    // Remote commands and receiver setup: control only, never flash, so a
+    // PSRAM stack.
+    BaseType_t ok = xTaskCreatePinnedToCoreWithCaps(ctrl_task, "airplay_ctrl", CTRL_STACK_SIZE, NULL, CTRL_TASK_PRIO,
+                                                    &s_ctrl_task, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     BaseType_t art_ok = xTaskCreatePinnedToCoreWithCaps(art_task, "airplay_art", ART_STACK_SIZE, NULL, ART_TASK_PRIO,
                                                         &s_art_task, tskNO_AFFINITY,
                                                         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);

@@ -11,6 +11,7 @@ typedef enum {
     ALARM_SOUND_TIMER,     // ding-dong
     ALARM_SOUND_FOCUS_END, // falling: time for a break
     ALARM_SOUND_BREAK_END, // rising: back to work
+    ALARM_SOUND_CALL,      // a Talk call ringing
 } alarm_sound_kind_t;
 
 typedef enum {

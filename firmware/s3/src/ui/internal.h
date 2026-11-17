@@ -11,6 +11,13 @@
 
 void ui_label_set_text(lv_obj_t *label, const char *text);
 void ui_set_visible(lv_obj_t *obj, bool visible);
+// Setters that skip an unchanged value: LVGL invalidates (and an image
+// re-reads its source header) on every call, which the 33 ms poll would
+// otherwise pay for every frame.
+void ui_image_set_src(lv_obj_t *img, const void *src);
+void ui_set_text_color(lv_obj_t *obj, lv_color_t color);
+void ui_set_image_recolor(lv_obj_t *obj, lv_color_t color);
+void ui_set_opa(lv_obj_t *obj, lv_opa_t opa);
 
 // A circular, non-clickable chip with a centered label; returns the label.
 // Callers make the chip (the label's parent) clickable if it should be.

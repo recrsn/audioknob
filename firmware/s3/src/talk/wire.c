@@ -18,7 +18,7 @@ size_t talk_rtp_encode(uint8_t *out, const talk_packet_t *p) {
     if (!p->length || p->length > TALK_PAYLOAD)
         return 0;
     out[0] = 0x80;
-    out[1] = 96;
+    out[1] = TALK_RTP_TYPE;
     put16(out + 2, p->sequence);
     put32(out + 4, p->timestamp);
     put32(out + 8, p->ssrc);
@@ -26,7 +26,7 @@ size_t talk_rtp_encode(uint8_t *out, const talk_packet_t *p) {
     return 12 + p->length;
 }
 bool talk_rtp_decode(talk_packet_t *p, const uint8_t *data, size_t len) {
-    if (len < 12 || data[0] >> 6 != 2 || (data[1] & 0x7f) != 96)
+    if (len < 12 || data[0] >> 6 != 2 || (data[1] & 0x7f) != TALK_RTP_TYPE)
         return false;
     size_t offset = 12 + 4 * (data[0] & 15);
     if (offset > len)
@@ -61,8 +61,20 @@ void talk_jitter_init(talk_jitter_t *j, uint16_t first) {
 }
 bool talk_jitter_push(talk_jitter_t *j, const talk_packet_t *p) {
     int16_t ahead = (int16_t)(p->sequence - j->next);
-    if (ahead < 0 || ahead >= TALK_JITTER_FRAMES || p->length > TALK_PAYLOAD || !p->length)
+    if (ahead < 0 || p->length > TALK_PAYLOAD || !p->length)
         return false;
+    // Past the window: the sender runs ahead of playback (a faster clock, or
+    // this side fell behind). Skip the oldest frames so the newest fits,
+    // rather than refusing it and every packet after it.
+    if (ahead >= TALK_JITTER_FRAMES) {
+        uint16_t next = (uint16_t)(p->sequence - (TALK_JITTER_FRAMES - 1));
+        for (int i = 0; i < TALK_JITTER_FRAMES; i++) {
+            talk_jitter_slot_t *slot = &j->slots[i];
+            if ((int16_t)(slot->sequence - next) < 0)
+                slot->present = false;
+        }
+        j->next = next;
+    }
     talk_jitter_slot_t *slot = &j->slots[p->sequence % TALK_JITTER_FRAMES];
     if (slot->present && slot->sequence == p->sequence)
         return false;
@@ -80,4 +92,8 @@ size_t talk_jitter_pop(talk_jitter_t *j, uint8_t *payload) {
     slot->present = false;
     j->next++;
     return n;
+}
+bool talk_jitter_ready(const talk_jitter_t *j) {
+    const talk_jitter_slot_t *slot = &j->slots[j->next % TALK_JITTER_FRAMES];
+    return slot->present && slot->sequence == j->next;
 }

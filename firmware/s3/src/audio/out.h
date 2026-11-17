@@ -43,3 +43,6 @@ uint32_t audio_out_queued_us(int64_t *now_us);
 
 // Times the DMA ran dry since boot (each one played as silence).
 uint32_t audio_out_underruns(void);
+// DMA buffers sent without fresh audio since boot; a difference over a
+// stretch of continuous writing counts the writer's gaps.
+uint32_t audio_out_dry_buffers(void);

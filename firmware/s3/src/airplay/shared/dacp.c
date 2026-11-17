@@ -14,6 +14,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 #include "airplay/shared/http_util.h"
 #include "lwip/sockets.h"
 #include "mdns.h"
@@ -65,7 +66,7 @@ static void search_task(void *arg) {
     }
 
     xSemaphoreGive(s.done);
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 void dacp_init(void) {
@@ -96,8 +97,9 @@ void dacp_start(const char *dacp_id, const char *active_remote) {
     snprintf(s.active_remote, sizeof(s.active_remote), "%s", active_remote);
     xSemaphoreGive(s.lock);
     s.searching = true;
-    if (xTaskCreatePinnedToCore(search_task, "dacp_search", SEARCH_STACK_SIZE, NULL, SEARCH_TASK_PRIO, &s.task,
-                                tskNO_AFFINITY) != pdPASS) {
+    // An mDNS lookup, never flash: a PSRAM stack.
+    if (xTaskCreatePinnedToCoreWithCaps(search_task, "dacp_search", SEARCH_STACK_SIZE, NULL, SEARCH_TASK_PRIO, &s.task,
+                                        tskNO_AFFINITY, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
         s.searching = false;
         s.task = NULL;
     }

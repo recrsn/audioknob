@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/idf_additions.h"
 #include "drivers/uart_link.h"
 
 #define PIN_I2S_SWITCH GPIO_NUM_0
@@ -101,7 +102,9 @@ void audio_source_init(void (*on_preempted)(audio_source_t source)) {
     select_locked(AUDIO_SOURCE_ESP32);
     taskEXIT_CRITICAL(&s_lock);
 
-    BaseType_t ok = xTaskCreate(esp32_watch_task, "src_watch", WATCH_TASK_STACK, NULL, 5, NULL);
+    // Polls shared state, never flash: a PSRAM stack.
+    BaseType_t ok =
+        xTaskCreateWithCaps(esp32_watch_task, "src_watch", WATCH_TASK_STACK, NULL, 5, NULL, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     ESP_ERROR_CHECK(ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 }
 

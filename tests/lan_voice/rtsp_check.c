@@ -2,6 +2,10 @@
 #include "talk/rtsp.h"
 #include "airplay/shared/http_util.h"
 #include <stdatomic.h>
+
+// The callee's side, as talk.c would answer it.
+static atomic_uint ringing_call, ended_call, next_call = 1;
+static atomic_int verdict = TALK_ANSWER_PENDING;
 static atomic_bool active;
 uint32_t esp_random(void) {
     static atomic_uint value = 12;
@@ -15,16 +19,44 @@ bool wifi_get_station(char *ssid, size_t slen, char *ip, size_t ilen) {
     snprintf(ip, ilen, "127.0.0.1");
     return true;
 }
-static bool start(uint32_t ip, uint16_t port, uint16_t seq, const char *name) {
+static uint32_t ring(uint32_t ip, uint16_t port, uint16_t seq, const char *name) {
     assert(ip == inet_addr("127.0.0.1") && port == 42425 && seq == 65000 && !strcmp(name, "Host test knob"));
-    atomic_store(&active, true);
-    return true;
+    if (atomic_load(&ringing_call))
+        return 0;
+    uint32_t call = atomic_fetch_add(&next_call, 1);
+    atomic_store(&verdict, TALK_ANSWER_PENDING);
+    atomic_store(&ringing_call, call);
+    return call;
 }
-static void stop(void) {
+static talk_answer_t answer(uint32_t call, uint16_t *seq, uint32_t *time) {
+    assert(call == atomic_load(&ringing_call));
+    *seq = 4242;
+    *time = 99;
+    talk_answer_t a = atomic_load(&verdict);
+    if (a == TALK_ANSWER_ACCEPTED)
+        atomic_store(&active, true);
+    return a;
+}
+static void stop(uint32_t call) {
+    atomic_store(&ended_call, call);
+    atomic_store(&ringing_call, 0);
     atomic_store(&active, false);
 }
-static bool is_active(void) {
-    return atomic_load(&active);
+static bool is_active(uint32_t call) {
+    return call == atomic_load(&ringing_call) && atomic_load(&active);
+}
+static void wait_for(atomic_uint *value, unsigned want) {
+    for (int i = 0; i < 200 && atomic_load(value) != want; i++)
+        usleep(10000);
+    assert(atomic_load(value) == want);
+}
+static talk_dial_t wait_answer(int fd, uint16_t *seq) {
+    talk_dial_t r = TALK_DIAL_RINGING;
+    for (int i = 0; i < 200 && r == TALK_DIAL_RINGING; i++) {
+        r = talk_rtsp_answer(fd, seq);
+        usleep(10000);
+    }
+    return r;
 }
 static void legacy_parser(void) {
     int fd[2];
@@ -43,16 +75,54 @@ static void legacy_parser(void) {
 }
 int main(void) {
     legacy_parser();
-    talk_rtsp_init(&(talk_rtsp_ops_t){start, stop, is_active});
+    talk_rtsp_init(&(talk_rtsp_ops_t){ring, answer, stop, is_active});
     usleep(200000);
-    uint16_t port = 0;
-    int fd = talk_rtsp_begin(inet_addr("127.0.0.1"), 65000, 123456, &port);
-    assert(fd >= 0 && port == 42425 && talk_rtsp_alive(fd) && is_active());
-    int busy = talk_rtsp_begin(inet_addr("127.0.0.1"), 65000, 123456, &port);
-    assert(busy < 0 && talk_rtsp_alive(fd) && is_active());
+    uint16_t port = 0, seq = 0;
+
+    // Rings until answered; the answer carries the callee's stream start.
+    int fd = talk_rtsp_dial(inet_addr("127.0.0.1"), 65000, 123456, &port);
+    assert(fd >= 0 && port == 42425);
+    wait_for(&ringing_call, 1);
+    usleep(150000);
+    assert(talk_rtsp_answer(fd, &seq) == TALK_DIAL_RINGING);
+    atomic_store(&verdict, TALK_ANSWER_ACCEPTED);
+    assert(wait_answer(fd, &seq) == TALK_DIAL_ANSWERED && seq == 4242 && talk_rtsp_alive(fd));
+
+    // One call at a time.
+    int busy = talk_rtsp_dial(inet_addr("127.0.0.1"), 65000, 123456, &port);
+    assert(busy >= 0 && wait_answer(busy, &seq) == TALK_DIAL_BUSY);
+    talk_rtsp_end(busy);
+
+    // Hanging up on either side ends it for the other.
     talk_rtsp_end(fd);
-    for (int i = 0; i < 100 && is_active(); i++)
+    wait_for(&ended_call, 1);
+    assert(!atomic_load(&active));
+
+    // Declined.
+    fd = talk_rtsp_dial(inet_addr("127.0.0.1"), 65000, 123456, &port);
+    assert(fd >= 0);
+    wait_for(&ringing_call, 2);
+    atomic_store(&verdict, TALK_ANSWER_DECLINED);
+    assert(wait_answer(fd, &seq) == TALK_DIAL_DECLINED);
+    wait_for(&ended_call, 2);
+    talk_rtsp_end(fd);
+
+    // The caller giving up while it rings stops the ring.
+    fd = talk_rtsp_dial(inet_addr("127.0.0.1"), 65000, 123456, &port);
+    assert(fd >= 0);
+    wait_for(&ringing_call, 3);
+    talk_rtsp_end(fd);
+    wait_for(&ended_call, 3);
+
+    // The callee hanging up closes the caller's connection.
+    fd = talk_rtsp_dial(inet_addr("127.0.0.1"), 65000, 123456, &port);
+    wait_for(&ringing_call, 4);
+    atomic_store(&verdict, TALK_ANSWER_ACCEPTED);
+    assert(wait_answer(fd, &seq) == TALK_DIAL_ANSWERED);
+    atomic_store(&active, false);
+    for (int i = 0; i < 100 && talk_rtsp_alive(fd); i++)
         usleep(10000);
-    assert(!is_active());
-    puts("Shared AirPlay parser and RTSP call setup/busy/close passed");
+    assert(!talk_rtsp_alive(fd));
+    talk_rtsp_end(fd);
+    puts("Shared AirPlay parser and RTSP call ring/answer/busy/decline/hang-up passed");
 }

@@ -10,6 +10,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "core/dev.h"
 #include "ambience/focus_sound.h"
 #include "drivers/haptic.h"
 #include "drivers/knob.h"
@@ -54,6 +55,34 @@ static uint32_t art_tint(const uint16_t *art, uint32_t version) {
 // already holds the LVGL lock for the whole lv_timer_handler() call this
 // fires inside of), at the same ~33ms cadence the ESP32 side rate-limits
 // its outgoing STATE_UPDATE frames to.
+#ifdef AK_DEV_AUTO_ACCEPT
+// Unattended testing only (tools/dev_flash.sh): answers what normally needs
+// a hand on the device, so never in a release, since the device press is
+// all that guards installing firmware from the unauthenticated web page.
+static void dev_auto_accept(const ota_status_t *ota, const ui_talk_t *talk) {
+    static int64_t ringing_since;
+    static bool installing;
+    // Once per upload: the state stays READY while ota_install()'s task starts.
+    if (ota->state != OTA_READY) {
+        installing = false;
+    } else if (!installing) {
+        installing = true;
+        ESP_LOGW(TAG, "dev: installing the uploaded firmware unasked");
+        ota_install();
+    }
+    // A second of ringing first, so the ring tone still gets exercised.
+    if (talk->state != UI_TALK_RINGING) {
+        ringing_since = 0;
+    } else if (!ringing_since) {
+        ringing_since = esp_timer_get_time();
+    } else if (esp_timer_get_time() - ringing_since > 1000000) {
+        ESP_LOGW(TAG, "dev: answering the call unasked");
+        talk_answer(true);
+        ringing_since = 0;
+    }
+}
+#endif
+
 static void state_poll_timer_cb(lv_timer_t *timer) {
     (void)timer;
 
@@ -135,6 +164,9 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
     ui_talk_t talk;
     talk_get_state(&talk);
     ui_update_talk(&talk);
+#ifdef AK_DEV_AUTO_ACCEPT
+    dev_auto_accept(&ota, &talk);
+#endif
 
     static uint32_t weather_version;
     ui_weather_t weather;
@@ -144,10 +176,18 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
         ui_update_weather(&weather);
     }
 
+    // localtime_r() walks the zone's rules, so only once a second.
+    static time_t clock_shown;
+    static bool clock_synced;
     time_t now = time(NULL);
-    struct tm local_time;
-    localtime_r(&now, &local_time);
-    ui_update_clock(ntp_is_synced(), &local_time);
+    bool synced = ntp_is_synced();
+    if (now != clock_shown || synced != clock_synced) {
+        clock_shown = now;
+        clock_synced = synced;
+        struct tm local_time;
+        localtime_r(&now, &local_time);
+        ui_update_clock(synced, &local_time);
+    }
 }
 
 static void feedback(haptic_effect_t effect) {
@@ -270,6 +310,9 @@ static void on_device_name(const char *name) {
 void app_main(void) {
     lcd_driver_backlight_init();
     ESP_LOGI(TAG, "ESP32-S3 target boot");
+#ifdef AK_DEV_AUTO_ACCEPT
+    ESP_LOGW(TAG, "dev build: firmware updates and calls are accepted without a press");
+#endif
     ntp_restore_rtc();
 
     uart_link_start();
@@ -295,7 +338,7 @@ void app_main(void) {
     ui_set_transport_handler(now_playing_transport);
     ui_set_source_handler(now_playing_pick);
     ui_set_radio_handler(radio_play);
-    ui_set_talk_handler(talk_press, talk_set_volume);
+    ui_set_talk_handler(talk_call, talk_answer, talk_set_volume);
     ui_set_pairing_handler(on_pairing);
     ui_set_firmware_handler(on_firmware);
     ui_set_alert_handler(on_alert);

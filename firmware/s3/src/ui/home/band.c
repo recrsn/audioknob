@@ -54,6 +54,6 @@ void band_refresh(void) {
     }
     s_band.app = item.app;
     ui_label_set_text(s_band.glyph, item.icon);
-    lv_obj_set_style_text_color(s_band.glyph, item.tint, 0);
+    ui_set_text_color(s_band.glyph, item.tint);
     ui_label_set_text(s_band.label, item.text);
 }
