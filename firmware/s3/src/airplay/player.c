@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "audio/out.h"
+#include "audio/pcm.h"
 #include "audio/source.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -54,10 +55,6 @@
 #define PLAYER_TASK_PRIO 15
 #define PLAYER_TASK_CORE 1
 
-#define GAIN_UNITY 32768
-// Per-frame exponential approach: ~3 ms time constant.
-#define GAIN_RAMP_DIV 256
-
 typedef struct {
     int64_t playtime_us;
     uint32_t rate;
@@ -95,8 +92,8 @@ static uint32_t s_dropped;
 static SemaphoreHandle_t s_lock;
 static TaskHandle_t s_task;
 static volatile bool s_flushed;
-static volatile int32_t s_gain_target = GAIN_UNITY;
-static int32_t s_gain = GAIN_UNITY;
+static volatile int32_t s_gain_target = PCM_GAIN_UNITY;
+static int32_t s_gain = PCM_GAIN_UNITY;
 static ff_t s_ff[] = {{.rate = 44100}, {.rate = 48000}};
 
 // One spare frame for a stretch trim.
@@ -172,18 +169,6 @@ static size_t copy_trimmed(const int32_t *pcm, size_t frames, int adjust) {
     memcpy(s_out, pcm, (at + 1) * 2 * sizeof(int32_t));
     memcpy(s_out + (at + 1) * 2, pcm + at * 2, (frames - at) * 2 * sizeof(int32_t));
     return frames + 1;
-}
-
-static void apply_gain(size_t frames) {
-    int32_t target = s_gain_target;
-    for (size_t i = 0; i < frames; i++) {
-        if (s_gain != target) {
-            int32_t step = (target - s_gain) / GAIN_RAMP_DIV;
-            s_gain += step ? step : (target > s_gain ? 1 : -1);
-        }
-        s_out[i * 2] = (int32_t)(((int64_t)s_out[i * 2] * s_gain) >> 15);
-        s_out[i * 2 + 1] = (int32_t)(((int64_t)s_out[i * 2 + 1] * s_gain) >> 15);
-    }
 }
 
 static int feed_forward(sync_t *sync, const ff_t *ff, size_t frames) {
@@ -343,7 +328,7 @@ static void play_head_locked(sync_t *sync) {
     pop_locked(1);
     xSemaphoreGive(s_lock);
 
-    apply_gain(frames);
+    pcm_scale32(s_out, frames, &s_gain, s_gain_target);
     audio_out_write(s_out, frames);
     sync->last_audio_us = esp_timer_get_time();
 }
@@ -424,6 +409,5 @@ void airplay_player_flush(void) {
 }
 
 void airplay_player_set_volume(uint8_t volume_pct) {
-    float v = volume_pct / 100.0f;
-    s_gain_target = (int32_t)(v * v * v * GAIN_UNITY);
+    s_gain_target = pcm_gain_for_volume(volume_pct);
 }

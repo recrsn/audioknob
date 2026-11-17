@@ -96,7 +96,7 @@ typedef struct session {
     task_stats_t *stats; // CPU per task over the call
     int32_t gain;
     talk_jitter_t jitter;
-    int16_t pcm[TALK_FRAME_SAMPLES * 2];
+    int16_t pcm[TALK_FRAME_SAMPLES];
     int16_t far[TALK_FRAME_SAMPLES];
     // For the end-of-call log.
     uint32_t frames, rx, rx_foreign, rx_bad, rx_rejected, concealed;
@@ -580,13 +580,9 @@ static void call_frame(int sock, session_t **session) {
     int32_t target = pcm_gain_for_volume(s_ui.volume) / 2;
     s_ui.seconds = (uint32_t)((now_us() - s->answered) / 1000000);
     xSemaphoreGive(s_lock);
-    // Volume goes on before the reference is taken, so the canceller hears
-    // what the speaker plays.
-    memcpy(s->pcm, s->far, sizeof(s->far));
-    pcm_to_stereo(s->pcm, TALK_FRAME_SAMPLES, 1);
-    pcm_apply_gain(s->pcm, TALK_FRAME_SAMPLES, &s->gain, target);
-    for (int i = 0; i < TALK_FRAME_SAMPLES; i++)
-        s->far[i] = s->pcm[2 * i];
+    // Volume goes on before playout takes the canceller's reference, so it
+    // hears what the speaker plays.
+    pcm_apply_gain(s->far, TALK_FRAME_SAMPLES, 1, &s->gain, target);
     talk_playout_push(s->far, TALK_FRAME_SAMPLES);
     // Not counting the wait for the mic, whose processing mic_stop() logs.
     int64_t busy = now_us() - started;

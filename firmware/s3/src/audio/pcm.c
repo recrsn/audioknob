@@ -69,15 +69,22 @@ int32_t pcm_gain_for_volume(uint8_t volume_pct) {
     return (int32_t)(v * v * v * PCM_GAIN_UNITY);
 }
 
-void pcm_apply_gain(int16_t *pcm, size_t frames, int32_t *gain, int32_t target) {
+static inline int32_t ramp(int32_t g, int32_t target) {
+    if (g == target) {
+        return g;
+    }
+    int32_t step = (target - g) / GAIN_RAMP_DIV;
+    return g + (step ? step : (target > g ? 1 : -1));
+}
+
+void pcm_apply_gain(int16_t *pcm, size_t frames, int channels, int32_t *gain, int32_t target) {
     int32_t g = *gain;
     for (size_t i = 0; i < frames; i++) {
-        if (g != target) {
-            int32_t step = (target - g) / GAIN_RAMP_DIV;
-            g += step ? step : (target > g ? 1 : -1);
+        g = ramp(g, target);
+        for (int c = 0; c < channels; c++) {
+            int16_t *x = &pcm[i * channels + c];
+            *x = (int16_t)((*x * g) >> 15);
         }
-        pcm[i * 2] = (int16_t)((pcm[i * 2] * g) >> 15);
-        pcm[i * 2 + 1] = (int16_t)((pcm[i * 2 + 1] * g) >> 15);
     }
     *gain = g;
 }
@@ -85,13 +92,20 @@ void pcm_apply_gain(int16_t *pcm, size_t frames, int32_t *gain, int32_t target) 
 void pcm_apply_gain32(const int16_t *in, int32_t *out, size_t frames, int32_t *gain, int32_t target) {
     int32_t g = *gain;
     for (size_t i = 0; i < frames; i++) {
-        if (g != target) {
-            int32_t step = (target - g) / GAIN_RAMP_DIV;
-            g += step ? step : (target > g ? 1 : -1);
-        }
+        g = ramp(g, target);
         // Q15 gain: the product is the sample left-justified in 31 bits.
         out[i * 2] = in[i * 2] * g * 2;
         out[i * 2 + 1] = in[i * 2 + 1] * g * 2;
+    }
+    *gain = g;
+}
+
+void pcm_scale32(int32_t *pcm, size_t frames, int32_t *gain, int32_t target) {
+    int32_t g = *gain;
+    for (size_t i = 0; i < frames; i++) {
+        g = ramp(g, target);
+        pcm[i * 2] = (int32_t)(((int64_t)pcm[i * 2] * g) >> 15);
+        pcm[i * 2 + 1] = (int32_t)(((int64_t)pcm[i * 2 + 1] * g) >> 15);
     }
     *gain = g;
 }
