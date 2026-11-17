@@ -487,7 +487,6 @@ void ui_tools_build(lv_obj_t *const screens[UI_APP_COUNT], void (*on_alert)(lv_o
     static void (*const builders[UI_APP_COUNT])(lv_obj_t *) = {
         [UI_APP_RADIO] = radio_page_build,
         [UI_APP_TALK] = talk_page_build,
-        [UI_APP_INBOX] = inbox_page_build,
 #ifdef AK_LIGHTS
         [UI_APP_LIGHTS] = lights_page_build,
 #endif

@@ -10,6 +10,10 @@
 // Same rate as Waveshare's stock firmware on this link; headroom for
 // bulk payloads like cover art.
 #define PROTOCOL_UART_BAUD 921600
+// protocol_crc8() counts TYPE + LEN + PAYLOAD in a uint8_t, so a longer
+// payload would wrap that count and go unchecked. The CRC itself can't
+// change: an ESP32 on older firmware has to accept the update that fixes it.
+#define PROTOCOL_MAX_PAYLOAD (UINT8_MAX - 2)
 
 typedef enum {
     MSG_STATE_UPDATE = 0x01,
@@ -62,12 +66,13 @@ typedef struct __attribute__((packed)) {
 } fw_begin_t;
 
 #define FW_CHUNK_HEADER 4
-#define FW_CHUNK_MAX_DATA (UINT8_MAX - FW_CHUNK_HEADER)
+#define FW_CHUNK_MAX_DATA (PROTOCOL_MAX_PAYLOAD - FW_CHUNK_HEADER)
 
 typedef struct __attribute__((packed)) {
     uint32_t offset;
     uint8_t data[FW_CHUNK_MAX_DATA]; // only LEN - FW_CHUNK_HEADER bytes are sent
 } fw_chunk_t;
+_Static_assert(sizeof(fw_chunk_t) <= PROTOCOL_MAX_PAYLOAD, "fw_chunk_t must stay within the CRC's reach");
 
 typedef enum {
     FW_OK = 0,
@@ -188,13 +193,14 @@ typedef struct __attribute__((packed)) {
 // rather than asking for a resend. MSG_ART_END with total_len 0 means the
 // track has no artwork (or the transfer failed): clear it.
 #define ART_CHUNK_HEADER 5
-#define ART_CHUNK_MAX_DATA (UINT8_MAX - ART_CHUNK_HEADER)
+#define ART_CHUNK_MAX_DATA (PROTOCOL_MAX_PAYLOAD - ART_CHUNK_HEADER)
 
 typedef struct __attribute__((packed)) {
     uint8_t id;       // changes per image, so late chunks of an old one are ignored
     uint32_t offset;
     uint8_t data[ART_CHUNK_MAX_DATA];  // only LEN - ART_CHUNK_HEADER bytes are sent
 } art_chunk_t;
+_Static_assert(sizeof(art_chunk_t) <= PROTOCOL_MAX_PAYLOAD, "art_chunk_t must stay within the CRC's reach");
 
 typedef struct __attribute__((packed)) {
     uint8_t id;
@@ -222,6 +228,8 @@ typedef struct {
     uint8_t type;
     uint8_t len;
     uint8_t idx;
+    uint8_t crc;       // running, over the bytes the sender's CRC covers
+    uint8_t crc_left;  // payload bytes still to add to it
     uint8_t payload[UINT8_MAX];
 } protocol_parser_t;
 

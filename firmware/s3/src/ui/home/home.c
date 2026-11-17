@@ -27,7 +27,7 @@ static struct {
     lv_obj_t *weather_air_icon[2];
     lv_obj_t *weather_air[2];
     // One per app, shown while that app has something in progress; Talk
-    // and the inbox show in the band instead.
+    // shows in the band instead.
     lv_obj_t *chips[UI_APP_COUNT];
     lv_obj_t *chip_labels[UI_APP_COUNT];
 } idle_screen;

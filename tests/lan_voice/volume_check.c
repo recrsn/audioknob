@@ -51,10 +51,9 @@ int main(void) {
     owner = AUDIO_SOURCE_TALK;
     assert(now_playing_adjust_volume(5) && volume == 75);
     assert(now_playing_adjust_volume(100) && volume == 100);
-    owner = AUDIO_SOURCE_NOTE;
     assert(now_playing_set_volume(20) && volume == 20);
     assert(now_playing_adjust_volume(-100) && volume == 0 && old_source_changes == 0);
     owner = AUDIO_SOURCE_ESP32;
     assert(!now_playing_adjust_volume(1) && old_source_changes == 0);
-    puts("Background Talk and voice-note knob/web volume routing passed");
+    puts("Background Talk knob/web volume routing passed");
 }

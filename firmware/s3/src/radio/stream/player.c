@@ -27,7 +27,7 @@
 
 #define IN_CHUNK 2048
 #define RS_OUT_FRAMES 4096
-// audio_out_write16() blocks until its frames are queued; short writes let a
+// audio_out_write() blocks until its frames are queued; short writes let a
 // stop silence output within ~12 ms.
 #define WRITE_FRAMES 512
 #define DECODE_ERRORS_RESET 20
@@ -131,6 +131,7 @@ typedef struct {
     uint8_t *out; // decoder output, then the same frames as stereo
     size_t out_size;
     int16_t rs[RS_OUT_FRAMES * 2];
+    int32_t wide[WRITE_FRAMES * 2]; // one write, with the volume applied
     pcm_resampler_t resampler;
     int32_t gain;
 } decode_t;
@@ -208,13 +209,14 @@ static void play_pcm(decode_t *d, size_t bytes) {
     for (size_t at = 0; at < frames; at += piece) {
         size_t n = frames - at < piece ? frames - at : piece;
         size_t out = pcm_resample(&d->resampler, pcm + at * 2, n, d->rs);
-        pcm_apply_gain(d->rs, out, &d->gain, s_gain_target);
         for (size_t w = 0; w < out; w += WRITE_FRAMES) {
             if (s_out_epoch != d->epoch) {
                 return;
             }
+            size_t count = out - w < WRITE_FRAMES ? out - w : WRITE_FRAMES;
+            pcm_apply_gain32(d->rs + w * 2, d->wide, count, &d->gain, s_gain_target);
             audio_out_set_rate(d->resampler.out_rate);
-            audio_out_write16(d->rs + w * 2, out - w < WRITE_FRAMES ? out - w : WRITE_FRAMES);
+            audio_out_write(d->wide, count);
         }
     }
     if (s_out_epoch == d->epoch) {

@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <strings.h>
+
+#include "core/device_name.h"
 #include "esp_log.h"
 #include "web/api/api.h"
 #include "web/page.h"
@@ -104,6 +107,44 @@ void web_copy_utf8(char *out, size_t len, const char *in) {
     out[n] = '\0';
 }
 
+// A page on another site can point a DNS name of its own at this device and
+// so become same-origin with it (DNS rebinding). Its requests still carry
+// that name in Host, so only the device's own names and bare addresses get
+// an answer.
+static bool host_is_ours(httpd_req_t *req) {
+    char host[HEADER_MAX], own[HEADER_MAX];
+    if (httpd_req_get_hdr_value_len(req, "Host") == 0) {
+        return true; // no browser omits it
+    }
+    if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
+        return false;
+    }
+    if (host[0] == '[') {
+        return true; // an IPv6 literal
+    }
+    host[strcspn(host, ":")] = '\0';
+    if (host[0] && host[strspn(host, "0123456789.")] == '\0') {
+        return true;
+    }
+    device_name_hostname(own, sizeof(own) - sizeof(".local"));
+    if (!strcasecmp(host, own)) {
+        return true;
+    }
+    strcat(own, ".local");
+    return !strcasecmp(host, own);
+}
+
+// Every handler is registered behind this; user_ctx is its httpd_uri_t.
+static esp_err_t guarded_handler(httpd_req_t *req) {
+    if (!host_is_ours(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Unknown host");
+        // Closes the socket rather than reading a refused body.
+        return ESP_FAIL;
+    }
+    const httpd_uri_t *uri = req->user_ctx;
+    return uri->handler(req);
+}
+
 bool web_settings_start(void) {
     if (s_server) {
         return true;
@@ -113,12 +154,7 @@ bool web_settings_start(void) {
         {.uri = "/api/state", .method = HTTP_GET, .handler = web_api_state},
         {.uri = "/api/zones", .method = HTTP_GET, .handler = web_api_zones},
         {.uri = "/api/art.bmp", .method = HTTP_GET, .handler = web_api_art},
-        {.uri = "/api/voice", .method = HTTP_GET, .handler = web_api_voice_get},
-        {.uri = "/api/voice", .method = HTTP_POST, .handler = web_api_voice_post},
         {.uri = "/api/talk", .method = HTTP_GET, .handler = web_api_talk_get},
-        {.uri = "/api/messages", .method = HTTP_GET, .handler = web_api_messages_get},
-        {.uri = "/api/messages", .method = HTTP_POST, .handler = web_api_messages_post},
-        {.uri = "/api/mic.wav", .method = HTTP_GET, .handler = web_api_mic_wav},
         {.uri = "/api/set", .method = HTTP_POST, .handler = web_api_set},
         {.uri = "/api/name", .method = HTTP_POST, .handler = web_api_name},
         {.uri = "/api/location", .method = HTTP_POST, .handler = web_api_location},
@@ -143,7 +179,10 @@ bool web_settings_start(void) {
         return false;
     }
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
-        httpd_register_uri_handler(s_server, &uris[i]);
+        httpd_uri_t uri = uris[i];
+        uri.handler = guarded_handler;
+        uri.user_ctx = (void *)&uris[i];
+        httpd_register_uri_handler(s_server, &uri);
     }
     ESP_LOGI(TAG, "device page up");
     return true;

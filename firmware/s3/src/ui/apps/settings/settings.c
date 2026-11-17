@@ -72,7 +72,6 @@ typedef enum {
     ROW_VERSION,
     ROW_UPDATES,
     ROW_MEMORY,
-    ROW_STORAGE,
     ROW_COUNT,
 } row_t;
 
@@ -109,7 +108,6 @@ static const struct {
     [ROW_UPDATES] = {"Check for updates", KIND_VALUE},
     [ROW_VERSION] = {"Version", KIND_VALUE},
     [ROW_MEMORY] = {"Free memory", KIND_VALUE},
-    [ROW_STORAGE] = {"Storage used", KIND_VALUE},
 };
 
 // Top to bottom: a header (row < 0) or a row.
@@ -147,7 +145,6 @@ static const struct {
     {NULL, ROW_VERSION},
     {NULL, ROW_UPDATES},
     {NULL, ROW_MEMORY},
-    {NULL, ROW_STORAGE},
 };
 #define LAYOUT_COUNT (sizeof(k_layout) / sizeof(k_layout[0]))
 
@@ -351,16 +348,6 @@ static void value_text(int row, char *buf, size_t len) {
         break;
     case ROW_VERSION:
         snprintf(buf, len, "%s", s->version[0] ? s->version : "dev");
-        break;
-    case ROW_STORAGE:
-        if (s->storage_total_bytes) {
-            unsigned used = s->storage_used_bytes / 1024;
-            unsigned total = s->storage_total_bytes / 1024;
-            snprintf(buf, len, "%u.%u / %u.%u MiB", used / 1024, used % 1024 * 10 / 1024,
-                     total / 1024, total % 1024 * 10 / 1024);
-        } else {
-            snprintf(buf, len, "Unavailable");
-        }
         break;
     case ROW_MEMORY:
         snprintf(buf, len, "%lu KB \xC2\xB7 %lu.%lu MB", (unsigned long)s->free_internal_kb,

@@ -19,8 +19,9 @@ void avrcp_controller_toggle_play_pause(void);
 void avrcp_controller_next(void);
 void avrcp_controller_prev(void);
 
-// Next AVRCP transaction label; every CT command needs one.
+// Next AVRCP transaction label; every CT command needs one. bt_app task only.
 uint8_t avrcp_controller_alloc_tl(void);
 
-// Sends an explicit pause. Returns false if no AVRCP controller link is up.
-bool avrcp_controller_pause(void);
+// Pauses the phone, or drops its A2DP link when there's no AVRCP link to ask
+// over.
+void avrcp_controller_pause(void);

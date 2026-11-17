@@ -4,9 +4,9 @@
 
 // Talk: the knobs on this WiFi as a list (the knob moves the selection, a
 // tap opens one), then one knob as a walkie-talkie: a big push-to-talk button
-// under its name, ringed by the mic or speaker level while audio flows. Under
-// it, back to the list and hold-to-record a voice note for that knob. The
-// knob is Talk's volume there, shown in place of the title while it turns.
+// under its name, ringed by the mic or speaker level while audio flows, and
+// back to the list under it. The knob is Talk's volume there, shown in place
+// of the title while it turns.
 
 #define TALK_LIST_H    (304 - TOOL_LIST_TOP)
 #define TALK_ROW_H     48
@@ -17,7 +17,6 @@
 #define TALK_PTT_LEVEL 12 // the level ring's widest, past the button's edge
 #define TALK_STATE_Y   80
 #define TALK_ACTIONS_Y 124
-#define TALK_ACTIONS_X 40
 
 typedef enum { TALK_LIST, TALK_PEER } talk_view_t;
 
@@ -25,10 +24,10 @@ static struct {
     ui_talk_t data;
     uint32_t peer; // the knob open, 0 for the list
     int selected;  // the list's selection
-    bool held, note_held;
+    bool held;
     lv_obj_t *screen, *title, *list, *empty, *empty_hint;
     lv_obj_t *rows[UI_TALK_MAX], *names[UI_TALK_MAX], *details[UI_TALK_MAX];
-    lv_obj_t *name, *ptt, *ptt_icon, *state, *back, *note;
+    lv_obj_t *name, *ptt, *ptt_icon, *state, *back;
     void (*press)(uint32_t peer, bool held);
     void (*set_volume)(uint8_t volume);
 } tk;
@@ -39,10 +38,6 @@ void ui_set_talk_handler(void (*press)(uint32_t, bool), void (*volume)(uint8_t))
 }
 
 static void release(void) {
-    if (tk.note_held) {
-        tk.note_held = false;
-        ui_voice_record(tk.peer, false);
-    }
     if (tk.held) {
         tk.held = false;
         if (tk.press) {
@@ -65,9 +60,6 @@ static bool incoming(void) {
 }
 
 static const char *state_text(void) {
-    if (tk.note_held) {
-        return "Release to send the note";
-    }
     switch (tk.data.state) {
     case UI_TALK_RECEIVING:
         return "Listening";
@@ -80,9 +72,6 @@ static const char *state_text(void) {
     }
     if (tk.data.message[0]) {
         return tk.data.message;
-    }
-    if (ui_voice_current()->state == UI_VOICE_SAVING) {
-        return "Sending note\xE2\x80\xA6";
     }
     return peer_name(tk.peer) ? "Hold to talk" : "Knob unavailable";
 }
@@ -102,9 +91,9 @@ static void list_render(void) {
 }
 
 static void ptt_style(void) {
-    bool sending = tk.held || tk.note_held || tk.data.state == UI_TALK_SENDING;
-    bool live = sending || incoming() || ui_voice_current()->state == UI_VOICE_RECORDING;
-    bool ready = peer_name(tk.peer) && !incoming() && ui_voice_current()->state == UI_VOICE_IDLE;
+    bool sending = tk.held || tk.data.state == UI_TALK_SENDING;
+    bool live = sending || incoming();
+    bool ready = peer_name(tk.peer) && !incoming();
     uint32_t tint = UI_TINT_TALK;
     lv_obj_set_style_bg_color(tk.ptt, lv_color_hex(incoming() ? UI_COLOR_SURFACE : tint), 0);
     lv_obj_set_style_bg_opa(tk.ptt, sending || incoming() ? LV_OPA_COVER : UI_OPA_TINTED, 0);
@@ -113,25 +102,22 @@ static void ptt_style(void) {
     lv_obj_set_style_opa(tk.ptt, ready || live ? LV_OPA_COVER : UI_OPA_DISABLED, 0);
     // The level as a halo around the button: the mic's while sending, the
     // other knob's voice while listening.
-    int level = ui_voice_current()->state == UI_VOICE_RECORDING ? ui_voice_current()->level
-                : live                                           ? tk.data.level
-                                                                 : 0;
+    int level = live ? tk.data.level : 0;
     lv_obj_set_style_outline_width(tk.ptt, level * TALK_PTT_LEVEL / 100, 0);
 }
 
 static void peer_render(void) {
-    bool busy = tk.data.state != UI_TALK_IDLE || tk.note_held || ui_voice_current()->state != UI_VOICE_IDLE;
+    bool busy = tk.data.state != UI_TALK_IDLE;
     const char *name = incoming() ? tk.data.peer : peer_name(tk.peer);
     ui_label_set_text(tk.name, name ? name : "");
     ui_label_set_text(tk.state, state_text());
     ui_set_visible(tk.back, !busy);
-    ui_set_visible(tk.note, (!busy || tk.note_held) && ui_voice_current()->storage_ready && peer_name(tk.peer));
     ptt_style();
 }
 
 static void render(void) {
     talk_view_t view = tk.peer ? TALK_PEER : TALK_LIST;
-    lv_obj_t *peer_objs[] = {tk.name, tk.ptt, tk.state, tk.back, tk.note};
+    lv_obj_t *peer_objs[] = {tk.name, tk.ptt, tk.state, tk.back};
     for (size_t i = 0; i < sizeof(peer_objs) / sizeof(peer_objs[0]); i++) {
         ui_set_visible(peer_objs[i], view == TALK_PEER);
     }
@@ -178,8 +164,7 @@ static void back_click(lv_event_t *e) {
 
 static void ptt_event(lv_event_t *e) {
     lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_PRESSED && tk.data.state == UI_TALK_IDLE && ui_voice_current()->state == UI_VOICE_IDLE &&
-        peer_name(tk.peer)) {
+    if (code == LV_EVENT_PRESSED && tk.data.state == UI_TALK_IDLE && peer_name(tk.peer)) {
         tk.held = true;
         if (tk.press) {
             tk.press(tk.peer, true);
@@ -187,26 +172,6 @@ static void ptt_event(lv_event_t *e) {
         render();
     } else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
         release();
-        render();
-    }
-}
-
-static void note_event(lv_event_t *e) {
-    lv_event_code_t code = lv_event_get_code(e);
-    if (code == LV_EVENT_PRESSED && tk.data.state == UI_TALK_IDLE && ui_voice_current()->state == UI_VOICE_IDLE &&
-        peer_name(tk.peer)) {
-        tk.note_held = true;
-        ui_voice_record(tk.peer, true);
-        render();
-    } else if ((code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) && tk.note_held) {
-        tk.note_held = false;
-        ui_voice_record(tk.peer, false);
-        render();
-    }
-}
-
-void ui_talk_voice_changed(void) {
-    if (tk.screen) {
         render();
     }
 }
@@ -236,10 +201,6 @@ static bool rotate(int steps) {
 }
 
 static bool status(char *buf, size_t len) {
-    if (tk.note_held) {
-        snprintf(buf, len, "Recording note");
-        return true;
-    }
     if (tk.data.state == UI_TALK_IDLE) {
         return false;
     }
@@ -315,14 +276,7 @@ static void peer_build(lv_obj_t *screen) {
     lv_obj_align(tk.state, LV_ALIGN_CENTER, 0, TALK_STATE_Y);
 
     tk.back = tool_icon_button_create(screen, LV_SYMBOL_LEFT, back_click);
-    lv_obj_align(tk.back, LV_ALIGN_CENTER, -TALK_ACTIONS_X, TALK_ACTIONS_Y);
-    // Hold for a voice note: an envelope, since it lands in their inbox.
-    tk.note = tool_icon_button_create(screen, ICON_INBOX, NULL);
-    lv_obj_t *icon = lv_obj_get_child(tk.note, 0);
-    lv_obj_set_style_text_font(icon, UI_FONT_ICON_SM, 0);
-    lv_obj_set_style_text_color(icon, lv_color_hex(UI_TINT_TALK), 0);
-    lv_obj_add_event_cb(tk.note, note_event, LV_EVENT_ALL, NULL);
-    lv_obj_align(tk.note, LV_ALIGN_CENTER, TALK_ACTIONS_X, TALK_ACTIONS_Y);
+    lv_obj_align(tk.back, LV_ALIGN_CENTER, 0, TALK_ACTIONS_Y);
 }
 
 void talk_page_build(lv_obj_t *screen) {

@@ -61,13 +61,7 @@ void avrcp_target_bt_event(esp_avrc_tg_cb_event_t event, esp_avrc_tg_cb_param_t 
     bt_app_work_dispatch((bt_app_cb_t)handle_event, event, param, sizeof(esp_avrc_tg_cb_param_t), NULL, NULL);
 }
 
-void avrcp_target_step_volume(int steps) {
-    int volume = (int)app_state_get().volume + steps;
-    volume = volume < 0 ? 0 : (volume > 100 ? 100 : volume);
-    avrcp_target_set_local_volume((uint8_t)volume);
-}
-
-void avrcp_target_set_local_volume(uint8_t volume_pct) {
+static void set_local_volume(uint8_t volume_pct) {
     app_state_set_volume(volume_pct);
     i2s_out_set_volume(volume_pct);
 
@@ -77,4 +71,28 @@ void avrcp_target_set_local_volume(uint8_t volume_pct) {
     s_notify_pending = false;
     esp_avrc_rn_param_t rn_param = {.volume = pct_to_avrc(volume_pct)};
     esp_avrc_tg_send_rn_rsp(ESP_AVRC_RN_VOLUME_CHANGE, ESP_AVRC_RN_RSP_CHANGED, &rn_param);
+}
+
+// Local changes come from the UART and encoder tasks; they run on the
+// bt_app task, so steps add up in order and s_notify_pending has one owner.
+enum {
+    WORK_STEP,
+    WORK_SET,
+};
+
+static void on_work(uint16_t work, void *param) {
+    int volume = *(int *)param;
+    if (work == WORK_STEP) {
+        volume += app_state_get().volume;
+    }
+    set_local_volume((uint8_t)(volume < 0 ? 0 : (volume > 100 ? 100 : volume)));
+}
+
+void avrcp_target_step_volume(int steps) {
+    bt_app_work_dispatch(on_work, WORK_STEP, &steps, sizeof(steps), NULL, NULL);
+}
+
+void avrcp_target_set_local_volume(uint8_t volume_pct) {
+    int volume = volume_pct;
+    bt_app_work_dispatch(on_work, WORK_SET, &volume, sizeof(volume), NULL, NULL);
 }

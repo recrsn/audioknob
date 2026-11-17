@@ -57,6 +57,16 @@ without changing its embedded version. Thus a main-only release does not ask
 current devices to update Bluetooth, while devices that skipped earlier
 releases can still fetch the latest Bluetooth image from the current release.
 
+`Firmware CI` builds both chips on firmware-related pushes to `main`, warming
+the PlatformIO dependency and compiled-object caches for releases. GitHub lets
+release tags restore default-branch caches, but isolates caches between tags.
+The first build is cold; subsequent builds reuse downloads and matching compiled
+outputs while still verifying the release's embedded versions and checksums.
+Build directories are not restored. PlatformIO checks source and build settings
+before reusing compiled outputs. Keep cache paths and keys in the two workflows
+in sync; bump their `v1` suffixes to discard a cache. The cache-warming workflow
+can also be run manually on `main`.
+
 CI labels each asset `version:<embedded-version>`. The updater uses each
 asset's label when comparing versions, falling back to the release tag for
 older unlabeled releases such as `v0.1.0`. The device prompt and web download

@@ -1,7 +1,6 @@
 #pragma once
 
-// The clock's top band: one thing asking for attention (Talk, then unread
-// messages), a tap away from its page. The now-playing pill gives way to the
+// The clock's top band: Talk while a call is on, a tap away from its page. The now-playing pill gives way to the
 // same item.
 
 #include "ui/internal.h"

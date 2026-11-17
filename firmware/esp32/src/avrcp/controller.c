@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "a2dp_sink.h"
 #include "app_state.h"
 #include "bt/app_core.h"
 #include "esp_log.h"
@@ -100,37 +101,62 @@ static void send_passthrough(uint8_t key_code) {
     esp_avrc_ct_send_passthrough_cmd(tl, key_code, ESP_AVRC_PT_CMD_STATE_RELEASED);
 }
 
-void avrcp_controller_toggle_play_pause(void) {
+// Local commands come from the UART and encoder tasks; like every other
+// handler they run on the bt_app task, which owns the state above.
+enum {
+    WORK_TOGGLE,
+    WORK_NEXT,
+    WORK_PREV,
+    WORK_PAUSE,
+};
+
+static void on_work(uint16_t work, void *param) {
+    (void)param;
     if (!s_connected) {
+        if (work == WORK_PAUSE) {
+            a2dp_sink_disconnect();
+        }
         return;
     }
+    switch (work) {
+    case WORK_TOGGLE: {
+        uint8_t key_code = s_playing_guess ? ESP_AVRC_PT_CMD_PAUSE : ESP_AVRC_PT_CMD_PLAY;
+        s_playing_guess = !s_playing_guess;
+        app_state_set_playing(s_playing_guess);
+        send_passthrough(key_code);
+        break;
+    }
+    case WORK_NEXT:
+        send_passthrough(ESP_AVRC_PT_CMD_FORWARD);
+        break;
+    case WORK_PREV:
+        send_passthrough(ESP_AVRC_PT_CMD_BACKWARD);
+        break;
+    case WORK_PAUSE:
+        // app_state's playing flag follows on its own once the phone
+        // suspends the stream (ESP_A2D_AUDIO_STATE_EVT).
+        s_playing_guess = false;
+        send_passthrough(ESP_AVRC_PT_CMD_PAUSE);
+        break;
+    }
+}
 
-    uint8_t key_code = s_playing_guess ? ESP_AVRC_PT_CMD_PAUSE : ESP_AVRC_PT_CMD_PLAY;
-    s_playing_guess = !s_playing_guess;
-    app_state_set_playing(s_playing_guess);
-    send_passthrough(key_code);
+static void post(uint16_t work) {
+    bt_app_work_dispatch(on_work, work, NULL, 0, NULL, NULL);
+}
+
+void avrcp_controller_toggle_play_pause(void) {
+    post(WORK_TOGGLE);
 }
 
 void avrcp_controller_next(void) {
-    if (s_connected) {
-        send_passthrough(ESP_AVRC_PT_CMD_FORWARD);
-    }
+    post(WORK_NEXT);
 }
 
 void avrcp_controller_prev(void) {
-    if (s_connected) {
-        send_passthrough(ESP_AVRC_PT_CMD_BACKWARD);
-    }
+    post(WORK_PREV);
 }
 
-bool avrcp_controller_pause(void) {
-    if (!s_connected) {
-        return false;
-    }
-
-    // app_state's playing flag follows on its own once the phone suspends
-    // the stream (ESP_A2D_AUDIO_STATE_EVT).
-    s_playing_guess = false;
-    send_passthrough(ESP_AVRC_PT_CMD_PAUSE);
-    return true;
+void avrcp_controller_pause(void) {
+    post(WORK_PAUSE);
 }

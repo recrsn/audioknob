@@ -52,11 +52,13 @@ typedef enum {
 // Ambient sounds generated on the device, for focus or on their own. In
 // the order the pickers show them.
 typedef enum {
-    UI_AMBIENCE_BROWN,
-    UI_AMBIENCE_PINK,
     UI_AMBIENCE_RAIN,
+    UI_AMBIENCE_STORM,
     UI_AMBIENCE_OCEAN,
+    UI_AMBIENCE_STREAM,
     UI_AMBIENCE_FOREST,
+    UI_AMBIENCE_WIND,
+    UI_AMBIENCE_FIREPLACE,
     UI_AMBIENCE_COUNT,
 } ui_ambience_t;
 
@@ -229,6 +231,7 @@ typedef struct {
     int count;
     char names[UI_RADIO_MAX][UI_RADIO_NAME_MAX]; // the presets, in order
     int current;            // the loaded station's index, or -1
+    int last;               // the last one played (or the first), or -1
     ui_radio_state_t state; // of `current`
     // The stream's title while playing; why, while retrying or failed.
     char detail[64];
@@ -291,8 +294,6 @@ typedef struct {
     char version[32];
     uint32_t free_internal_kb;
     uint32_t free_psram_kb;
-    uint32_t storage_total_bytes; // mounted filesystem capacity, excluding SPIFFS overhead
-    uint32_t storage_used_bytes;
 } ui_settings_t;
 
 typedef enum {
@@ -359,25 +360,3 @@ typedef struct {
 } ui_talk_t;
 void ui_update_talk(const ui_talk_t *talk);
 void ui_set_talk_handler(void (*press)(uint32_t peer, bool held), void (*volume)(uint8_t pct));
-
-#define UI_INBOX_MAX 8
-#define UI_MESSAGE_TEXT_MAX 160
-typedef struct {
-    char id[17], sender[33], text[UI_MESSAGE_TEXT_MAX + 1];
-    bool acknowledged, pending, failed, voice, local;
-    uint32_t duration_ms;
-} ui_message_t;
-typedef struct { uint8_t count; ui_message_t messages[UI_INBOX_MAX]; } ui_inbox_t;
-void ui_update_inbox(const ui_inbox_t *inbox);
-void ui_set_inbox_handler(void (*ack)(const char *id), void (*remove)(const char *id));
-
-typedef enum { UI_VOICE_IDLE, UI_VOICE_RECORDING, UI_VOICE_SAVING, UI_VOICE_PLAYING } ui_voice_state_t;
-typedef struct {
-    ui_voice_state_t state;
-    uint8_t level;
-    uint16_t seconds;
-    bool storage_ready;
-    char id[17], message[48];
-} ui_voice_t;
-void ui_update_voice(const ui_voice_t *voice);
-void ui_set_voice_handler(void (*record)(uint32_t peer, bool held), void (*play)(const char *id), void (*stop)(void));

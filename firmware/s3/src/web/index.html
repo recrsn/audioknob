@@ -372,7 +372,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
   <div class="navbar"><a class="back" href="#">Settings</a><h2>Pomodoro</h2></div>
   <div class="group">
     <div class="card">
-      <div class="row"><span>Sound during focus</span><select id="focusSound" aria-label="Sound during focus"><option value="0">None</option><option value="1">Brown noise</option><option value="2">Pink noise</option><option value="3">Rain</option><option value="4">Ocean</option><option value="5">Forest</option></select></div>
+      <div class="row"><span>Sound during focus</span><select id="focusSound" aria-label="Sound during focus"><option value="0">None</option><option value="1">Rain</option><option value="2">Thunderstorm</option><option value="3">Ocean</option><option value="4">Stream</option><option value="5">Forest</option><option value="6">Wind</option><option value="7">Fireplace</option></select></div>
     </div>
     <p class="foot">Plays during focus blocks. Doesn't play over music.</p>
   </div>
@@ -382,7 +382,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
   <div class="navbar"><a class="back" href="#">Settings</a><h2>Ambience</h2></div>
   <div class="group">
     <div class="card">
-      <div class="row"><span>Sound</span><select id="ambienceSound" aria-label="Ambience sound"><option value="0">Brown noise</option><option value="1">Pink noise</option><option value="2">Rain</option><option value="3">Ocean</option><option value="4">Forest</option></select></div>
+      <div class="row"><span>Sound</span><select id="ambienceSound" aria-label="Ambience sound"><option value="0">Rain</option><option value="1">Thunderstorm</option><option value="2">Ocean</option><option value="3">Stream</option><option value="4">Forest</option><option value="5">Wind</option><option value="6">Fireplace</option></select></div>
       <div class="row"><span>Volume</span><div class="slider"><input type="range" id="ambienceVolume" min="0" max="100" step="5" aria-label="Ambience volume"><output id="ambval"></output></div></div>
     </div>
     <p class="foot">Defaults for the Ambience app.</p>
@@ -446,7 +446,6 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
     <p class="foot" id="updhint"></p>
   </div>
   <div class="group card">
-    <div class="row"><span>Storage used</span><span class="val" id="storage"></span></div>
   </div>
 </section>
 </main>
@@ -848,7 +847,6 @@ function render(s) {
   setText("addr", s.ip ? `${s.hostname}.local · ${s.ip}` : "—");
   setText("host", s.ip ? `${s.hostname}.local` : "Not on WiFi");
   renderRoot(s);
-  setText("storage", s.storageTotalBytes ? `${(s.storageUsedBytes / 1048576).toFixed(1)} / ${(s.storageTotalBytes / 1048576).toFixed(1)} MiB` : "Unavailable");
   renderUpdate(s);
 }
 

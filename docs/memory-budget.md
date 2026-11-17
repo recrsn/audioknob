@@ -1,5 +1,8 @@
 # Radio internal-memory regression (static analysis)
 
+The `messages` and `note_store` stacks (6 KiB internal each) this analysis
+found were removed with text messages and voice notes.
+
 ## Evidence
 
 After flashing the Talk/inbox build, the saved `/api/state` readings showed
@@ -12,8 +15,6 @@ The radio start path reserved two stacks explicitly from internal RAM:
 
 | Allocation | Size | Lifetime |
 | --- | ---: | --- |
-| `messages` stack | 6 KiB | Always allocated after inbox initialization |
-| `note_store` stack | 6 KiB | Always allocated after voice-note initialization |
 | `radio_net` stack | 8 KiB | While a radio session is running |
 | `radio_dec` stack | 8 KiB | While a radio session is running |
 | Talk connection stacks | 6 KiB each, at most two | Only while connected |
@@ -94,7 +95,7 @@ old mix completion from swallowing a replacement request.
 | Remove two task control blocks (`sizeof(StaticTask_t) == 340`) | +680 internal |
 | Add two lifecycle mutexes (`sizeof(StaticQueue_t) == 84`) | -168 internal |
 | Additional combined module `.data` + `.bss` | -51 internal |
-| Free ambience synth (`sizeof(struct ambience_synth) == 1948`) | +1,948 from its ordinary malloc heap |
+| Free ambience synth (`sizeof(struct ambience_synth) == 2280`) | +2,280 from its ordinary malloc heap |
 | Free ambience render buffers + alarm LUT | +7,172 PSRAM |
 
 The stack saving alone, less new control storage, is **6,949 bytes (6.79 KiB)**.

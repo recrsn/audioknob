@@ -25,9 +25,10 @@
 #define RX_BUF_SIZE 1024
 // esp_ota_end()'s image check runs on the RX task.
 #define RX_TASK_STACK 6144
-// Holds a whole cover-art thumbnail, so streaming one never blocks the
-// bt_app task for longer than a frame.
-#define TX_BUF_SIZE (16 * 1024)
+// Cover art arrives in parts of at most ESP_AVRC_CA_MTU_MAX (1691) bytes,
+// so two parts queue whole; beyond that the bt_app task waits for the
+// line (92 KB/s) instead of this holding a whole thumbnail.
+#define TX_BUF_SIZE 4096
 
 #define TICK_MS 33
 #define RESYNC_TICKS (1000 / TICK_MS)

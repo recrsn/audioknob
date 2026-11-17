@@ -33,3 +33,7 @@ void pcm_to_stereo(int16_t *pcm, size_t frames, int channels);
 #define PCM_GAIN_UNITY 32768
 int32_t pcm_gain_for_volume(uint8_t volume_pct);
 void pcm_apply_gain(int16_t *pcm, size_t frames, int32_t *gain, int32_t target);
+// The same ramped gain, widening to left-justified 32-bit for
+// audio_out_write(): a quiet volume keeps the source's 16 bits instead of
+// being rounded back into them.
+void pcm_apply_gain32(const int16_t *in, int32_t *out, size_t frames, int32_t *gain, int32_t target);

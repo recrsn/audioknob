@@ -6,6 +6,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "nvs.h"
@@ -13,6 +14,10 @@
 #define NVS_NAMESPACE "radio"
 // The list as one blob: "name\0url\0" per station, in order.
 #define NVS_KEY "stations"
+#define NVS_KEY_LAST "last"
+// Saved from the esp_timer task: playing is started from the LVGL task,
+// whose PSRAM stack must not touch flash.
+#define LAST_SAVE_US (1000 * 1000)
 
 static const char *TAG = "radio_stations";
 
@@ -28,6 +33,34 @@ static SemaphoreHandle_t s_lock;
 static radio_station_t *s_list; // RADIO_STATIONS_MAX, in PSRAM
 static int s_count;
 static uint32_t s_version;
+static int s_last;
+static esp_timer_handle_t s_last_timer;
+
+static void save_last(void *arg) {
+    (void)arg;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    uint8_t last = (uint8_t)s_last;
+    xSemaphoreGive(s_lock);
+    nvs_handle_t nvs;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs) == ESP_OK) {
+        nvs_set_u8(nvs, NVS_KEY_LAST, last);
+        nvs_commit(nvs);
+        nvs_close(nvs);
+    }
+}
+
+// Caller holds s_lock.
+static void set_last_locked(int index) {
+    if (index >= s_count) {
+        index = 0;
+    }
+    if (index < 0 || index == s_last) {
+        return;
+    }
+    s_last = index;
+    esp_timer_stop(s_last_timer);
+    esp_timer_start_once(s_last_timer, LAST_SAVE_US);
+}
 
 // Caller holds s_lock.
 static void save_locked(void) {
@@ -81,10 +114,17 @@ void radio_stations_init(void) {
     s_list = heap_caps_calloc(RADIO_STATIONS_MAX, sizeof(radio_station_t), MALLOC_CAP_SPIRAM);
     ESP_ERROR_CHECK(s_lock && s_list ? ESP_OK : ESP_ERR_NO_MEM);
 
+    const esp_timer_create_args_t timer = {.callback = save_last, .name = "radio_last"};
+    ESP_ERROR_CHECK(esp_timer_create(&timer, &s_last_timer));
+
     nvs_handle_t nvs;
     size_t len = 0;
     bool stored = false;
     if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs) == ESP_OK) {
+        uint8_t last;
+        if (nvs_get_u8(nvs, NVS_KEY_LAST, &last) == ESP_OK) {
+            s_last = last;
+        }
         if (nvs_get_blob(nvs, NVS_KEY, NULL, &len) == ESP_OK) {
             char *blob = heap_caps_malloc(len, MALLOC_CAP_SPIRAM);
             if (blob && nvs_get_blob(nvs, NVS_KEY, blob, &len) == ESP_OK) {
@@ -101,6 +141,9 @@ void radio_stations_init(void) {
         xSemaphoreTake(s_lock, portMAX_DELAY);
         save_locked();
         xSemaphoreGive(s_lock);
+    }
+    if (s_last >= s_count) {
+        s_last = 0;
     }
     ESP_LOGI(TAG, "%d station(s)", s_count);
 }
@@ -161,6 +204,8 @@ bool radio_stations_remove(int index) {
     if (ok) {
         memmove(&s_list[index], &s_list[index + 1], (size_t)(s_count - index - 1) * sizeof(radio_station_t));
         s_count--;
+        // The one after a removed last station takes its index.
+        set_last_locked(s_last > index ? s_last - 1 : s_last >= s_count ? 0 : s_last);
         save_locked();
     }
     xSemaphoreGive(s_lock);
@@ -193,10 +238,30 @@ bool radio_stations_move(int from, int to) {
             memmove(&s_list[to + 1], &s_list[to], (size_t)(from - to) * sizeof(radio_station_t));
         }
         s_list[to] = moving;
+        int last = s_last == from                  ? to
+                   : from < s_last && s_last <= to ? s_last - 1
+                   : to <= s_last && s_last < from ? s_last + 1
+                                                   : s_last;
+        set_last_locked(last);
         save_locked();
     }
     xSemaphoreGive(s_lock);
     return ok;
+}
+
+int radio_stations_last(void) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    int last = s_count ? s_last : -1;
+    xSemaphoreGive(s_lock);
+    return last;
+}
+
+void radio_stations_set_last(int index) {
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (index < s_count) {
+        set_last_locked(index);
+    }
+    xSemaphoreGive(s_lock);
 }
 
 uint32_t radio_stations_version(void) {

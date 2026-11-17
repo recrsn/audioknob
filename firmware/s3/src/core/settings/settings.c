@@ -33,6 +33,29 @@ static uint8_t get_u8(nvs_handle_t nvs, const char *key, uint8_t fallback) {
     return nvs_get_u8(nvs, key, &v) == ESP_OK ? v : fallback;
 }
 
+// The sounds were renumbered when brown and pink noise went, so they're
+// saved under new keys; picks under the old ones (brown, pink, rain, ocean,
+// forest) carry over, the noises becoming rain.
+static void load_ambience(nvs_handle_t nvs, settings_t *out) {
+    static const uint8_t k_from_v1[] = {UI_AMBIENCE_RAIN, UI_AMBIENCE_RAIN, UI_AMBIENCE_RAIN, UI_AMBIENCE_OCEAN,
+                                        UI_AMBIENCE_FOREST};
+    uint8_t v;
+    if (nvs_get_u8(nvs, "amb_kind", &v) == ESP_OK) {
+        out->ambience_sound = v;
+    } else if (nvs_get_u8(nvs, "amb_sound", &v) == ESP_OK && v < sizeof(k_from_v1)) {
+        out->ambience_sound = k_from_v1[v];
+    } else {
+        out->ambience_sound = k_defaults.ambience_sound;
+    }
+    if (nvs_get_u8(nvs, "focus_kind", &v) == ESP_OK) {
+        out->focus_sound = v;
+    } else if (nvs_get_u8(nvs, "focus_sound", &v) == ESP_OK && v <= sizeof(k_from_v1)) {
+        out->focus_sound = v ? k_from_v1[v - 1] + 1 : 0;
+    } else {
+        out->focus_sound = k_defaults.focus_sound;
+    }
+}
+
 void settings_nvs_init(void) {
     // Same recovery net/wifi/wifi.c applies; a second nvs_flash_init() is a no-op.
     esp_err_t err = nvs_flash_init();
@@ -70,9 +93,8 @@ void settings_load(settings_t *out) {
     }
     out->bluetooth = get_u8(nvs, "bluetooth", k_defaults.bluetooth);
     out->air_show = get_u8(nvs, "air_show", k_defaults.air_show);
-    out->ambience_sound = get_u8(nvs, "amb_sound", k_defaults.ambience_sound);
+    load_ambience(nvs, out);
     out->ambience_volume = get_u8(nvs, "amb_volume", k_defaults.ambience_volume);
-    out->focus_sound = get_u8(nvs, "focus_sound", k_defaults.focus_sound);
     if (out->ambience_sound >= UI_AMBIENCE_COUNT) {
         out->ambience_sound = k_defaults.ambience_sound;
     }
@@ -103,9 +125,9 @@ void settings_save(const settings_t *s) {
     nvs_set_u8(nvs, "timer_volume", s->timer_volume);
     nvs_set_u8(nvs, "bluetooth", s->bluetooth);
     nvs_set_u8(nvs, "air_show", s->air_show);
-    nvs_set_u8(nvs, "amb_sound", s->ambience_sound);
+    nvs_set_u8(nvs, "amb_kind", s->ambience_sound);
     nvs_set_u8(nvs, "amb_volume", s->ambience_volume);
-    nvs_set_u8(nvs, "focus_sound", s->focus_sound);
+    nvs_set_u8(nvs, "focus_kind", s->focus_sound);
     nvs_set_str(nvs, "tz", s->tz);
     nvs_commit(nvs);
     nvs_close(nvs);

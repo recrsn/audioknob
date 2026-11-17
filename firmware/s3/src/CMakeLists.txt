@@ -12,7 +12,6 @@ set(AK_REQUIRES
     esp_new_jpeg
     libpng
     esp_timer
-    spiffs
     nvs_flash
     esp_wifi
     esp_netif

@@ -34,13 +34,11 @@ static void on_command(protocol_cmd_t cmd, uint8_t value) {
     }
     switch (cmd) {
     case CMD_PAUSE:
-        // AirPlay took the DAC on the S3. Without an AVRCP link the phone
-        // can't be paused, so drop it rather than leave it streaming into
-        // a switch that no longer routes to the DAC.
+        // AirPlay took the DAC on the S3. A phone that can't be paused is
+        // dropped rather than left streaming into a switch that no longer
+        // routes to the DAC.
         ESP_LOGI(TAG, "S3 requested pause");
-        if (!avrcp_controller_pause()) {
-            a2dp_sink_disconnect();
-        }
+        avrcp_controller_pause();
         break;
     case CMD_PLAY_PAUSE:
         avrcp_controller_toggle_play_pause();

@@ -183,11 +183,13 @@ void ui_update_radio(const ui_radio_t *radio) {
     }
 }
 
-// Coming back to the page, the selection starts on the station playing.
+// Coming back to the page, the selection starts on the station playing,
+// else the last one played.
 static void screen_load_cb(lv_event_t *e) {
     (void)e;
-    if (rd.data->current >= 0) {
-        rd.selected = rd.data->current;
+    int start = rd.data->current >= 0 ? rd.data->current : rd.data->last;
+    if (start >= 0 && start < rd.data->count) {
+        rd.selected = start;
     }
     render();
     if (rd.data->count) {
@@ -203,6 +205,7 @@ void radio_page_build(lv_obj_t *screen) {
     rd.data = lv_malloc_zeroed(sizeof(*rd.data));
     LV_ASSERT_MALLOC(rd.data);
     rd.data->current = -1;
+    rd.data->last = -1;
 
     lv_obj_t *title = tool_title_create(screen, "RADIO", lv_color_hex(UI_TINT_RADIO));
     lv_obj_align(title, LV_ALIGN_CENTER, 0, RADIO_TITLE_Y);

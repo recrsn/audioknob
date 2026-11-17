@@ -1,8 +1,6 @@
 #include "talk/talk.h"
 #include "talk/wire.h"
 #include "talk/rtsp.h"
-#include "talk/flash_message.h"
-#include "talk/voice/notes.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -38,6 +36,7 @@
 #define RECEIVE_TIMEOUT_US 500000
 #define CONNECT_TIMEOUT_US 2000000
 #define PREFILL_US 60000
+#define VOLUME_SAVE_US 2000000
 static const char *TAG = "talk";
 static SemaphoreHandle_t s_lock, s_write_lock;
 static ui_talk_t s_ui = {.volume = 70};
@@ -45,7 +44,7 @@ static uint32_t s_requested_peer;
 static bool s_abort, s_network, s_renamed;
 static int64_t s_receive_end;
 static uint32_t s_request_epoch;
-static int64_t s_volume_changed;
+static esp_timer_handle_t s_save_timer;
 static QueueHandle_t s_incoming, s_answer;
 typedef struct {
     uint32_t ip;
@@ -96,8 +95,9 @@ void talk_press(uint32_t peer, bool held) {
 void talk_set_volume(uint8_t volume) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_ui.volume = volume > 100 ? 100 : volume;
-    s_volume_changed = now_us();
     xSemaphoreGive(s_lock);
+    esp_timer_stop(s_save_timer);
+    esp_timer_start_once(s_save_timer, VOLUME_SAVE_US);
 }
 void talk_preempt(void) {
     if (!s_lock)
@@ -237,24 +237,17 @@ static void incoming_chime(session_t *s) {
     }
     write_audio(s, 882);
 }
-void talk_persist_settings(void) {
-    if (!s_lock)
-        return;
+// Runs on the esp_timer task, whose internal stack may write flash.
+static void save_volume(void *arg) {
+    (void)arg;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    int64_t changed = s_volume_changed;
     uint8_t v = s_ui.volume;
     xSemaphoreGive(s_lock);
-    if (!changed || now_us() - changed < 2000000)
-        return;
     nvs_handle_t nvs;
     if (nvs_open("talk", NVS_READWRITE, &nvs) == ESP_OK) {
         if (nvs_set_u8(nvs, "volume", v) == ESP_OK)
             nvs_commit(nvs);
         nvs_close(nvs);
-        xSemaphoreTake(s_lock, portMAX_DELAY);
-        if (s_volume_changed == changed)
-            s_volume_changed = 0;
-        xSemaphoreGive(s_lock);
     }
 }
 static void consume_request(uint32_t epoch) {
@@ -517,12 +510,6 @@ static void discovery(void *arg) {
         xSemaphoreGive(s_lock);
     }
 }
-static bool on_message(uint32_t ip, const char *name, const char *path, const char *type, const void *body,
-                       size_t length) {
-    if (!strncmp(path, "/messages/voice?id=", 19))
-        return !strcmp(type, "audio/ogg") && voice_notes_receive(ip, name, path + 19, body, length);
-    return !strcmp(type, "application/json") && length <= 1024 && flash_message_receive(ip, path, body);
-}
 void talk_init(void) {
     s_lock = xSemaphoreCreateMutex();
     s_write_lock = xSemaphoreCreateMutex();
@@ -534,11 +521,13 @@ void talk_init(void) {
             s_ui.volume = volume;
         nvs_close(nvs);
     }
+    const esp_timer_create_args_t timer = {.callback = save_volume, .name = "talk_volume"};
+    ESP_ERROR_CHECK(esp_timer_create(&timer, &s_save_timer));
     s_incoming = xQueueCreate(1, sizeof(incoming_t));
     s_answer = xQueueCreate(1, sizeof(bool));
     ESP_ERROR_CHECK(s_incoming && s_answer ? ESP_OK : ESP_ERR_NO_MEM);
     // Espressif documents up to 40 KB codec stack. Keep it in PSRAM; this
-    // task never writes flash (volume persistence runs on the messages task).
+    // task never writes flash (volume persistence runs on the esp_timer task).
     BaseType_t w =
         xTaskCreatePinnedToCoreWithCaps(worker, "talk", 40960, NULL, 8, NULL, 0, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     BaseType_t d =
@@ -554,7 +543,7 @@ void talk_network_up(void) {
     // asserts in tcpip_send_msg_wait_sem. Keep one listener across reconnects.
     if (first) {
         talk_rtsp_init(&(talk_rtsp_ops_t){
-            .start = incoming_start, .stop = incoming_stop, .active = incoming_active, .message = on_message});
+            .start = incoming_start, .stop = incoming_stop, .active = incoming_active});
         ESP_LOGI(TAG, "LAN voice ready, RTSP %d / RTP %d", TALK_RTSP_PORT, TALK_RTP_PORT);
     }
 }

@@ -36,14 +36,11 @@ be captured under actual TLS, decoding, recording and update workloads.
 | `airplay_play` | 4 | internal | 1 | service lifetime after initialization; created once; retained |
 | `airplay_ctrl` | 6 | internal | 1 | service lifetime after initialization; created once; retained |
 | `airplay_art` | 6 | PSRAM | 1 | service lifetime after initialization; created once; retained |
-| `messages` | 6 | internal | 1 | service lifetime after initialization; created once; retained |
-| `note_store` | 6 | internal | 1 | service lifetime after initialization; created once; retained |
 | `ptp` | 4 | internal | 1 | service lifetime after initialization; created once; retained |
 | `network_jobs` | 8 | internal | 1 | reserved at boot; task starts on first due job; static stack + static TCB; reused |
 | `httpd (settings)` | 6 | internal | 1 | normal joined-network mode; created once; retained |
 | `lvgl` | 8 | PSRAM | 1 | service lifetime after initialization; created once; retained |
 | `talk` | 40 | PSRAM | 1 | service lifetime after initialization; created once; retained |
-| `voice_notes` | 40 | PSRAM | 1 | service lifetime after initialization; created once; retained |
 | `talk_discovery` | 4 | PSRAM | 1 | service lifetime after initialization; created once; retained |
 | `talk_rtsp` | 3 | PSRAM | 1 | service lifetime after initialization; created once; retained |
 | `ap2_listen` | 3 | PSRAM | 1 | service lifetime after initialization; created once; retained |
@@ -160,7 +157,6 @@ PSRAM usage, heap fragmentation or a contiguous-block guarantee.
 | UART artwork staging | 128 KiB | Explicit PSRAM, permanent |
 | Artwork double buffer | 69,696 B | Explicit PSRAM; 2 × 132 × 132 × RGB565 |
 | Radio preset list | 7,296 B | Explicit PSRAM; 24 × `sizeof(radio_station_t)==304` |
-| Inbox/outbox stores | 3,680 B | Explicit PSRAM; 2 × `sizeof(store_t)==1840`; snapshots/JSON additional |
 | AirPlay buffered compressed ring | 256 KiB–1 MiB + 1 B | Explicit PSRAM while buffered stream exists, tries 1 MiB first |
 | AirPlay buffered decode scratch | 36,871 B | Explicit PSRAM; 2 × 16 KiB blocks, 7-byte AAC headroom, 4 KiB PCM; codec state extra |
 | AirPlay buffered control object | 412 B | Explicit internal heap while buffered stream exists |
@@ -169,8 +165,7 @@ PSRAM usage, heap fragmentation or a contiguous-block guarantee.
 | Radio compressed ring | **512 KiB** | Explicit PSRAM during radio session; ring control extra |
 | Radio decoder scratch/state | 18,504 B + variable output | Explicit PSRAM; codec allocations prefer PSRAM with eligible-heap fallback |
 | Talk session | 15,256 B + codec allocations | Explicit PSRAM while session exists |
-| Recorded voice-note staging | up to 300 KiB | Explicit PSRAM during record/save; loaded/read note buffers are additional, length-dependent |
-| Ambience rendering | 3,072 B | PSRAM during ambience; synth ordinary malloc is another 1,948 B (internal-preferred) |
+| Ambience rendering | 3,072 B | PSRAM during ambience; synth ordinary malloc is another 2,280 B (internal-preferred) |
 | System-sound lookup table | 4,100 B | Explicit PSRAM while system sound needs it |
 | Weather/location response | 8 KiB per job | Explicit PSRAM, freed after each job |
 | Release discovery response | 64 KiB | Explicit PSRAM during discovery; parsed JSON nodes also PSRAM |

@@ -66,3 +66,10 @@ CONFIG_MBEDTLS_CHACHA20_C=y
 CONFIG_MBEDTLS_POLY1305_C=y
 CONFIG_MBEDTLS_CHACHAPOLY_C=y
 CONFIG_MBEDTLS_HKDF_C=y
+# IRAM comes out of the same internal RAM as the heap. Ringbuf functions no
+# ISR calls run from flash instead (only the UART driver uses them). FreeRTOS
+# stays in IRAM: from flash, 2.2 Mbps lossless AirPlay skipped (flash code
+# and PSRAM share the cache the WiFi/lwIP tasks miss in). Nor is
+# SPIRAM_MALLOC_ALWAYSINTERNAL lowered from 16 KB: 4 KB freed nothing
+# measurable and sends the WiFi blob's plain mallocs to PSRAM.
+CONFIG_RINGBUF_PLACE_FUNCTIONS_INTO_FLASH=y

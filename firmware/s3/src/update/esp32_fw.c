@@ -1,9 +1,11 @@
 #include "update/esp32_fw.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_app_desc.h"
 #include "esp_app_format.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_partition.h"
 #include "freertos/FreeRTOS.h"
@@ -69,8 +71,19 @@ void esp32_fw_stage_abort(void) {
     s_img.ready = false;
 }
 
+static const char *check_staged(uint8_t *buf);
+
 const char *esp32_fw_stage_end(void) {
-    static uint8_t buf[READ_CHUNK];
+    uint8_t *buf = heap_caps_malloc(READ_CHUNK, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        return "Out of memory";
+    }
+    const char *error = check_staged(buf);
+    free(buf);
+    return error;
+}
+
+static const char *check_staged(uint8_t *buf) {
     esp_image_header_t header;
     esp_app_desc_t desc;
     if (s_img.written != s_img.size || s_img.size < DESC_OFFSET + sizeof(desc) + DIGEST_LEN ||

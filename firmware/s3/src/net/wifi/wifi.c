@@ -36,6 +36,7 @@
 #define RETRY_SAVED_US (30 * 1000 * 1000)
 // Long enough for the portal's status page to show the result.
 #define RESTART_DELAY_US (3 * 1000 * 1000)
+#define RECONNECT_MAX_S 30
 
 #define MAX_SCAN 20
 
@@ -58,7 +59,11 @@ static char s_attempt_password[65];
 static wifi_network_t s_scan[MAX_SCAN];
 static size_t s_scan_count;
 
-static esp_timer_handle_t s_connect_timer, s_attempt_timer, s_retry_timer, s_restart_timer;
+static esp_timer_handle_t s_connect_timer, s_attempt_timer, s_retry_timer, s_restart_timer, s_reconnect_timer;
+// Reconnects since the last address: the first goes at once (a roam, a brief
+// dropout), later ones back off so a router that's gone isn't scanned for
+// without pause.
+static uint8_t s_reconnects;
 
 // --- Credentials -----------------------------------------------------------
 
@@ -326,6 +331,29 @@ static void retry_saved_cb(void *arg) {
     }
 }
 
+static void reconnect_cb(void *arg) {
+    (void)arg;
+    // Setup mode retries on its own schedule, around the portal's attempts.
+    if (!s_setup_mode) {
+        esp_wifi_connect();
+    }
+}
+
+static void reconnect_backed_off(void) {
+    uint32_t delay_s = s_reconnects ? 1u << (s_reconnects - 1) : 0;
+    if (delay_s > RECONNECT_MAX_S) {
+        delay_s = RECONNECT_MAX_S;
+    } else {
+        s_reconnects++;
+    }
+    if (!delay_s) {
+        esp_wifi_connect();
+        return;
+    }
+    esp_timer_stop(s_reconnect_timer);
+    esp_timer_start_once(s_reconnect_timer, (uint64_t)delay_s * 1000000);
+}
+
 static void restart_cb(void *arg) {
     (void)arg;
     esp_restart();
@@ -344,7 +372,7 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
         wifi_event_sta_disconnected_t *event = data;
         if (!s_setup_mode) {
             ESP_LOGW(TAG, "disconnected (reason %d), retrying", event->reason);
-            esp_wifi_connect();
+            reconnect_backed_off();
         } else {
             attempt_failed(describe_disconnect(event->reason));
         }
@@ -352,6 +380,7 @@ static void event_handler(void *arg, esp_event_base_t base, int32_t id, void *da
         ip_event_got_ip_t *event = data;
         ESP_LOGI(TAG, "got IP " IPSTR, IP2STR(&event->ip_info.ip));
 
+        s_reconnects = 0;
         if (!s_setup_mode) {
             esp_timer_stop(s_connect_timer);
             uint8_t mac[6];
@@ -402,6 +431,7 @@ void wifi_start(wifi_got_ip_cb_t on_got_ip) {
     s_connect_timer = make_timer(connect_timeout_cb, "wifi_connect");
     s_attempt_timer = make_timer(attempt_timeout_cb, "wifi_attempt");
     s_retry_timer = make_timer(retry_saved_cb, "wifi_retry");
+    s_reconnect_timer = make_timer(reconnect_cb, "wifi_reconnect");
     s_restart_timer = make_timer(restart_cb, "wifi_restart");
     xTaskCreate(setup_task, "wifi_setup", 4096, NULL, 5, &s_setup_task);
 

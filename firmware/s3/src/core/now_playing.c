@@ -34,7 +34,6 @@ now_playing_front_t now_playing_front(void) {
     case AUDIO_SOURCE_ESP32:
     case AUDIO_SOURCE_LOCAL:
     case AUDIO_SOURCE_TALK:
-    case AUDIO_SOURCE_NOTE:
         break;
     }
     wireless_state_t esp32;
@@ -102,8 +101,7 @@ const uint16_t *now_playing_artwork(uint32_t *version) {
 }
 
 static bool voice_in_front(void) {
-    audio_source_t source = audio_source_active();
-    return source == AUDIO_SOURCE_TALK || source == AUDIO_SOURCE_NOTE;
+    return audio_source_active() == AUDIO_SOURCE_TALK;
 }
 
 bool now_playing_adjust_volume(int steps) {

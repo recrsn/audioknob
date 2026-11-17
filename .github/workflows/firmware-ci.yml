@@ -1,0 +1,76 @@
+name: Firmware CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - firmware/**
+      - tests/ota/test_release_ci.py
+      - tests/partitions/**
+      - tools/release_firmware.py
+      - .github/workflows/firmware-ci.yml
+      - .github/workflows/release-firmware.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firmware-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    name: Build firmware and warm release caches
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      PLATFORMIO_BUILD_CACHE_DIR: ${{ github.workspace }}/.pio-build-cache
+    steps:
+      - name: Check out firmware
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Check release tooling
+        run: python -m unittest discover -s tests/ota -p test_release_ci.py
+
+      # Populate caches on main so every release tag can restore them.
+      # Keep these paths and keys in sync with release-firmware.yml.
+      - name: Cache PlatformIO dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+            firmware/s3/.pio/libdeps
+            firmware/esp32/.pio/libdeps
+            firmware/s3/managed_components
+            firmware/esp32/managed_components
+          key: ${{ runner.os }}-${{ runner.arch }}-pio-6.2.0-py3.12-v1-${{ hashFiles('firmware/*/platformio.ini', 'firmware/*/dependencies.lock', 'firmware/**/idf_component.yml') }}
+
+      - name: Cache compiled firmware objects
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PLATFORMIO_BUILD_CACHE_DIR }}
+          key: ${{ runner.os }}-${{ runner.arch }}-pio-objects-v1-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-pio-objects-v1-
+
+      - name: Install PlatformIO
+        run: python -m pip install 'platformio==6.2.0'
+
+      - name: Build main firmware
+        run: pio run -d firmware/s3 -e s3
+
+      - name: Build Bluetooth firmware
+        run: pio run -d firmware/esp32 -e esp32
+
+      - name: Check partition limits
+        run: python tests/partitions/check.py

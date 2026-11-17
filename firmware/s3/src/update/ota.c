@@ -28,6 +28,26 @@ static const char *TAG = "ota";
 
 static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static ota_status_t s_status;
+static bool s_audio_suspended;
+
+static void suspend_audio(void) {
+    taskENTER_CRITICAL(&s_lock);
+    s_audio_suspended = true;
+    taskEXIT_CRITICAL(&s_lock);
+    audio_source_suspend(true);
+}
+
+// A failure before anything was suspended (a download that never opened)
+// must not resume: that hands the DAC to the ESP32 under a playing source.
+static void resume_audio(void) {
+    taskENTER_CRITICAL(&s_lock);
+    bool suspended = s_audio_suspended;
+    s_audio_suspended = false;
+    taskEXIT_CRITICAL(&s_lock);
+    if (suspended) {
+        audio_source_suspend(false);
+    }
+}
 
 // Where an image goes, per chip. The functions return NULL or why they
 // failed.
@@ -83,7 +103,7 @@ static void set_status(ota_state_t state, const char *error) {
 
 static bool fail(const char *error) {
     ESP_LOGW(TAG, "update failed: %s", error);
-    audio_source_suspend(false);
+    resume_audio();
     set_status(OTA_FAILED, error);
     return false;
 }
@@ -149,7 +169,7 @@ static bool start_receiving(void) {
 
 static bool receive_image(size_t size, ota_read_fn read, void *ctx, const ota_target_t *expected,
                           const uint8_t expected_sha256[32]) {
-    audio_source_suspend(true);
+    suspend_audio();
     if (size < HEADER_LEN) {
         return fail("Not a firmware image");
     }
@@ -268,7 +288,7 @@ static void esp32_install_task(void *arg) {
     if (error) {
         fail(error);
     } else {
-        audio_source_suspend(false);
+        resume_audio();
         set_status(OTA_INSTALLED, NULL);
     }
     vTaskDelete(NULL);
@@ -295,7 +315,7 @@ void ota_install(void) {
     if (status.state != OTA_READY) {
         return;
     }
-    audio_source_suspend(true);
+    suspend_audio();
     // Both installs write flash, which a PSRAM stack (the LVGL task's)
     // can't do, so they get a task of their own.
     bool esp32 = status.target == OTA_TARGET_ESP32;
@@ -309,7 +329,7 @@ void ota_decline(void) {
     ota_status_t status;
     ota_get_status(&status);
     if (status.state == OTA_READY) {
-        audio_source_suspend(false);
+        resume_audio();
         set_status(OTA_DECLINED, NULL);
     }
 }

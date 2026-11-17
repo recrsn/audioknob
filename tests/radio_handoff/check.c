@@ -66,7 +66,7 @@ esp_audio_simple_dec_process(esp_audio_simple_dec_handle_t dec,
   return ESP_AUDIO_ERR_OK;
 }
 void audio_out_set_rate(uint32_t hz) { (void)hz; }
-void audio_out_write16(const int16_t *pcm, size_t frames) {
+void audio_out_write(const int32_t *pcm, size_t frames) {
   (void)pcm;
   (void)frames;
   atomic_fetch_add(&writes, 1);

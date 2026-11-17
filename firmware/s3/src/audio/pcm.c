@@ -81,3 +81,17 @@ void pcm_apply_gain(int16_t *pcm, size_t frames, int32_t *gain, int32_t target) 
     }
     *gain = g;
 }
+
+void pcm_apply_gain32(const int16_t *in, int32_t *out, size_t frames, int32_t *gain, int32_t target) {
+    int32_t g = *gain;
+    for (size_t i = 0; i < frames; i++) {
+        if (g != target) {
+            int32_t step = (target - g) / GAIN_RAMP_DIV;
+            g += step ? step : (target > g ? 1 : -1);
+        }
+        // Q15 gain: the product is the sample left-justified in 31 bits.
+        out[i * 2] = in[i * 2] * g * 2;
+        out[i * 2 + 1] = in[i * 2 + 1] * g * 2;
+    }
+    *gain = g;
+}

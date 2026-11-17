@@ -26,6 +26,8 @@
 static const char *TAG = "http_util";
 
 // Returns the line length, 0 on timeout/peer close, -1 on socket error.
+// Peeks at what has arrived and takes only up to the line's end, so the
+// body or the next message stays in the socket for whoever reads it.
 static int read_line(int sock, char *line, int maxlen) {
     struct pollfd pfd = {.fd = sock, .events = POLLIN};
     int count = 0;
@@ -35,8 +37,8 @@ static int read_line(int sock, char *line, int maxlen) {
             break;
         }
 
-        char ch;
-        int n = recv(sock, &ch, 1, 0);
+        char chunk[64];
+        int n = recv(sock, chunk, sizeof(chunk), MSG_PEEK);
         if (n < 0) {
             if (errno == EAGAIN) {
                 break;
@@ -48,12 +50,21 @@ static int read_line(int sock, char *line, int maxlen) {
         if (n == 0) {
             break;
         }
-        if (ch == '\n') {
+
+        int used = 0;
+        bool ended = false;
+        while (used < n && count < maxlen - 1 && !ended) {
+            char ch = chunk[used++];
+            if (ch == '\n') {
+                ended = true;
+            } else if (ch != '\r') {
+                line[count++] = ch;
+            }
+        }
+        recv(sock, chunk, used, 0);
+        if (ended) {
             line[count] = '\0';
             return count;
-        }
-        if (ch != '\r') {
-            line[count++] = ch;
         }
     }
 

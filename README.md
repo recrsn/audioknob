@@ -14,9 +14,9 @@ Firmware that turns the [Waveshare ESP32-S3-Knob-Touch-LCD-1.8](https://www.wave
 - **Bluetooth A2DP sink + AVRCP** (ESP32), with the same now-playing view and on-screen pairing confirmation.
 - **Internet radio** (MP3/AAC streams, ICY titles), with presets edited from the web page.
 - **One source at a time**: a hardware I2S switch routes whichever chip is playing to the PCM5100A DAC; the last source to start wins.
-- **Knob and touch UI** built with LVGL: a clock face that puts what's playing first, an app launcher, and apps for radio, Talk, inbox, timer, pomodoro, ambient sounds, stopwatch, weather and settings.
-- **LAN Talk and inbox**: hold-to-talk between AudioKnobs on the same network, plus text messages and voice notes kept in an inbox ([docs/lan-talk.md](docs/lan-talk.md)).
-- **Ambient sounds**: brown/pink noise, rain, ocean and forest, synthesized live so nothing loops; the pomodoro can play one during focus blocks.
+- **Knob and touch UI** built with LVGL: a clock face that puts what's playing first, an app launcher, and apps for radio, Talk, timer, pomodoro, ambient sounds, stopwatch, weather and settings.
+- **LAN Talk**: hold-to-talk between AudioKnobs on the same network ([docs/lan-talk.md](docs/lan-talk.md)).
+- **Ambient sounds**: rain, thunderstorm, ocean, stream, forest, wind and fireplace, synthesized live so nothing loops; the pomodoro can play one during focus blocks.
 - **Web settings page** at `http://<device-name>.local/` and Wi-Fi setup through a captive portal.
 - **OTA updates** for both chips, with rollback: upload a `.bin` or download from GitHub releases, with daily update checks. [Update guide](docs/firmware-updates.md).
 - **Desktop emulator** of the UI (SDL2), so UI work needs no hardware.
@@ -32,9 +32,8 @@ Rendered from the desktop emulator, which feeds the UI sample data.
 | ![Clock face](docs/screenshots/home.png)<br>Clock face | ![Resume card](docs/screenshots/home-now-playing.png)<br>Paused track | ![Launcher](docs/screenshots/launcher.png)<br>Launcher |
 | ![AirPlay](docs/screenshots/airplay.png)<br>AirPlay | ![Bluetooth](docs/screenshots/bluetooth.png)<br>Bluetooth | ![Waiting for Bluetooth](docs/screenshots/bluetooth-waiting.png)<br>Waiting for Bluetooth |
 | ![Radio](docs/screenshots/radio.png)<br>Radio | ![Talk](docs/screenshots/talk.png)<br>Talk | ![Hold to talk](docs/screenshots/talk-peer.png)<br>Hold to talk |
-| ![Inbox](docs/screenshots/inbox.png)<br>Inbox | ![Message](docs/screenshots/inbox-message.png)<br>Message | ![Ambience](docs/screenshots/ambience.png)<br>Ambience |
-| ![Timer](docs/screenshots/timer.png)<br>Timer | ![Pomodoro](docs/screenshots/pomodoro.png)<br>Pomodoro | ![Stopwatch](docs/screenshots/stopwatch.png)<br>Stopwatch |
-| ![Weather](docs/screenshots/weather.png)<br>Weather | ![Settings](docs/screenshots/settings.png)<br>Settings | |
+| ![Ambience](docs/screenshots/ambience.png)<br>Ambience | ![Timer](docs/screenshots/timer.png)<br>Timer | ![Pomodoro](docs/screenshots/pomodoro.png)<br>Pomodoro |
+| ![Stopwatch](docs/screenshots/stopwatch.png)<br>Stopwatch | ![Weather](docs/screenshots/weather.png)<br>Weather | ![Settings](docs/screenshots/settings.png)<br>Settings |
 
 ## Architecture
 
@@ -61,7 +60,7 @@ The native target needs SDL2 (`brew install sdl2` on macOS) and expects Homebrew
 
 Emulator keys: Up/Down (or the mouse wheel) turn the knob, Enter presses it, Esc long-presses it (opens the launcher). Sample data: `P` cycles playback states, `T` toggles an incoming Talk call, `U` sends a sample firmware update, `A` steps the weather's air quality and UV.
 
-Host tests for the Talk protocol and inbox storage: `python3 tests/lan_voice/run.py`.
+Host tests for the Talk protocol: `python3 tests/lan_voice/run.py`.
 
 ### Configuration
 

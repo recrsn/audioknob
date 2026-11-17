@@ -7,23 +7,28 @@
 // and the knob, shown in place of the title while it turns.
 
 #define AMB_LIST_TOP (UI_SAFE_TOP + 26)
+#define AMB_LIST_H   (304 - AMB_LIST_TOP) // more rows than fit: it scrolls by touch
 #define AMB_ROW_H    42
 #define AMB_LIST_W   248 // clear of the ring beside the outer rows
 
 static const char *const k_names[UI_AMBIENCE_COUNT] = {
-    [UI_AMBIENCE_BROWN] = "Brown noise",
-    [UI_AMBIENCE_PINK] = "Pink noise",
     [UI_AMBIENCE_RAIN] = "Rain",
+    [UI_AMBIENCE_STORM] = "Thunderstorm",
     [UI_AMBIENCE_OCEAN] = "Ocean",
+    [UI_AMBIENCE_STREAM] = "Stream",
     [UI_AMBIENCE_FOREST] = "Forest",
+    [UI_AMBIENCE_WIND] = "Wind",
+    [UI_AMBIENCE_FIREPLACE] = "Fireplace",
 };
 
 static const char *const k_details[UI_AMBIENCE_COUNT] = {
-    [UI_AMBIENCE_BROWN] = "Deep, steady rumble",
-    [UI_AMBIENCE_PINK] = "Softer, even hiss",
     [UI_AMBIENCE_RAIN] = "Steady rain and drops",
+    [UI_AMBIENCE_STORM] = "Heavy rain, distant thunder",
     [UI_AMBIENCE_OCEAN] = "Waves rolling in",
-    [UI_AMBIENCE_FOREST] = "Breeze and birdsong",
+    [UI_AMBIENCE_STREAM] = "Water over stones",
+    [UI_AMBIENCE_FOREST] = "Birdsong in the trees",
+    [UI_AMBIENCE_WIND] = "Gusts through the eaves",
+    [UI_AMBIENCE_FIREPLACE] = "Crackling logs",
 };
 
 static struct {
@@ -34,6 +39,7 @@ static struct {
 
     lv_obj_t *ring;
     lv_obj_t *title;
+    lv_obj_t *list;
     lv_obj_t *rows[UI_AMBIENCE_COUNT];
     lv_obj_t *details[UI_AMBIENCE_COUNT];
     lv_obj_t *names[UI_AMBIENCE_COUNT];
@@ -53,7 +59,7 @@ static uint8_t volume(void) {
 // The sound playing, else the one it would start with.
 static ui_ambience_t selected(void) {
     uint8_t k = ui_settings_current()->ambience_sound;
-    return amb.playing ? amb.kind : k < UI_AMBIENCE_COUNT ? (ui_ambience_t)k : UI_AMBIENCE_BROWN;
+    return amb.playing ? amb.kind : k < UI_AMBIENCE_COUNT ? (ui_ambience_t)k : UI_AMBIENCE_RAIN;
 }
 
 static void page_refresh(void) {
@@ -73,6 +79,7 @@ static void page_refresh(void) {
             ui_label_set_text(amb.details[i], !now ? k_details[i] : amb.focus ? "Playing for focus" : "Playing");
             ui_set_visible(amb.stops[i], now);
         }
+        tool_list_center(amb.list, sel, LV_ANIM_ON);
     }
     tool_ring_set(amb.ring, volume());
 }
@@ -180,10 +187,10 @@ static void row_cb(lv_event_t *e) {
 }
 
 static void list_create(lv_obj_t *screen) {
-    lv_obj_t *list = tool_list_create(screen, AMB_ROW_H * UI_AMBIENCE_COUNT);
+    lv_obj_t *list = tool_list_create(screen, AMB_LIST_H);
+    amb.list = list;
     lv_obj_set_width(list, AMB_LIST_W);
     lv_obj_align(list, LV_ALIGN_TOP_MID, 0, AMB_LIST_TOP);
-    lv_obj_remove_flag(list, LV_OBJ_FLAG_SCROLLABLE);
     for (int i = 0; i < UI_AMBIENCE_COUNT; i++) {
         amb.rows[i] = tool_list_row_create(list, AMB_ROW_H, &amb.names[i], &amb.details[i]);
         ui_label_set_text(amb.names[i], k_names[i]);

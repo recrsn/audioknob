@@ -41,15 +41,10 @@ esp_err_t web_api_ambience(httpd_req_t *req);
 esp_err_t web_api_stations_get(httpd_req_t *req);
 esp_err_t web_api_stations_post(httpd_req_t *req);
 
-// talk.c: LAN Talk, messages and voice notes.
-esp_err_t web_api_voice_get(httpd_req_t *req);
-esp_err_t web_api_voice_post(httpd_req_t *req);
-esp_err_t web_api_messages_get(httpd_req_t *req);
-esp_err_t web_api_messages_post(httpd_req_t *req);
+// talk.c: LAN Talk.
 esp_err_t web_api_talk_get(httpd_req_t *req);
 
-// system.c: firmware updates, Bluetooth pairing, the mic recording.
+// system.c: firmware updates, Bluetooth pairing.
 esp_err_t web_api_update(httpd_req_t *req);
 esp_err_t web_api_release(httpd_req_t *req);
 esp_err_t web_api_pairing(httpd_req_t *req);
-esp_err_t web_api_mic_wav(httpd_req_t *req);

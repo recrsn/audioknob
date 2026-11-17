@@ -214,22 +214,16 @@ Per the CH445P datasheet, `EN#`=0 and `IN`=0 selects S1, `IN`=1 selects S2 — s
 **AirPlay/multi-protocol reference (for lessons on S3 porting friction, not for direct reuse given lean-build scope)**
 - squeezelite-esp32 ESP32-S3 support discussion: https://github.com/sle118/squeezelite-esp32/discussions/236
 
-## 9. LAN voice and saved messages
+## 9. LAN voice
 The Talk app uses half-duplex hold-to-talk between knobs on the LAN. Discovery
 is `_audioknob._tcp`; control uses RTSP/1.0 sharing the AirPlay request helpers,
 and media is Opus 16 kHz mono in 20 ms frames over RTP/UDP, resampled to the
 44.1 kHz DAC path. Incoming speech preempts the current source. The knob has no
 physical press available for this feature: all start/stop actions use touch.
-
-Text messages and recorded voice notes are fire-and-forget deliveries to a
-persistent inbox. They do not require the receiver to be present and do not
-play automatically. The receiver can send a separate manual acknowledgement.
-Voice notes can also be saved locally and played later. See
+Speech is live only: there are no text messages, voice notes or inbox. See
 [lan-talk.md](lan-talk.md) for the API and implementation/testing status.
 
-The S3 reserves 6.8125 MiB for `user_data` (SPIFFS), offset 0x930000, size
-0x6d0000. Both S3 OTA slots are 4 MiB; ESP32 firmware staging is 1 MiB.
-The new layout requires a full erase and USB flash. Ordinary later OTA keeps
-saved data. Unknown non-erased contents are never automatically formatted.
-Settings and the web About section show used/total filesystem space.
-See [flash-layout.md](flash-layout.md) for the complete map.
+The S3 partition table still reserves 6.8125 MiB for `user_data` (SPIFFS),
+offset 0x930000, size 0x6d0000, now unused. Both S3 OTA slots are 4 MiB; ESP32
+firmware staging is 1 MiB. See [flash-layout.md](flash-layout.md) for the
+complete map.

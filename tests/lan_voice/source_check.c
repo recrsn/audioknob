@@ -24,17 +24,15 @@ int main(void) {
     assert(gpio_level == 1);
     assert(audio_source_claim(AUDIO_SOURCE_TALK));
     assert(local_stops == 1);
-    assert(audio_source_claim(AUDIO_SOURCE_NOTE));
-    assert(stops[AUDIO_SOURCE_TALK] == 1);
     assert(audio_source_claim(AUDIO_SOURCE_AIRPLAY));
-    assert(stops[AUDIO_SOURCE_NOTE] == 1);
+    assert(stops[AUDIO_SOURCE_TALK] == 1);
     assert(audio_source_claim(AUDIO_SOURCE_TALK));
     assert(stops[AUDIO_SOURCE_AIRPLAY] == 1);
-    audio_source_release(AUDIO_SOURCE_NOTE);
+    audio_source_release(AUDIO_SOURCE_RADIO);
     assert(audio_source_active() == AUDIO_SOURCE_TALK);
     peer.connected = peer.playing = 1;
     audio_source_suspend(true);
-    assert(gpio_level == 1 && pauses == 1 && stops[AUDIO_SOURCE_TALK] == 2 && stops[AUDIO_SOURCE_NOTE] == 2);
+    assert(gpio_level == 1 && pauses == 1 && stops[AUDIO_SOURCE_TALK] == 2);
     for (int source = AUDIO_SOURCE_ESP32; source <= AUDIO_SOURCE_TALK; source++)
         assert(!audio_source_claim(source));
     audio_source_release(AUDIO_SOURCE_TALK);
@@ -43,9 +41,9 @@ int main(void) {
     assert(pauses == 2 && gpio_level == 1);
     audio_source_suspend(false);
     assert(gpio_level == 0);
-    assert(audio_source_claim(AUDIO_SOURCE_NOTE));
+    assert(audio_source_claim(AUDIO_SOURCE_TALK));
     assert(gpio_level == 1);
-    audio_source_release(AUDIO_SOURCE_NOTE);
+    audio_source_release(AUDIO_SOURCE_TALK);
     assert(gpio_level == 0);
-    puts("Talk/voice-note source handovers and OTA suspension passed");
+    puts("Talk source handovers and OTA suspension passed");
 }

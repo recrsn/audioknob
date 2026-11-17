@@ -69,6 +69,7 @@ static void start(const radio_station_t *station) {
     s_playing = true;
     s_version++;
     xSemaphoreGive(s_lock);
+    radio_stations_set_last(radio_stations_find(station->url));
     ESP_LOGI(TAG, "playing \"%s\"", station->name);
     stream_player_play(station->url);
 }
@@ -114,7 +115,7 @@ void radio_toggle_play_pause(void) {
         // Still playable when it has since been removed from the presets.
         start(&station);
     } else {
-        radio_play(0);
+        radio_play(radio_stations_last());
     }
 }
 
@@ -219,6 +220,7 @@ uint32_t radio_ui_snapshot(ui_radio_t *out) {
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
     out->current = s_loaded ? radio_stations_find(s_station.url) : -1;
+    out->last = radio_stations_last();
     out->state = s_playing ? k_states[st.state] : UI_RADIO_STOPPED;
     if (s_playing) {
         snprintf(out->detail, sizeof(out->detail), "%s",

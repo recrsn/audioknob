@@ -1,6 +1,7 @@
 #include "i2s_out.h"
 
 #include <inttypes.h>
+#include <stdbool.h>
 
 #include "driver/i2s_std.h"
 #include "esp_log.h"
@@ -22,7 +23,7 @@
 #define RB_PREFETCH (20 * 1024)
 // On overflow, incoming packets are dropped until the backlog drains to this.
 #define RB_DROP_RESUME (RB_SIZE / 5)
-// One DMA descriptor's worth (240 frames x 4 bytes) per write.
+// One DMA descriptor's worth (240 stereo frames) of 16-bit PCM per write.
 #define WRITE_CHUNK 960
 // An empty buffer for this long means the stream starved; refill first.
 #define UNDERRUN_MS 20
@@ -53,6 +54,10 @@ static SemaphoreHandle_t s_wake;
 static volatile rb_mode_t s_mode = MODE_STOPPED;
 static volatile int32_t s_gain_target = GAIN_UNITY;
 static int32_t s_gain = GAIN_UNITY;
+// The DAC takes 24 bits, so the volume is applied on the way to 32-bit
+// slots: scaling the 16-bit samples themselves left a quiet volume only a
+// few bits of resolution.
+static int32_t s_wide[WRITE_CHUNK / sizeof(int16_t)];
 
 static size_t rb_filled(void) {
     return RB_SIZE - xRingbufferGetCurFreeSize(s_rb);
@@ -66,17 +71,15 @@ static void drain(void) {
     }
 }
 
-static void apply_gain(int16_t *samples, size_t count) {
+static void widen_with_gain(const int16_t *samples, size_t count) {
     int32_t target = s_gain_target;
-    if (s_gain == GAIN_UNITY && target == GAIN_UNITY) {
-        return;
-    }
     for (size_t i = 0; i < count; i++) {
         if (s_gain != target) {
             int32_t step = (target - s_gain) / GAIN_RAMP_DIV;
             s_gain += step ? step : (target > s_gain ? 1 : -1);
         }
-        samples[i] = (int16_t)((samples[i] * s_gain) >> 15);
+        // Q15 gain: the product is the sample left-justified in 31 bits.
+        s_wide[i] = samples[i] * s_gain * 2;
     }
 }
 
@@ -85,22 +88,26 @@ static void play_until_starved(void) {
         size_t n = 0;
         uint8_t *item = xRingbufferReceiveUpTo(s_rb, &n, pdMS_TO_TICKS(UNDERRUN_MS), WRITE_CHUNK);
         if (!item) {
-            if (s_mode == MODE_PLAYING) {
+            // Dropping too: this task is about to sleep, and only a
+            // prefetch wakes it.
+            if (s_mode == MODE_PLAYING || s_mode == MODE_DROPPING) {
                 s_mode = MODE_PREFETCHING;
                 ESP_LOGW(TAG, "underrun, refilling");
             }
             return;
         }
-        apply_gain((int16_t *)item, n / sizeof(int16_t));
+        widen_with_gain((const int16_t *)item, n / sizeof(int16_t));
+        vRingbufferReturnItem(s_rb, item);
+        const uint8_t *out = (const uint8_t *)s_wide;
+        size_t len = n * 2;
         size_t written = 0;
-        while (written < n) {
+        while (written < len) {
             size_t chunk = 0;
-            if (i2s_channel_write(s_tx_chan, item + written, n - written, &chunk, WRITE_TIMEOUT_MS) != ESP_OK) {
+            if (i2s_channel_write(s_tx_chan, out + written, len - written, &chunk, WRITE_TIMEOUT_MS) != ESP_OK) {
                 break;
             }
             written += chunk;
         }
-        vRingbufferReturnItem(s_rb, item);
     }
 }
 
@@ -123,7 +130,7 @@ void i2s_out_init(void) {
 
     i2s_std_config_t std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(44100),
-        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
+        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
             .bclk = I2S_BCK_GPIO,
@@ -148,7 +155,7 @@ void i2s_out_configure(uint32_t sample_rate_hz, uint8_t channels) {
 
     i2s_std_clk_config_t clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(sample_rate_hz);
     i2s_std_slot_config_t slot_cfg =
-        I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, channels == 1 ? I2S_SLOT_MODE_MONO : I2S_SLOT_MODE_STEREO);
+        I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, channels == 1 ? I2S_SLOT_MODE_MONO : I2S_SLOT_MODE_STEREO);
     ESP_ERROR_CHECK(i2s_channel_reconfig_std_clock(s_tx_chan, &clk_cfg));
     ESP_ERROR_CHECK(i2s_channel_reconfig_std_slot(s_tx_chan, &slot_cfg));
 
@@ -176,6 +183,7 @@ void i2s_out_set_volume(uint8_t volume_pct) {
 }
 
 void i2s_out_write(const uint8_t *data, size_t len) {
+    bool resumed = false;
     switch (s_mode) {
     case MODE_STOPPED:
         return;
@@ -184,6 +192,7 @@ void i2s_out_write(const uint8_t *data, size_t len) {
             return;
         }
         s_mode = MODE_PLAYING;
+        resumed = true;
         break;
     default:
         break;
@@ -197,6 +206,10 @@ void i2s_out_write(const uint8_t *data, size_t len) {
 
     if (s_mode == MODE_PREFETCHING && rb_filled() >= RB_PREFETCH) {
         s_mode = MODE_PLAYING;
+        xSemaphoreGive(s_wake);
+    } else if (resumed) {
+        // The task may have run the ring dry and gone to sleep just as
+        // this resumed; a spare wake is harmless.
         xSemaphoreGive(s_wake);
     }
 }

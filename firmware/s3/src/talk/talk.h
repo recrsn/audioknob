@@ -12,6 +12,3 @@ void talk_press(uint32_t peer, bool held);
 void talk_set_volume(uint8_t volume);
 // Stops writes before returning; safe from another source's claiming task.
 void talk_preempt(void);
-
-// Persists debounced volume on the messages task (an internal flash-safe stack).
-void talk_persist_settings(void);

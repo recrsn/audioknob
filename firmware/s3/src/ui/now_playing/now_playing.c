@@ -476,7 +476,7 @@ static void format_subtitle(const ui_track_info_t *track, char *out, size_t len)
     }
 }
 
-// Connected, the pill gives way to Talk, messages or a running tool; else
+// Connected, the pill gives way to Talk or a running tool; else
 // it's the time and the source. Waiting, it names the source alone.
 static void wireless_pill_refresh(bool waiting) {
     band_item_t item;

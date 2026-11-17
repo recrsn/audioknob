@@ -34,5 +34,11 @@ bool radio_stations_update(int index, const char *name, const char *url);
 // Moves one station to position `to`, shifting the ones between.
 bool radio_stations_move(int from, int to);
 
+// The last station played, kept across restarts: it follows its station
+// through moves, and when that station is removed the one after it takes
+// its place (the first, if it was the last). -1 with no stations.
+int radio_stations_last(void);
+void radio_stations_set_last(int index);
+
 // Changes whenever the list does.
 uint32_t radio_stations_version(void);

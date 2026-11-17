@@ -21,11 +21,7 @@
 #include "net/wifi/wifi.h"
 
 #define MAX_HEADERS 16
-// A message's reply comes only once the receiver has saved it to flash:
-// ~650 ms for text, 1.6 s for a 4 s voice note.
 #define SETUP_REPLY_MS 1000
-#define TEXT_REPLY_MS 5000
-#define VOICE_REPLY_MS 20000
 static talk_rtsp_ops_t s_ops;
 static SemaphoreHandle_t s_connections, s_receiver;
 static const char *TAG = "talk_rtsp";
@@ -158,24 +154,6 @@ bool talk_rtsp_alive(int fd) {
     int n = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT);
     return n > 0 || (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK));
 }
-bool talk_rtsp_message(uint32_t ip, const char *path, const char *json) {
-    int fd = connect_peer(ip);
-    if (fd < 0)
-        return false;
-    bool ok = exchange(fd, "SET_PARAMETER", path, 1, NULL, NULL, "application/json", json, strlen(json), NULL, NULL, 0,
-                       NULL, TEXT_REPLY_MS);
-    close(fd);
-    return ok;
-}
-bool talk_rtsp_message_bytes(uint32_t ip, const char *path, const char *type, const void *data, size_t length) {
-    int fd = connect_peer(ip);
-    if (fd < 0)
-        return false;
-    bool ok =
-        exchange(fd, "SET_PARAMETER", path, 1, NULL, NULL, type, data, length, NULL, NULL, 0, NULL, VOICE_REPLY_MS);
-    close(fd);
-    return ok;
-}
 static bool reply(int fd, const key_data_t *request, int code, const char *session, uint16_t port) {
     char line[80], transport[128];
     const char *seq = kd_lookup(request, "CSeq");
@@ -188,7 +166,7 @@ static bool reply(int fd, const key_data_t *request, int code, const char *sessi
         {"CSeq", (char *)(seq ? seq : "0")},
         {"Content-Length", "0"},
         {session ? "Session" : "Server", session ? (char *)session : "AudioKnob Talk/1"},
-        {port ? "Transport" : "Public", port ? transport : "ANNOUNCE, SETUP, RECORD, TEARDOWN, SET_PARAMETER, OPTIONS"},
+        {port ? "Transport" : "Public", port ? transport : "ANNOUNCE, SETUP, RECORD, TEARDOWN, OPTIONS"},
         {NULL, NULL}};
     return http_send(fd, line, headers);
 }
@@ -260,11 +238,6 @@ static void serve(int fd, uint32_t ip) {
                 code = 400;
             else
                 done = true;
-        } else if (code == 200 && !strcmp(method, "SET_PARAMETER")) {
-            const char *type = kd_lookup(headers, "Content-Type");
-            if (!body || !type || !s_ops.message || !s_ops.message(ip, name, path, type, body, len))
-                code = 400;
-            done = true;
         } else
             code = 400;
         bool ok = reply(fd, headers, code, setup ? session : NULL,

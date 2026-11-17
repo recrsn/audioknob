@@ -23,11 +23,11 @@ bool band_app_item(ui_app_t app, band_item_t *out) {
 }
 
 bool band_item(band_item_t *out) {
-    return band_app_item(UI_APP_TALK, out) || band_app_item(UI_APP_INBOX, out);
+    return band_app_item(UI_APP_TALK, out);
 }
 
 bool band_owns(ui_app_t app) {
-    return app == UI_APP_TALK || app == UI_APP_INBOX;
+    return app == UI_APP_TALK;
 }
 
 static void band_cb(lv_event_t *e) {
@@ -38,7 +38,7 @@ static void band_cb(lv_event_t *e) {
 }
 
 void band_build(lv_obj_t *screen) {
-    s_band.label = ui_glyph_pill_create(screen, ICON_INBOX, lv_color_hex(UI_TINT_TALK), band_cb, NULL);
+    s_band.label = ui_glyph_pill_create(screen, ICON_TALK, lv_color_hex(UI_TINT_TALK), band_cb, NULL);
     s_band.band = lv_obj_get_parent(s_band.label);
     s_band.glyph = lv_obj_get_child(s_band.band, 0);
     ui_chip_align_top(s_band.band);

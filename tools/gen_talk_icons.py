@@ -1,9 +1,8 @@
-"""Generate Talk/inbox LVGL fonts from Material Symbols Rounded.
+"""Generate the Talk LVGL fonts from Material Symbols Rounded.
 
 Usage: python3 tools/gen_talk_icons.py MaterialSymbolsRounded.ttf /path/to/lv_font_conv.js
-Requires fontTools and Node. Talk uses a custom walkie-talkie outline at U+E029;
-the inbox keeps Material Symbols' mail glyph. Both retain the UI's filled,
-weight-500 style at their matching optical sizes.
+Requires fontTools and Node. Talk uses a custom walkie-talkie outline at U+E029,
+in the UI's filled, weight-500 style at each optical size.
 """
 import subprocess
 import sys
@@ -55,7 +54,7 @@ with tempfile.TemporaryDirectory(prefix='audioknob-walkie-') as tmp:
         ttf = Path(tmp) / f'talk-{size}.ttf'
         font.save(ttf)
         target = assets / f'font_icons_talk_{size}.c'
-        subprocess.run(['node', converter, '--font', str(ttf), '-r', '0xe029,0xe158',
+        subprocess.run(['node', converter, '--font', str(ttf), '-r', '0xe029',
                         '--size', str(size), '--bpp', '4', '--format', 'lvgl', '--no-compress',
                         '--lv-font-name', f'icons_talk_{size}', '--lv-include', 'lvgl.h',
                         '-o', str(target)], check=True)

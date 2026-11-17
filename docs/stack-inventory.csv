@@ -4,14 +4,11 @@ S3,uart_rx,6144,1,internal,service lifetime after initialization,created once; r
 S3,airplay_play,4096,1,internal,service lifetime after initialization,created once; retained,True,firmware/s3/src/airplay/player.c,
 S3,airplay_ctrl,6144,1,internal,service lifetime after initialization,created once; retained,True,firmware/s3/src/airplay/airplay.c,
 S3,airplay_art,6144,1,PSRAM,service lifetime after initialization,created once; retained,True,firmware/s3/src/airplay/airplay.c,Retained 6 KiB PSRAM stack; memory-only artwork decode; TCB remains internal.
-S3,messages,6144,1,internal,service lifetime after initialization,created once; retained,True,firmware/s3/src/talk/flash_message.c,
-S3,note_store,6144,1,internal,service lifetime after initialization,created once; retained,True,firmware/s3/src/talk/voice/notes.c,
 S3,ptp,4096,1,internal,service lifetime after initialization,created once; retained,True,firmware/s3/src/airplay/receiver/ptp.c,
 S3,network_jobs,8192,1,internal,reserved at boot; task starts on first due job,static stack + static TCB; reused,True,firmware/s3/src/net/network_jobs.c,"Weather/location/NVS, discovery and reserved OTA downloads share this stack."
 S3,httpd (settings),6144,1,internal,normal joined-network mode,created once; retained,True,firmware/s3/src/web/server.c,
 S3,lvgl,8192,1,PSRAM,service lifetime after initialization,created once; retained,True,firmware/s3/src/drivers/lcd/driver.c,
 S3,talk,40960,1,PSRAM,service lifetime after initialization,created once; retained,True,firmware/s3/src/talk/talk.c,
-S3,voice_notes,40960,1,PSRAM,service lifetime after initialization,created once; retained,True,firmware/s3/src/talk/voice/notes.c,
 S3,talk_discovery,4096,1,PSRAM,service lifetime after initialization,created once; retained,True,firmware/s3/src/talk/talk.c,
 S3,talk_rtsp,3072,1,PSRAM,service lifetime after initialization,created once; retained,True,firmware/s3/src/talk/rtsp.c,
 S3,ap2_listen,3072,1,PSRAM,service lifetime after initialization,created once; retained,True,firmware/s3/src/airplay/receiver/rtsp.c,

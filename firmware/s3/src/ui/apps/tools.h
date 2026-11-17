@@ -48,7 +48,7 @@ void tool_button_set_enabled(lv_obj_t *label, bool enabled);
 // NULL for a button that handles its own events.
 lv_obj_t *tool_icon_button_create(lv_obj_t *parent, const char *symbol, lv_event_cb_t cb);
 
-// Settings-style lists (Radio, Talk, Inbox, Ambience): a column of pill rows
+// Settings-style lists (Radio, Talk, Ambience): a column of pill rows
 // under the title. Rows are the list's only children, in order.
 #define TOOL_LIST_W   272
 #define TOOL_LIST_TOP (UI_SAFE_TOP + 22)
@@ -83,7 +83,6 @@ void tool_page_register(lv_obj_t *screen, const tool_page_desc_t *desc);
 // Reports a countdown on `screen` ringing, or UI_ALERT_NONE once dismissed.
 void tool_alert(lv_obj_t *screen, ui_alert_t alert);
 
-void inbox_page_build(lv_obj_t *screen);
 void talk_page_build(lv_obj_t *screen);
 void radio_page_build(lv_obj_t *screen);
 void weather_page_build(lv_obj_t *screen);

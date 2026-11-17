@@ -235,7 +235,12 @@ static void request_missing(rtp_t *r) {
         bool ask = false;
         if (!is_held(r, seq)) {
             if (h->seq != seq) {
-                *h = (held_t){.seq = seq, .noticed_us = now};
+                // Field by field: a compound literal would zero the slot's
+                // 2.8 KB of PCM too.
+                h->held = false;
+                h->seq = seq;
+                h->noticed_us = now;
+                h->requested_us = 0;
             }
             ask = now - h->noticed_us >= RESEND_FIRST_US &&
                   (!h->requested_us || now - h->requested_us >= RESEND_REPEAT_US) && !due(r, ahead, now);
@@ -355,7 +360,11 @@ static void put_packet(rtp_t *r, const uint8_t *p, size_t len) {
         if (seq == r->next_seq && timed(r, timestamp)) {
             deliver(r, r->pcm, (size_t)frames, timestamp, epoch);
         } else {
-            *h = (held_t){.held = true, .seq = seq, .frames = (uint16_t)frames, .timestamp = timestamp, .epoch = epoch};
+            h->held = true;
+            h->seq = seq;
+            h->frames = (uint16_t)frames;
+            h->timestamp = timestamp;
+            h->epoch = epoch;
             memcpy(h->pcm, r->pcm, (size_t)frames * 2 * sizeof(int32_t));
         }
     }
