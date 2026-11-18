@@ -161,3 +161,20 @@ void note_store_list(const char *suffix, void (*each)(const char *name, void *ct
     }
     closedir(dir);
 }
+
+void note_store_sweep(bool (*ours)(const char *name)) {
+    DIR *dir = s_ready ? opendir(NOTE_STORE_PATH) : NULL;
+    if (!dir) {
+        return;
+    }
+    char path[sizeof(NOTE_STORE_PATH) + 1 + 256];
+    struct dirent *e;
+    while ((e = readdir(dir))) {
+        if (!valid_name(e->d_name) || !ours(e->d_name)) {
+            snprintf(path, sizeof(path), NOTE_STORE_PATH "/%s", e->d_name);
+            ESP_LOGI(TAG, "removing stray %s", e->d_name);
+            unlink(path);
+        }
+    }
+    closedir(dir);
+}

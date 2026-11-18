@@ -51,7 +51,7 @@ class Rtsp:
     def request(self, method, headers=None, body=b''):
         self.cseq += 1
         lines = [f'{method} /talk RTSP/1.0', f'CSeq: {self.cseq}', f'Content-Length: {len(body)}',
-                 'X-AudioKnob-Name: Mac test caller', 'User-Agent: AudioKnob Talk/2']
+                 'X-AudioKnob-Name: Mac test caller', 'X-AudioKnob-Id: 0a1b2c3d4e5f', 'User-Agent: AudioKnob Talk/3']
         lines += [f'{k}: {v}' for k, v in (headers or {}).items()]
         self.sock.sendall(('\r\n'.join(lines) + '\r\n\r\n').encode() + body)
 

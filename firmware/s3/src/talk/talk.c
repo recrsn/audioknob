@@ -831,7 +831,13 @@ static void discovery(void *arg) {
             }
             if (!version || !name || !notes_valid_key(key) || !strcmp(key, s_key) || r->port != TALK_RTSP_PORT)
                 continue;
-            for (mdns_ip_addr_t *a = r->addr; a; a = a->next) {
+            // Not every responder adds its address to the answer (macOS
+            // doesn't); then ask for the host's.
+            esp_ip4_addr_t resolved = {0};
+            if (!r->addr && r->hostname)
+                mdns_query_a(r->hostname, 1000, &resolved);
+            mdns_ip_addr_t fallback = {.addr = {.type = ESP_IPADDR_TYPE_V4, .u_addr.ip4 = resolved}};
+            for (mdns_ip_addr_t *a = r->addr ? r->addr : resolved.addr ? &fallback : NULL; a; a = a->next) {
                 if (a->addr.type != ESP_IPADDR_TYPE_V4 || a->addr.u_addr.ip4.addr == inet_addr(own_ip))
                     continue;
                 uint32_t id = a->addr.u_addr.ip4.addr;

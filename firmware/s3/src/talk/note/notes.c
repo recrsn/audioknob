@@ -361,10 +361,21 @@ static void sweep_temp(const char *file, void *ctx) {
     note_store_remove(file);
 }
 
+static bool ends_with(const char *name, const char *suffix) {
+    size_t n = strlen(name), tail = strlen(suffix);
+    return n > tail && !strcmp(name + n - tail, suffix);
+}
+
+static bool ours(const char *name) {
+    return ends_with(name, ".idx") || ends_with(name, ".idx.tmp") || ends_with(name, ".ogg") ||
+           ends_with(name, ".ogg.tmp");
+}
+
 static void do_mount(void) {
     if (!note_store_mount()) {
         return;
     }
+    note_store_sweep(ours);
     note_store_list(".idx", load_index, NULL);
     note_store_list(".idx.tmp", load_index, NULL);
     note_store_list(".ogg", sweep_orphan, NULL);

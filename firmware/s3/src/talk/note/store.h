@@ -25,3 +25,5 @@ void *note_store_read(const char *name, size_t *size, size_t max);
 bool note_store_remove(const char *name);
 // Every file whose name ends in suffix.
 void note_store_list(const char *suffix, void (*each)(const char *name, void *ctx), void *ctx);
+// Removes every file `ours` doesn't claim, such as an older firmware's.
+void note_store_sweep(bool (*ours)(const char *name));
