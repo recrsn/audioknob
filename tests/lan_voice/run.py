@@ -31,6 +31,8 @@ with tempfile.TemporaryDirectory(prefix='audioknob-lan-check-') as tmp:
     run([out/'rtsp'],env=env)
     (stubs/'driver').mkdir(exist_ok=True)
     (stubs/'driver/gpio.h').write_text('#pragma once\n#include "runtime.h"\n#define GPIO_NUM_0 0\n#define GPIO_MODE_OUTPUT 1\ntypedef struct {uint64_t pin_bit_mask;int mode;} gpio_config_t;\nstatic int gpio_level;\nstatic int gpio_config(const gpio_config_t *c){(void)c;return 0;}\nstatic void gpio_set_level(int pin,int level){(void)pin;gpio_level=level;}\n')
+    run(common+[HERE/'ogg_check.c',SRC/'talk/note/ogg.c','-o',out/'ogg'])
+    run([out/'ogg'],env=env)
     run(common+['-DHOST_NO_TASKS',HERE/'source_check.c','-o',out/'sources'])
     run([out/'sources'],env=env)
     run(common+['-ffunction-sections','-Wl,-dead_strip',HERE/'volume_check.c','-o',out/'volume'])

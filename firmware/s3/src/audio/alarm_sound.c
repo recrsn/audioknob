@@ -7,6 +7,7 @@
 
 #include "audio/out.h"
 #include "audio/source.h"
+#include "core/psram_stream.h"
 #include "esp_err.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -37,6 +38,7 @@
 // A ring has to be heard across the room whatever the timer volume is; about
 // 80 % on the cubic volume curve.
 #define CALL_GAIN    0.5f
+#define NOTE_GAIN    0.3f
 #define DUCK_GAIN    0.15f // AirPlay under the chime, about -16 dB
 #define DUCK_S       0.15f
 #define GAIN_SMOOTH  0.001f // one-pole step towards a new volume, per sample
@@ -56,6 +58,11 @@
 
 #define TARGET_KIND  0xFFu
 #define TARGET_ONCE  0x100u
+// A clip: 16 kHz mono, held a little ahead of the hook.
+#define CLIP_RATE    16000
+#define CLIP_RING_MS 200
+#define CLIP_BLOCK   64
+
 // Each preview is a new target, so stepping the volume replays it.
 #define TARGET_GEN_SHIFT 9
 
@@ -117,12 +124,14 @@ static const note_t k_focus_notes[] = {{0, G5}, {320, E5}, {640, C5}};
 static const note_t k_break_notes[] = {{0, C5}, {180, G5}, {360, C6}};
 // A phone's double ring, as four quick strikes.
 static const note_t k_call_notes[] = {{0, E5}, {140, G5}, {420, E5}, {560, G5}};
+static const note_t k_note_notes[] = {{0, G5}, {120, C6}};
 
 static const pattern_t k_patterns[] = {
     [ALARM_SOUND_TIMER] = {k_timer_notes, 2, 2000},
     [ALARM_SOUND_FOCUS_END] = {k_focus_notes, 3, 3000},
     [ALARM_SOUND_BREAK_END] = {k_break_notes, 3, 2400},
     [ALARM_SOUND_CALL] = {k_call_notes, 4, 3000},
+    [ALARM_SOUND_NOTE] = {k_note_notes, 2, 900},
 };
 
 static const char *TAG = "alarm_sound";
@@ -152,6 +161,12 @@ static volatile float s_gain_target;
 // token avoids pairing a stale done flag with a newer hook target.
 static uint32_t s_done_target = UINT32_MAX;
 
+// The clip, between its writer and the hook: the API sets on (and ending
+// once the last of it is written); the hook sets drained once it has played
+// all of an ending clip, and discards whatever is queued while off.
+static psram_stream_t s_clip_ring;
+static volatile bool s_clip_on, s_clip_ending, s_clip_drained;
+
 // Hook state, under audio_out's lock.
 static struct {
     uint32_t seen;
@@ -163,6 +178,10 @@ static struct {
     uint32_t clock;
     uint32_t rate;
     voice_t voices[MAX_VOICES];
+    // The clip, read a block at a time and interpolated to the DAC's rate.
+    int16_t clip[CLIP_BLOCK];
+    size_t clip_at, clip_len;
+    float clip_pos, clip_prev, clip_next;
 } h;
 
 static uint32_t ms_to_samples(uint32_t ms) {
@@ -292,6 +311,46 @@ static void seq_step(void) {
     }
 }
 
+static float clip_pop(void) {
+    if (h.clip_at == h.clip_len) {
+        h.clip_at = 0;
+        h.clip_len = xStreamBufferReceive(s_clip_ring.handle, h.clip, sizeof(h.clip), 0) / sizeof(h.clip[0]);
+        if (!h.clip_len) {
+            return 0;
+        }
+    }
+    return h.clip[h.clip_at++] * (1.0f / 32768.0f);
+}
+
+// Whether the clip sounds in this block: an ending one stops once played out.
+static bool clip_active(void) {
+    if (!s_clip_on) {
+        // Stopped mid-way: what's still queued never plays.
+        uint8_t discard[64];
+        while (s_clip_ring.handle && xStreamBufferReceive(s_clip_ring.handle, discard, sizeof(discard), 0)) {
+        }
+        h.clip_at = h.clip_len = 0;
+        h.clip_prev = h.clip_next = 0;
+        return false;
+    }
+    if (s_clip_ending && !s_clip_drained && h.clip_at == h.clip_len &&
+        !xStreamBufferBytesAvailable(s_clip_ring.handle)) {
+        s_clip_drained = true;
+    }
+    return !s_clip_drained;
+}
+
+static float clip_sample(void) {
+    float out = h.clip_prev + (h.clip_next - h.clip_prev) * h.clip_pos;
+    h.clip_pos += (float)CLIP_RATE / (float)h.rate;
+    while (h.clip_pos >= 1.0f) {
+        h.clip_pos -= 1.0f;
+        h.clip_prev = h.clip_next;
+        h.clip_next = clip_pop();
+    }
+    return out;
+}
+
 static int32_t saturate(float x) {
     return x >= 2147483520.0f ? INT32_MAX : x <= -2147483648.0f ? INT32_MIN : (int32_t)x;
 }
@@ -313,9 +372,13 @@ static void mix(int32_t *pcm, size_t frames, uint32_t rate) {
     }
 
     bool finished = h.releasing && h.release <= 0;
-    float duck_to = finished ? 1.0f : DUCK_GAIN;
+    bool chime_idle = !h.seq_on && (!h.releasing || finished);
+    bool clip = clip_active();
+    float duck_to = chime_idle && !clip ? 1.0f : DUCK_GAIN;
     float duck_step = (1.0f - DUCK_GAIN) / (DUCK_S * h.rate);
-    float gain_target = h.pattern == &k_patterns[ALARM_SOUND_CALL] ? CALL_GAIN : s_gain_target;
+    float gain_target = h.pattern == &k_patterns[ALARM_SOUND_CALL]   ? CALL_GAIN
+                        : h.pattern == &k_patterns[ALARM_SOUND_NOTE] ? NOTE_GAIN
+                                                                     : s_gain_target;
 
     for (size_t n = 0; n < frames; n++) {
         seq_step();
@@ -335,6 +398,10 @@ static void mix(int32_t *pcm, size_t frames, uint32_t rate) {
         h.duck = h.duck < duck_to ? fminf(h.duck + duck_step, duck_to) : fmaxf(h.duck - duck_step, duck_to);
 
         float chime = out * h.gain * 2147483647.0f;
+        if (clip) {
+            // Already at its volume.
+            chime += clip_sample() * 2147483647.0f;
+        }
         pcm[n * 2] = saturate(pcm[n * 2] * h.duck + chime);
         pcm[n * 2 + 1] = saturate(pcm[n * 2 + 1] * h.duck + chime);
     }
@@ -344,7 +411,7 @@ static void mix(int32_t *pcm, size_t frames, uint32_t rate) {
     } else {
         cull_voices();
     }
-    __atomic_store_n(&s_done_target, finished && h.duck >= 1.0f ? h.seen : UINT32_MAX,
+    __atomic_store_n(&s_done_target, chime_idle && !s_clip_on && h.duck >= 1.0f ? h.seen : UINT32_MAX,
                      __ATOMIC_RELEASE);
 }
 
@@ -388,7 +455,7 @@ static void system_sound_task(void *arg) {
             s_count--;
         }
         __atomic_store_n(&s_target, target, __ATOMIC_RELEASE);
-        if (!active && !target) {
+        if (!active && !target && !s_clip_on) {
             free(s_lut);
             s_lut = NULL;
             s_requested = 0;
@@ -425,6 +492,7 @@ static void system_sound_task(void *arg) {
             xSemaphoreTake(s_control, portMAX_DELAY);
             s_count = 0;
             s_requested = 0;
+            s_clip_on = false;
             xSemaphoreGive(s_control);
             end();
             active = false;
@@ -457,13 +525,24 @@ void alarm_sound_configure(alarm_sound_voice_t voice, uint8_t volume_pct) {
     s_gain_target = v * v * v;
 }
 
+// Caller holds s_control.
+static bool start_task_locked(void) {
+    if (!s_task && xTaskCreatePinnedToCore(system_sound_task, "system_sound", TASK_STACK, NULL, TASK_PRIO, &s_task,
+                                           TASK_CORE) != pdPASS) {
+        s_task = NULL;
+        ESP_LOGW(TAG, "cannot create system sound worker");
+        return false;
+    }
+    return true;
+}
+
 // Caller holds s_control. Posting never waits for queue space or playback.
 static void post_locked(uint32_t target) {
     if (audio_source_suspended()) {
         target = 0;
     }
     s_requested = target;
-    if (!s_task && !target) {
+    if (!s_task && !target && !s_clip_on) {
         return;
     }
     if (s_count == COMMAND_CAPACITY) {
@@ -472,12 +551,9 @@ static void post_locked(uint32_t target) {
     }
     s_commands[(s_head + s_count) % COMMAND_CAPACITY] = target;
     s_count++;
-    if (!s_task && xTaskCreatePinnedToCore(system_sound_task, "system_sound", TASK_STACK, NULL,
-                                         TASK_PRIO, &s_task, TASK_CORE) != pdPASS) {
-        s_task = NULL;
+    if (!start_task_locked()) {
         s_count = 0;
         s_requested = 0;
-        ESP_LOGW(TAG, "cannot create system sound worker");
     }
 }
 
@@ -509,4 +585,41 @@ void alarm_sound_preview(alarm_sound_kind_t kind) {
         post_locked(((uint32_t)kind + 1) | TARGET_ONCE | (s_preview_gen << TARGET_GEN_SHIFT));
     }
     xSemaphoreGive(s_control);
+}
+
+void alarm_sound_notify(alarm_sound_kind_t kind) {
+    alarm_sound_preview(kind);
+}
+
+bool alarm_sound_clip_start(void) {
+    xSemaphoreTake(s_control, portMAX_DELAY);
+    bool ok = !audio_source_suspended() &&
+              (s_clip_ring.handle || psram_stream_create(&s_clip_ring, CLIP_RING_MS * CLIP_RATE / 1000 * 2, 1));
+    if (ok) {
+        s_clip_ending = s_clip_drained = false;
+        s_clip_on = true;
+        ok = start_task_locked();
+        s_clip_on = ok;
+    }
+    xSemaphoreGive(s_control);
+    return ok;
+}
+
+size_t alarm_sound_clip_write(const int16_t *pcm, size_t frames, uint32_t wait_ms) {
+    if (!s_clip_on) {
+        return 0;
+    }
+    return xStreamBufferSend(s_clip_ring.handle, pcm, frames * sizeof(*pcm), pdMS_TO_TICKS(wait_ms)) / sizeof(*pcm);
+}
+
+void alarm_sound_clip_finish(void) {
+    s_clip_ending = true;
+}
+
+bool alarm_sound_clip_playing(void) {
+    return s_clip_on && !s_clip_drained && !audio_source_suspended();
+}
+
+void alarm_sound_clip_stop(void) {
+    s_clip_on = false;
 }

@@ -16,6 +16,8 @@
 #include "drivers/knob.h"
 #include "audio/mic/mic.h"
 #include "talk/talk.h"
+#include "talk/note/audio.h"
+#include "talk/note/notes.h"
 #include "drivers/lcd/driver.h"
 #include "ui/apps/lights/lights.h"
 #include "lvgl.h"
@@ -32,6 +34,15 @@
 #include "net/wifi/wifi.h"
 
 static const char *TAG = "s3";
+
+static void on_note_remove(const char *id) {
+    ui_talk_t talk;
+    note_audio_get(&talk);
+    if (!strcmp(talk.playing, id)) {
+        note_audio_stop();
+    }
+    notes_remove(id);
+}
 
 // Once per art version (well under a millisecond), not every poll.
 static uint32_t art_tint(const uint16_t *art, uint32_t version) {
@@ -163,6 +174,17 @@ static void state_poll_timer_cb(lv_timer_t *timer) {
 
     ui_talk_t talk;
     talk_get_state(&talk);
+    // Before the state, so the page has the thread a new note lands in.
+    static ui_notes_t *notes;
+    static uint32_t notes_shown = UINT32_MAX;
+    if (!notes) {
+        notes = heap_caps_malloc(sizeof(*notes), MALLOC_CAP_SPIRAM);
+    }
+    if (notes && talk.notes_version != notes_shown) {
+        notes_shown = talk.notes_version;
+        notes_snapshot(notes);
+        ui_update_notes(notes);
+    }
     ui_update_talk(&talk);
 #ifdef AK_DEV_AUTO_ACCEPT
     dev_auto_accept(&ota, &talk);
@@ -339,6 +361,15 @@ void app_main(void) {
     ui_set_source_handler(now_playing_pick);
     ui_set_radio_handler(radio_play);
     ui_set_talk_handler(talk_call, talk_answer, talk_set_volume);
+    ui_set_note_handlers(&(ui_note_handlers_t){.record = note_audio_record,
+                                               .send = note_audio_send,
+                                               .discard = note_audio_discard,
+                                               .pause = note_audio_pause,
+                                               .play = note_audio_play_request,
+                                               .stop = note_audio_stop,
+                                               .remove = on_note_remove,
+                                               .resend = notes_resend,
+                                               .seen = notes_seen});
     ui_set_pairing_handler(on_pairing);
     ui_set_firmware_handler(on_firmware);
     ui_set_alert_handler(on_alert);

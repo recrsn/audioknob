@@ -343,11 +343,19 @@ typedef enum {
 // The handler applies and persists it, then pushes ui_update_settings().
 void ui_set_settings_handler(void (*handler)(ui_setting_t setting, int value, const char *zone));
 
-// LAN calls between knobs. Peer IDs stay stable as discovery results change.
+// LAN calls and voice notes between knobs. Peer IDs (IPv4) stay stable as
+// discovery results change; a knob's key (its MAC in hex) outlives its address.
 #define UI_TALK_MAX 8
+#define UI_TALK_KEY 13
 typedef enum { UI_TALK_IDLE, UI_TALK_CALLING, UI_TALK_RINGING, UI_TALK_IN_CALL } ui_talk_state_t;
+typedef enum {
+    UI_NOTE_REC_IDLE,
+    UI_NOTE_REC_RECORDING,
+    UI_NOTE_REC_DRAFT, // stopped (left the page, or at the length limit), waiting for send or delete
+} ui_note_rec_t;
 typedef struct {
     uint32_t id;
+    char key[UI_TALK_KEY];
     char name[33];
 } ui_talk_peer_t;
 typedef struct {
@@ -358,7 +366,72 @@ typedef struct {
     char peer[33];
     uint32_t peer_id;
     char message[48];
+    // The voice note being recorded, for the knob with key rec_key.
+    ui_note_rec_t rec;
+    char rec_key[UI_TALK_KEY];
+    uint16_t rec_tenths; // recorded so far, 0.1 s
+    uint8_t level;       // the mic's last frame, 0-100
+    // The note playing, "" for none, and how far it has got.
+    char playing[17];
+    uint16_t play_tenths;
+    // Bumped whenever the threads change: fetch them then.
+    uint32_t notes_version;
 } ui_talk_t;
 void ui_update_talk(const ui_talk_t *talk);
 // call(peer) dials; call(0) hangs up. answer() takes or turns down a ringing call.
 void ui_set_talk_handler(void (*call)(uint32_t peer), void (*answer)(bool accept), void (*volume)(uint8_t pct));
+
+// A conversation with one knob: its voice notes and calls, oldest first.
+#define UI_NOTE_MAX_TENTHS 600
+#define UI_NOTE_WAVE 24
+#define UI_THREAD_ITEMS 20
+#define UI_THREADS_MAX 20
+typedef enum { UI_NOTE_IN, UI_NOTE_OUT, UI_CALL_IN, UI_CALL_OUT } ui_note_kind_t;
+typedef enum {
+    // Outgoing notes.
+    UI_NOTE_SENDING,
+    UI_NOTE_SENT,   // saved on the other knob
+    UI_NOTE_PLAYED, // played there
+    UI_NOTE_FAILED, // not delivered; tap to send again
+} ui_note_status_t;
+typedef enum {
+    UI_CALL_ANSWERED,
+    UI_CALL_MISSED, // incoming, rang without an answer
+    UI_CALL_DECLINED,
+    UI_CALL_NO_ANSWER,
+    UI_CALL_BUSY,
+} ui_call_outcome_t;
+typedef struct {
+    char id[17];
+    uint8_t kind;   // ui_note_kind_t
+    uint8_t status; // ui_note_status_t for an outgoing note, ui_call_outcome_t for a call
+    bool unread;    // an incoming note not yet played, a missed call not yet seen
+    uint16_t tenths; // the note's length, or the call's in 0.1 s
+    uint32_t time;   // Unix seconds; 0 when the clock wasn't set
+    uint8_t wave[UI_NOTE_WAVE]; // a note's loudness along it, 0-100
+} ui_note_t;
+typedef struct {
+    char key[UI_TALK_KEY];
+    char name[33];
+    uint32_t peer; // its address while discovered, else 0
+    uint8_t count, unread;
+    ui_note_t items[UI_THREAD_ITEMS];
+} ui_thread_t;
+typedef struct {
+    uint8_t count;
+    ui_thread_t threads[UI_THREADS_MAX]; // latest activity first, then knobs never talked to, by name
+} ui_notes_t;
+// Copied; called when notes_version moves.
+void ui_update_notes(const ui_notes_t *notes);
+typedef struct {
+    void (*record)(const char *key);
+    void (*send)(void);    // the recording, or its draft
+    void (*discard)(void); // the recording, or its draft
+    void (*pause)(void);   // stops recording, keeping a draft
+    void (*play)(const char *id);
+    void (*stop)(void); // the note playing
+    void (*remove)(const char *id);
+    void (*resend)(const char *id);
+    void (*seen)(const char *key); // a thread was opened: its missed calls are seen
+} ui_note_handlers_t;
+void ui_set_note_handlers(const ui_note_handlers_t *handlers);

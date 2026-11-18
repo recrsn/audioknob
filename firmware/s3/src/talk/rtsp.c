@@ -5,6 +5,11 @@
 // port), then RECORD, which the callee answers only once its user accepts
 // (200 with its own RTP-Info), declines (603), lets it ring out (480) or is
 // busy (453). The call lasts as long as the connection.
+//
+// A voice note is a connection of its own: one SET_PARAMETER /note carrying
+// the note (X-Note-Id, X-Note-Wave, Content-Type audio/ogg), answered once
+// it's saved; SET_PARAMETER /note/played tells its sender it was played.
+// Every request names its knob in X-AudioKnob-Id.
 #include "talk/rtsp.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -29,8 +34,12 @@
 #define REPLY_MS 1000
 #define POLL_MS 100
 #define RECORD_CSEQ 3
-#define USER_AGENT "AudioKnob Talk/2"
+#define USER_AGENT "AudioKnob Talk/3"
+// A note's receiver replies once the note is on its flash.
+#define NOTE_REPLY_MS 20000
+#define CONNECTIONS 3 // a call and two notes
 static talk_rtsp_ops_t s_ops;
+static char s_key[UI_TALK_KEY];
 static SemaphoreHandle_t s_connections, s_receiver;
 static const char *TAG = "talk_rtsp";
 static void timeout(int fd) {
@@ -82,9 +91,9 @@ static bool request(int fd, const char *method, int cseq, const char *session, c
     snprintf(line, sizeof(line), "%s /talk RTSP/1.0", method);
     snprintf(seq, sizeof(seq), "%d", cseq);
     snprintf(length, sizeof(length), "%u", (unsigned)(sdp ? strlen(sdp) : 0));
-    key_data_t headers[9] = {{"CSeq", seq}, {"Content-Length", length}, {"X-AudioKnob-Name", name},
-                             {"User-Agent", USER_AGENT}};
-    int n = 4;
+    key_data_t headers[10] = {{"CSeq", seq}, {"Content-Length", length}, {"X-AudioKnob-Name", name},
+                              {"User-Agent", USER_AGENT}, {"X-AudioKnob-Id", s_key}};
+    int n = 5;
     if (session)
         headers[n++] = (key_data_t){"Session", (char *)session};
     if (transport)
@@ -197,6 +206,39 @@ void talk_rtsp_end(int fd) {
         close(fd);
     }
 }
+static int note_post(uint32_t ip, const char *path, const char *id, const uint8_t *wave, const uint8_t *ogg,
+                     size_t len) {
+    int fd = connect_peer(ip);
+    if (fd < 0)
+        return -1;
+    char line[64], length[16], name[33], wave_hex[UI_NOTE_WAVE * 2 + 1] = "";
+    device_name_get(name, sizeof(name));
+    snprintf(line, sizeof(line), "SET_PARAMETER %s RTSP/1.0", path);
+    snprintf(length, sizeof(length), "%u", (unsigned)len);
+    for (int i = 0; wave && i < UI_NOTE_WAVE; i++)
+        snprintf(wave_hex + i * 2, 3, "%02x", wave[i]);
+    key_data_t headers[10] = {{"CSeq", "1"},         {"Content-Length", length},  {"X-AudioKnob-Name", name},
+                              {"User-Agent", USER_AGENT}, {"X-AudioKnob-Id", s_key}, {"X-Note-Id", (char *)id}};
+    int n = 6;
+    if (ogg) {
+        headers[n++] = (key_data_t){"Content-Type", "audio/ogg"};
+        headers[n++] = (key_data_t){"X-Note-Wave", wave_hex};
+    }
+    int code = http_send(fd, line, headers) && (!ogg || send_body(fd, ogg, len))
+                   ? reply_code(fd, 1, NOTE_REPLY_MS, NULL, 0, NULL, NULL)
+                   : -1;
+    close(fd);
+    return code;
+}
+
+int talk_rtsp_send_note(uint32_t ip, const char *id, const uint8_t wave[UI_NOTE_WAVE], const uint8_t *ogg, size_t len) {
+    return note_post(ip, "/note", id, wave, ogg, len);
+}
+
+int talk_rtsp_send_played(uint32_t ip, const char *id) {
+    return note_post(ip, "/note/played", id, NULL, NULL, 0);
+}
+
 bool talk_rtsp_alive(int fd) {
     char byte;
     int n = recv(fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT);
@@ -208,6 +250,8 @@ static bool reply(int fd, const char *cseq, int code, const char *session, uint1
              code == 200   ? "OK"
              : code == 453 ? "Not Enough Bandwidth"
              : code == 480 ? "Temporarily Unavailable"
+             : code == 503 ? "Service Unavailable"
+             : code == 507 ? "Insufficient Storage"
              : code == 603 ? "Decline"
                            : "Bad Request");
     snprintf(transport, sizeof(transport), "RTP/AVP/UDP;unicast;server_port=%u", port);
@@ -224,9 +268,44 @@ static bool reply(int fd, const char *cseq, int code, const char *session, uint1
     return http_send(fd, line, headers);
 }
 typedef struct {
-    char session[16], name[33], cseq[16];
+    char session[16], name[33], key[UI_TALK_KEY], cseq[16];
     uint16_t client_port, first;
 } offer_t;
+
+static bool parse_wave(const char *hex, uint8_t wave[UI_NOTE_WAVE]) {
+    if (!hex || strlen(hex) != UI_NOTE_WAVE * 2) {
+        return false;
+    }
+    for (int i = 0; i < UI_NOTE_WAVE; i++) {
+        unsigned v;
+        if (sscanf(hex + i * 2, "%2x", &v) != 1 || v > 100) {
+            return false;
+        }
+        wave[i] = v;
+    }
+    return true;
+}
+
+// SET_PARAMETER: a note, or its played receipt. Takes *body for a note.
+static int note_request(const char *path, key_data_t *headers, char **body, int len, const offer_t *o) {
+    const char *id = kd_lookup(headers, "X-Note-Id");
+    if (!o->key[0] || !id) {
+        return 400;
+    }
+    if (!strcmp(path, "/note/played")) {
+        s_ops.played(o->key, id);
+        return 200;
+    }
+    const char *type = kd_lookup(headers, "Content-Type");
+    uint8_t wave[UI_NOTE_WAVE];
+    if (strcmp(path, "/note") || !type || strcmp(type, "audio/ogg") || !*body ||
+        !parse_wave(kd_lookup(headers, "X-Note-Wave"), wave)) {
+        return 400;
+    }
+    uint8_t *ogg = (uint8_t *)*body;
+    *body = NULL;
+    return s_ops.note(o->key, o->name, id, wave, ogg, len);
+}
 // ANNOUNCE and SETUP, up to a valid RECORD. False if the caller gave up or
 // sent something else first.
 static bool negotiate(int fd, offer_t *o) {
@@ -245,8 +324,14 @@ static bool negotiate(int fd, offer_t *o) {
         const char *value = kd_lookup(headers, "X-AudioKnob-Name");
         if (value)
             snprintf(o->name, sizeof(o->name), "%s", value);
-        bool record = false;
+        value = kd_lookup(headers, "X-AudioKnob-Id");
+        if (value && strlen(value) == UI_TALK_KEY - 1)
+            snprintf(o->key, sizeof(o->key), "%s", value);
+        bool record = false, note = false;
         if (code != 200 || !strcmp(method, "OPTIONS")) {
+        } else if (!strcmp(method, "SET_PARAMETER")) {
+            code = note_request(path, headers, &body, len, o);
+            note = true;
         } else if (!strcmp(method, "ANNOUNCE")) {
             const char *type = kd_lookup(headers, "Content-Type");
             announced = type && !strcmp(type, "application/sdp") && body && len <= 2048 &&
@@ -284,7 +369,7 @@ static bool negotiate(int fd, offer_t *o) {
         free(body);
         if (record)
             return true;
-        if (!ok || code != 200)
+        if (!ok || code != 200 || note)
             return false;
         idle = 0;
     }
@@ -340,7 +425,7 @@ static void serve(int fd, uint32_t ip) {
         close(fd);
         return;
     }
-    uint32_t call = s_ops.ring(ip, o.client_port, o.first, o.name);
+    uint32_t call = s_ops.ring(ip, o.client_port, o.first, o.key, o.name);
     if (!call) {
         reply(fd, o.cseq, 453, o.session, 0, NULL);
     } else {
@@ -400,9 +485,10 @@ static void listener(void *arg) {
         }
     }
 }
-void talk_rtsp_init(const talk_rtsp_ops_t *ops) {
+void talk_rtsp_init(const talk_rtsp_ops_t *ops, const char *key) {
     s_ops = *ops;
-    s_connections = xSemaphoreCreateCounting(2, 2);
+    snprintf(s_key, sizeof(s_key), "%s", key);
+    s_connections = xSemaphoreCreateCounting(CONNECTIONS, CONNECTIONS);
     s_receiver = xSemaphoreCreateMutex();
     ESP_ERROR_CHECK(s_connections && s_receiver ? ESP_OK : ESP_ERR_NO_MEM);
     BaseType_t ok =

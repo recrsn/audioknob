@@ -369,29 +369,177 @@ static void push_radio(void) {
     ui_update_wireless(&state, &track);
 }
 
-static ui_talk_t s_talk = {.count = 2, .volume = 70, .peers = {{1, "AudioKnob-Priya-Desk"}, {2, "Kitchen"}}};
+static ui_talk_t s_talk = {.count = 2,
+                           .volume = 70,
+                           .peers = {{1, "a1b2c3d4e5f6", "AudioKnob-Priya-Desk"}, {2, "0a0b0c0d0e0f", "Kitchen"}}};
 static uint32_t s_talk_called;
 static void talk_set(ui_talk_state_t state, uint32_t peer) {
     s_talk.state = state;
-    s_talk.peer_id = state == UI_TALK_IDLE ? 0 : peer;
+    s_talk.peer_id = peer;
     s_talk.seconds = 0;
     snprintf(s_talk.peer, sizeof(s_talk.peer), "%s",
              state == UI_TALK_IDLE ? "" : peer == 1 ? "AudioKnob-Priya-Desk" : "Kitchen");
     ui_update_talk(&s_talk);
 }
-// A dialled sample knob answers after 2 s; a call's clock ticks once a second.
+
+// Sample conversations: Priya's with a missed call and an unheard note,
+// Kitchen's empty, and Studio, away, with a note that didn't go.
+static ui_notes_t s_notes;
+static uint32_t s_note_seq;
+static uint32_t s_play_started;
+static uint16_t s_play_length;
+static void notes_push(void) {
+    s_talk.notes_version++;
+    ui_update_notes(&s_notes);
+    ui_update_talk(&s_talk);
+}
+static ui_thread_t *sample_thread(const char *key) {
+    for (int i = 0; i < s_notes.count; i++) {
+        if (!strcmp(s_notes.threads[i].key, key)) {
+            return &s_notes.threads[i];
+        }
+    }
+    return NULL;
+}
+static ui_note_t *sample_note(const char *id, ui_thread_t **thread) {
+    for (int t = 0; t < s_notes.count; t++) {
+        for (int i = 0; i < s_notes.threads[t].count; i++) {
+            if (!strcmp(s_notes.threads[t].items[i].id, id)) {
+                *thread = &s_notes.threads[t];
+                return &s_notes.threads[t].items[i];
+            }
+        }
+    }
+    return NULL;
+}
+static void sample_unread(ui_thread_t *t) {
+    t->unread = 0;
+    for (int i = 0; i < t->count; i++) {
+        t->unread += t->items[i].unread;
+    }
+}
+static ui_note_t *sample_add(ui_thread_t *t, ui_note_kind_t kind, int status, uint16_t tenths, uint32_t ago_s) {
+    if (t->count == UI_THREAD_ITEMS) {
+        memmove(t->items, t->items + 1, (UI_THREAD_ITEMS - 1) * sizeof(t->items[0]));
+        t->count--;
+    }
+    ui_note_t *n = &t->items[t->count++];
+    memset(n, 0, sizeof(*n));
+    snprintf(n->id, sizeof(n->id), "%016x", (unsigned)++s_note_seq);
+    n->kind = kind;
+    n->status = status;
+    n->tenths = tenths;
+    n->time = (uint32_t)time(NULL) - ago_s;
+    n->unread = kind == UI_NOTE_IN || (kind == UI_CALL_IN && status == UI_CALL_MISSED);
+    for (int i = 0; i < UI_NOTE_WAVE; i++) {
+        n->wave[i] = (uint8_t)(30 + (i * 37 + s_note_seq * 11) % 70);
+    }
+    sample_unread(t);
+    return n;
+}
+// Threads in the order the firmware sorts them: latest first, the rest by name.
+static void sample_sort(void) {
+    for (int a = 0; a < s_notes.count; a++) {
+        for (int b = a + 1; b < s_notes.count; b++) {
+            ui_thread_t *x = &s_notes.threads[a], *y = &s_notes.threads[b];
+            uint32_t tx = x->count ? x->items[x->count - 1].time : 0, ty = y->count ? y->items[y->count - 1].time : 0;
+            if (ty > tx) {
+                ui_thread_t swap = *x;
+                *x = *y;
+                *y = swap;
+            }
+        }
+    }
+}
+static void notes_sample(void) {
+    ui_thread_t *priya = &s_notes.threads[s_notes.count++];
+    snprintf(priya->key, sizeof(priya->key), "a1b2c3d4e5f6");
+    snprintf(priya->name, sizeof(priya->name), "AudioKnob-Priya-Desk");
+    priya->peer = 1;
+    sample_add(priya, UI_CALL_OUT, UI_CALL_ANSWERED, 1510, 2 * 86400);
+    sample_add(priya, UI_NOTE_OUT, UI_NOTE_PLAYED, 54, 26 * 3600);
+    sample_add(priya, UI_CALL_IN, UI_CALL_MISSED, 0, 3600);
+    sample_add(priya, UI_NOTE_IN, 0, 123, 240);
+    ui_thread_t *studio = &s_notes.threads[s_notes.count++];
+    snprintf(studio->key, sizeof(studio->key), "ffeeddccbbaa");
+    snprintf(studio->name, sizeof(studio->name), "Studio");
+    sample_add(studio, UI_NOTE_IN, 0, 80, 4 * 86400)->unread = false;
+    sample_add(studio, UI_NOTE_OUT, UI_NOTE_FAILED, 31, 3 * 86400);
+    sample_unread(studio);
+    ui_thread_t *kitchen = &s_notes.threads[s_notes.count++];
+    snprintf(kitchen->key, sizeof(kitchen->key), "0a0b0c0d0e0f");
+    snprintf(kitchen->name, sizeof(kitchen->name), "Kitchen");
+    kitchen->peer = 2;
+    sample_sort();
+}
+static const char *sample_key_of(uint32_t peer) {
+    return peer == 1 ? "a1b2c3d4e5f6" : "0a0b0c0d0e0f";
+}
+
+// A dialled sample knob: Priya answers after 2 s, Kitchen never does. A
+// call's clock ticks once a second; a recording or playback moves along.
 static void talk_tick(lv_timer_t *t) {
     (void)t;
     if (s_talk.state == UI_TALK_CALLING && lv_tick_elaps(s_talk_called) >= 2000) {
-        talk_set(UI_TALK_IN_CALL, s_talk.peer_id);
+        if (s_talk.peer_id == 1) {
+            talk_set(UI_TALK_IN_CALL, s_talk.peer_id);
+        } else {
+            sample_add(sample_thread(sample_key_of(s_talk.peer_id)), UI_CALL_OUT, UI_CALL_NO_ANSWER, 0, 0);
+            snprintf(s_talk.message, sizeof(s_talk.message), "No answer");
+            talk_set(UI_TALK_IDLE, s_talk.peer_id);
+            sample_sort();
+            notes_push();
+        }
     } else if (s_talk.state == UI_TALK_IN_CALL) {
         s_talk.seconds++;
+        ui_update_talk(&s_talk);
+    }
+}
+static void notes_tick(lv_timer_t *t) {
+    (void)t;
+    bool changed = false;
+    if (s_talk.rec == UI_NOTE_REC_RECORDING) {
+        s_talk.rec_tenths++;
+        s_talk.level = (uint8_t)(rand() % 90);
+        if (s_talk.rec_tenths >= UI_NOTE_MAX_TENTHS) {
+            s_talk.rec = UI_NOTE_REC_DRAFT;
+        }
+        changed = true;
+    }
+    if (s_talk.playing[0]) {
+        s_talk.play_tenths = (uint16_t)(lv_tick_elaps(s_play_started) / 100);
+        if (s_talk.play_tenths >= s_play_length) {
+            ui_thread_t *th;
+            ui_note_t *n = sample_note(s_talk.playing, &th);
+            if (n && n->kind == UI_NOTE_IN) {
+                n->unread = false;
+                sample_unread(th);
+                s_talk.notes_version++;
+                ui_update_notes(&s_notes);
+            }
+            s_talk.playing[0] = '\0';
+        }
+        changed = true;
+    }
+    for (int i = 0; i < s_notes.count; i++) {
+        ui_thread_t *th = &s_notes.threads[i];
+        for (int n = 0; n < th->count; n++) {
+            if (th->items[n].kind == UI_NOTE_OUT && th->items[n].status == UI_NOTE_SENDING &&
+                (uint32_t)time(NULL) - th->items[n].time >= 1) {
+                th->items[n].status = UI_NOTE_SENT;
+                s_talk.notes_version++;
+                ui_update_notes(&s_notes);
+            }
+        }
+    }
+    if (changed) {
         ui_update_talk(&s_talk);
     }
 }
 static void on_talk_call(uint32_t peer) {
     if (peer) {
         s_talk_called = lv_tick_get();
+        s_talk.message[0] = '\0';
     }
     talk_set(peer ? UI_TALK_CALLING : UI_TALK_IDLE, peer);
 }
@@ -401,6 +549,86 @@ static void on_talk_answer(bool accept) {
 static void on_talk_volume(uint8_t v) {
     s_talk.volume = v;
     ui_update_talk(&s_talk);
+}
+static void on_note_record(const char *key) {
+    s_talk.rec = UI_NOTE_REC_RECORDING;
+    snprintf(s_talk.rec_key, sizeof(s_talk.rec_key), "%s", key);
+    s_talk.rec_tenths = 0;
+    s_talk.playing[0] = '\0';
+    s_talk.message[0] = '\0';
+    ui_update_talk(&s_talk);
+}
+static void on_note_send(void) {
+    ui_thread_t *t = sample_thread(s_talk.rec_key);
+    if (t && s_talk.rec_tenths >= 5) {
+        sample_add(t, UI_NOTE_OUT, UI_NOTE_SENDING, s_talk.rec_tenths, 0);
+        sample_sort();
+    }
+    s_talk.rec = UI_NOTE_REC_IDLE;
+    notes_push();
+}
+static void on_note_discard(void) {
+    s_talk.rec = UI_NOTE_REC_IDLE;
+    ui_update_talk(&s_talk);
+}
+static void on_note_pause(void) {
+    if (s_talk.rec == UI_NOTE_REC_RECORDING) {
+        s_talk.rec = UI_NOTE_REC_DRAFT;
+        ui_update_talk(&s_talk);
+    }
+}
+static void on_note_play(const char *id) {
+    ui_thread_t *th;
+    ui_note_t *n = sample_note(id, &th);
+    if (n) {
+        snprintf(s_talk.playing, sizeof(s_talk.playing), "%s", id);
+        s_talk.play_tenths = 0;
+        s_play_started = lv_tick_get();
+        s_play_length = n->tenths;
+        ui_update_talk(&s_talk);
+    }
+}
+static void on_note_stop(void) {
+    s_talk.playing[0] = '\0';
+    ui_update_talk(&s_talk);
+}
+static void on_note_remove(const char *id) {
+    ui_thread_t *th;
+    ui_note_t *n = sample_note(id, &th);
+    if (n) {
+        int i = (int)(n - th->items);
+        memmove(n, n + 1, (th->count - i - 1) * sizeof(*n));
+        th->count--;
+        sample_unread(th);
+        notes_push();
+    }
+}
+static void on_note_resend(const char *id) {
+    ui_thread_t *th;
+    ui_note_t *n = sample_note(id, &th);
+    if (n) {
+        n->status = UI_NOTE_FAILED;
+        notes_push();
+    }
+}
+static void on_note_seen(const char *key) {
+    ui_thread_t *th = sample_thread(key);
+    for (int i = 0; th && i < th->count; i++) {
+        if (th->items[i].kind != UI_NOTE_IN) {
+            th->items[i].unread = false;
+        }
+    }
+    if (th) {
+        sample_unread(th);
+        notes_push();
+    }
+}
+// N: a note from Priya arrives.
+static void sample_note_arrives(void) {
+    ui_thread_t *t = sample_thread("a1b2c3d4e5f6");
+    sample_add(t, UI_NOTE_IN, 0, (uint16_t)(30 + rand() % 300), 0);
+    sample_sort();
+    notes_push();
 }
 static void on_radio(int station) {
     if (station < 0) {
@@ -525,6 +753,8 @@ static void knob_key_cb(lv_event_t *e) {
         cycle_sample_playback();
     } else if (key == 't' || key == 'T') {
         talk_set(s_talk.state == UI_TALK_IDLE ? UI_TALK_RINGING : UI_TALK_IDLE, 1);
+    } else if (key == 'n' || key == 'N') {
+        sample_note_arrives();
     } else if (key == 'u' || key == 'U') {
         start_sample_update();
     } else if (key == 'a' || key == 'A') {
@@ -579,8 +809,20 @@ int main(void) {
     ui_set_firmware_handler(on_firmware);
     lv_timer_create(firmware_tick_cb, SIM_FW_TICK_MS, NULL);
     ui_set_radio_handler(on_radio);
-    ui_set_talk_handler(on_talk_call, on_talk_answer, on_talk_volume); ui_update_talk(&s_talk);
+    ui_set_talk_handler(on_talk_call, on_talk_answer, on_talk_volume);
+    ui_set_note_handlers(&(ui_note_handlers_t){.record = on_note_record,
+                                               .send = on_note_send,
+                                               .discard = on_note_discard,
+                                               .pause = on_note_pause,
+                                               .play = on_note_play,
+                                               .stop = on_note_stop,
+                                               .remove = on_note_remove,
+                                               .resend = on_note_resend,
+                                               .seen = on_note_seen});
+    notes_sample();
+    notes_push();
     lv_timer_create(talk_tick, 1000, NULL);
+    lv_timer_create(notes_tick, 100, NULL);
     ui_set_transport_handler(on_transport);
     ui_update_radio(&s_radio);
     lv_timer_create(radio_tick_cb, 500, NULL);

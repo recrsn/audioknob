@@ -527,6 +527,11 @@ bool ui_tools_status(ui_app_t app, char *buf, size_t len) {
     return d->status && d->status(buf, len);
 }
 
+bool ui_tools_notice(ui_app_t app, char *buf, size_t len) {
+    const tool_page_desc_t *d = &s_pages[app].desc;
+    return d->notice && d->notice(buf, len);
+}
+
 bool ui_tools_alerting(void) {
     for (int i = 0; i < UI_APP_COUNT; i++) {
         if (s_pages[i].desc.cd && s_pages[i].desc.cd->state == COUNTDOWN_ALERT) {

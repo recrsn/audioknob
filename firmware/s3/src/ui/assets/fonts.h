@@ -45,6 +45,21 @@ extern const lv_font_t icons_20;
 #define ICON_RADIO        "\xEE\x80\xBE"
 
 // The Talk glyph lives in icons_talk_48/20, fallbacks of icons_48/20.
-// Talk is a walkie-talkie; regenerate both sizes with tools/gen_talk_icons.py.
+// Talk is a walkie-talkie; regenerate all three sizes with tools/gen_talk_icons.py.
 #define ICON_TALK "\xEE\x80\xA9"
+// Voice notes. icons_20 (through icons_talk_20): every one; icons_talk_24,
+// for the thread's round buttons: mic, send and delete.
+extern const lv_font_t icons_talk_24;
+#define ICON_NOTE_MIC      "\xEE\x8C\x9D"
+#define ICON_NOTE_SEND     "\xEE\x85\xA3"
+#define ICON_NOTE_DELETE   "\xEE\xA1\xB2"
+#define ICON_NOTE_SENT     "\xEE\xA1\xB6"
+#define ICON_NOTE_PLAYED   "\xEE\xA1\xB7"
+#define ICON_NOTE_SENDING  "\xEE\xA2\xB5"
+#define ICON_NOTE_FAILED   "\xEE\x80\x80"
+#define ICON_CALL_OUT      "\xEE\x82\xB2"
+#define ICON_CALL_IN       "\xEE\x82\xB5"
+#define ICON_CALL_MISSED   "\xEE\x82\xB4"
+#define ICON_NOTE_PLAY     "\xEE\x80\xB7"
+#define ICON_NOTE_STOP     "\xEE\x81\x87"
 

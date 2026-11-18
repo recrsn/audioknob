@@ -106,6 +106,10 @@ void ui_init(void) {
     home_refresh();
 }
 
+void ui_update_notes(const ui_notes_t *notes) {
+    ui_talk_notes_update(notes);
+}
+
 void ui_update_talk(const ui_talk_t *talk) {
     static bool was_ringing;
     bool ringing = talk->state == UI_TALK_RINGING;

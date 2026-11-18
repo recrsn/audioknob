@@ -28,6 +28,8 @@ set(AK_REQUIRES
     mdns
     esp_audio_codec
     esp-sr
+    # Voice notes on the user_data partition (talk/note/store.c).
+    spiffs
     libsodium
 )
 

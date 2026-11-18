@@ -2,7 +2,8 @@
 
 Usage: python3 tools/gen_talk_icons.py MaterialSymbolsRounded.ttf /path/to/lv_font_conv.js
 Requires fontTools and Node. Talk uses a custom walkie-talkie outline at U+E029,
-in the UI's filled, weight-500 style at each optical size.
+in the UI's filled, weight-500 style at each optical size. The 20 px size also
+carries the voice-note thread's glyphs, and 24 px the thread's round buttons.
 """
 import subprocess
 import sys
@@ -44,17 +45,28 @@ def walkie_talkie():
 
 source, converter = sys.argv[1:]
 assets = Path(__file__).resolve().parents[1] / 'firmware/s3/src/ui/assets'
+# Material Symbols code points: mic, send, delete, done, done_all, schedule,
+# error, call_made, call_received, call_missed, play_arrow, stop.
+NOTE_GLYPHS = '0xe31d,0xe163,0xe872,0xe876,0xe877,0xe8b5,0xe000,0xe0b2,0xe0b5,0xe0b4,0xe037,0xe047'
+BUTTON_GLYPHS = '0xe31d,0xe163,0xe872'
+RANGES = {20: '0xe029,' + NOTE_GLYPHS, 24: BUTTON_GLYPHS, 48: '0xe029'}
+
 with tempfile.TemporaryDirectory(prefix='audioknob-walkie-') as tmp:
-    for size in (20, 48):
+    for size, ranges in RANGES.items():
         font = instantiateVariableFont(TTFont(source),
                                       {'FILL': 1, 'wght': 500, 'GRAD': 0, 'opsz': size})
-        name = font.getBestCmap()[0xE029]
-        font['glyf'][name] = walkie_talkie()
-        font['hmtx'][name] = (960, 160)
+        # A glyph of its own: mic shares its outline with U+E31D, which the
+        # thread's record button needs as a microphone.
+        font.setGlyphOrder(font.getGlyphOrder() + ['walkie'])
+        font['glyf']['walkie'] = walkie_talkie()
+        font['hmtx']['walkie'] = (960, 160)
+        for table in font['cmap'].tables:
+            if table.isUnicode() and 0xE029 in table.cmap:
+                table.cmap[0xE029] = 'walkie'
         ttf = Path(tmp) / f'talk-{size}.ttf'
         font.save(ttf)
         target = assets / f'font_icons_talk_{size}.c'
-        subprocess.run(['node', converter, '--font', str(ttf), '-r', '0xe029',
+        subprocess.run(['node', converter, '--font', str(ttf), '-r', ranges,
                         '--size', str(size), '--bpp', '4', '--format', 'lvgl', '--no-compress',
                         '--lv-font-name', f'icons_talk_{size}', '--lv-include', 'lvgl.h',
                         '-o', str(target)], check=True)

@@ -23,7 +23,17 @@ bool band_app_item(ui_app_t app, band_item_t *out) {
 }
 
 bool band_item(band_item_t *out) {
-    return band_app_item(UI_APP_TALK, out);
+    if (band_app_item(UI_APP_TALK, out)) {
+        return true;
+    }
+    if (!ui_tools_notice(UI_APP_TALK, out->text, sizeof(out->text))) {
+        return false;
+    }
+    ui_app_info_t info = ui_tools_info(UI_APP_TALK);
+    out->app = UI_APP_TALK;
+    out->icon = info.icon;
+    out->tint = info.tint;
+    return true;
 }
 
 bool band_owns(ui_app_t app) {

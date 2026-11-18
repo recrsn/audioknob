@@ -9,6 +9,7 @@
 #define LAUNCHER_NAME_Y    (-9)
 #define LAUNCHER_STATUS_Y  13
 #define LAUNCHER_STATUS_MS 250
+#define LAUNCHER_BADGE     12 // a dot on an app with something waiting
 
 // Ring positions, clockwise from the top: the audio entry, then the apps.
 #define LAUNCHER_COUNT (UI_APP_COUNT + 1)
@@ -16,6 +17,7 @@
 static struct {
     lv_obj_t *scrim;
     lv_obj_t *items[LAUNCHER_COUNT];
+    lv_obj_t *badges[LAUNCHER_COUNT];
     lv_obj_t *name;
     lv_obj_t *status;
     lv_timer_t *timer;
@@ -46,7 +48,8 @@ bool launcher_visible(void) {
 static void refresh_status(void) {
     char buf[64];
     bool any = ln.selected == 0 ? ln.handlers.audio_status(buf, sizeof(buf))
-                                : ui_tools_status((ui_app_t)entry_at(ln.selected), buf, sizeof(buf));
+                                : ui_tools_status((ui_app_t)entry_at(ln.selected), buf, sizeof(buf)) ||
+                                      ui_tools_notice((ui_app_t)entry_at(ln.selected), buf, sizeof(buf));
     ui_label_set_text(ln.status, any ? buf : "");
 }
 
@@ -74,7 +77,15 @@ static void select_pos(int pos) {
     refresh_status();
 }
 
+static void refresh_badges(void) {
+    char buf[64];
+    for (int pos = 1; pos < LAUNCHER_COUNT; pos++) {
+        ui_set_visible(ln.badges[pos], ui_tools_notice((ui_app_t)entry_at(pos), buf, sizeof(buf)));
+    }
+}
+
 void launcher_show(int entry) {
+    refresh_badges();
     select_pos(pos_of(entry));
     if (!launcher_visible()) {
         lv_obj_remove_flag(ln.scrim, LV_OBJ_FLAG_HIDDEN);
@@ -151,6 +162,18 @@ static lv_obj_t *item_create(int pos) {
     int32_t y = LAUNCHER_RADIUS * lv_trigo_sin(angle) / LV_TRIGO_SIN_MAX;
     lv_obj_align(item, LV_ALIGN_CENTER, x, y);
     item_icon_create(item, pos);
+    if (pos) {
+        lv_obj_t *badge = lv_obj_create(item);
+        lv_obj_remove_style_all(badge);
+        lv_obj_remove_flag(badge, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_size(badge, LAUNCHER_BADGE, LAUNCHER_BADGE);
+        lv_obj_set_style_radius(badge, UI_RADIUS_PILL, 0);
+        lv_obj_set_style_bg_color(badge, lv_color_hex(UI_COLOR_ACCENT), 0);
+        lv_obj_set_style_bg_opa(badge, LV_OPA_COVER, 0);
+        lv_obj_align(badge, LV_ALIGN_TOP_RIGHT, 0, 0);
+        lv_obj_add_flag(badge, LV_OBJ_FLAG_HIDDEN);
+        ln.badges[pos] = badge;
+    }
     return item;
 }
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 // The ringing countdown's chime through the DAC, synthesized (a few decaying
@@ -12,6 +14,7 @@ typedef enum {
     ALARM_SOUND_FOCUS_END, // falling: time for a break
     ALARM_SOUND_BREAK_END, // rising: back to work
     ALARM_SOUND_CALL,      // a Talk call ringing
+    ALARM_SOUND_NOTE,      // a voice note arrived (alarm_sound_notify())
 } alarm_sound_kind_t;
 
 typedef enum {
@@ -37,3 +40,19 @@ void alarm_sound_stop(void);
 // Plays kind's pattern once, as a sample of the current settings; ignored
 // while an alarm rings.
 void alarm_sound_preview(alarm_sound_kind_t kind);
+// Plays kind once as a notification, at its own fixed level.
+void alarm_sound_notify(alarm_sound_kind_t kind);
+
+// A clip (a Talk voice note) over whatever plays, which ducks under it like
+// under the chime: 16 kHz mono PCM, already at its volume, written while it
+// plays. While on, the clip ducks playback even with nothing written (as
+// while a note is recorded). One writer at a time.
+bool alarm_sound_clip_start(void);
+// Waits up to wait_ms for room; returns the frames queued.
+size_t alarm_sound_clip_write(const int16_t *pcm, size_t frames, uint32_t wait_ms);
+// Nothing more to write: it plays out what's queued.
+void alarm_sound_clip_finish(void);
+// Until a finished clip has played out.
+bool alarm_sound_clip_playing(void);
+// Silences it at once, dropping what's queued, and lifts the duck.
+void alarm_sound_clip_stop(void);

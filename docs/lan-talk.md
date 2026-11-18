@@ -1,15 +1,39 @@
 # LAN Talk
 
-Two-way calls between AudioKnobs on the same network. Speech is live only:
-there are no text messages, voice notes or inbox.
+Two-way calls and voice notes between AudioKnobs on the same network. There
+are no text messages.
 
 ## Device UI
 
-- **Calling:** Talk lists the knobs it has discovered. Opening one shows its
-  avatar and name over Back and a green Call button. While the other knob
+- **Knobs:** Talk is a chat list: one row per knob, newest activity first,
+  with the last item ("Voice note 0:12", "Missed call") and its age, and a dot
+  while something is unheard. Knobs with a conversation stay listed when they
+  aren't on the network, dimmed and marked "away"; every discovered knob is
+  listed even with none. Tapping a row opens its thread: voice notes as
+  bubbles (theirs left, ours right in the Talk tint) and calls as one-line
+  entries, the newest at the bottom, over Back, Call and a mic button. The
+  knob scrolls the thread. A knob with no history shows its avatar instead.
+- **Calling:** Call While the other knob
   rings, rings pulse out of the avatar, it reads "Calling…", and a red End
-  button replaces the pair. Busy, Declined and No answer show under the name
-  if the call doesn't connect.
+  button replaces the pair. If the call doesn't connect, "No answer", "Declined"
+  or "Busy" reads "· leave a voice note" above the buttons, and the mic button
+  takes the accent fill.
+- **Recording a note:** tap the mic (no holding). A red dot, the time and a
+  live level trace replace the caption; Delete and Send replace the buttons.
+  A note stops at 60 s and waits for one of them; under 0.5 s is discarded.
+  Leaving the page keeps the recording as a draft ("Draft · 0:12"), which
+  Send or Delete finish later. Recording ducks whatever plays; incoming calls
+  are turned away while it runs.
+- **Sent notes** show a clock while sending, ✓ once the other knob saved it,
+  ✓✓ (accent) once it was played there, and ! if it failed; tapping a failed
+  one sends it again.
+- **Receiving a note:** it's never played on its own. A two-note chime plays
+  (not during a call), the display wakes if nothing is playing, the clock's
+  top band reads "Voice note · <name>" and the launcher's Talk icon gets a
+  dot. Tapping a bubble plays it at the Talk volume, ducking the music, which
+  comes back after it; tapping again stops it. The knob is the volume while a
+  note plays. Long-pressing a bubble or call entry deletes it, after a
+  confirmation, from this knob only.
 - **Ringing:** an incoming call wakes the display, opens Talk on the caller
   with the same pulsing avatar, and plays a ring over whatever is playing,
   which ducks under it. Decline (red, handset down) and Accept (green) sit side
@@ -34,8 +58,10 @@ Talk states: 0 idle, 1 calling, 2 ringing, 3 in a call.
 ## Protocol
 
 Discovery uses the existing mDNS instance: `_audioknob._tcp`, TCP 42424, TXT
-`v=2` and `name=<device name>`. Knobs advertising `v=1` (the old hold-to-talk
-firmware) aren't listed. AirPlay remains responsible for `mdns_init()`; the
+`v=3`, `name=<device name>` and `id=<key>`, the knob's station MAC as 12
+lowercase hex digits. The key, sent with every request as `X-AudioKnob-Id`,
+is what a thread belongs to, so it survives renames and new addresses. Knobs
+advertising another version aren't listed. AirPlay remains responsible for `mdns_init()`; the
 Talk advertisement is added once after its initial probing, and renames update
 the TXT value.
 
@@ -52,6 +78,15 @@ RTP-Info parser:
    when it is already ringing or in a call.
 4. The call lasts as long as the connection. Closing it (or `TEARDOWN`) hangs
    up, from either side; closing it while RECORD waits cancels the ring.
+
+A voice note is one request on a connection of its own:
+`SET_PARAMETER /note` with `Content-Type: audio/ogg`, `X-Note-Id` (16 hex
+digits, the sender's), `X-Note-Wave` (24 bars of 0-100 as 48 hex digits, so
+the bubble draws without decoding) and the Ogg Opus file as the body. The
+reply comes once it's on flash: `200`, `400` for a malformed note, `503` while
+the store isn't ready, `507` when it can't make room. When the
+note is first played, its receiver sends `SET_PARAMETER /note/played` with
+the same `X-Note-Id` and no body. Notes that fail aren't retried on their own.
 
 Each side sends RTP from and to UDP 42425, and accepts packets only from the
 other side's address and negotiated port, locked to the first SSRC it sees.
@@ -108,6 +143,29 @@ puts speech near full scale; the ring plays at a fixed level (`CALL_GAIN`), not
 the timer volume. The worker never writes flash, and the Talk volume is saved
 (debounced 2 s) from the esp_timer task.
 
+## Voice notes
+
+A note is Ogg Opus as the call's codec makes it: 16 kHz mono at ~24 kbit/s,
+complexity 0, one 20 ms packet per page, at most 3000 packets (60 s, ~180 KB;
+320 KB accepted). Receivers check every page's CRC and that each packet is one
+20 ms frame before saving it. Recording and playback run a frame at a time on
+the Talk worker, on its internal call stack, which Opus needs; the mic runs
+the call's processing chain. Playback decodes into `alarm_sound`'s clip channel: a 200 ms
+PSRAM stream at 16 kHz that the alarm's `audio_out` mix hook resamples to the
+DAC rate and mixes in while ducking S3 playback (and muting Bluetooth through
+the S3 bank, like the alarm). So the note needs no DAC claim and the music
+resumes by itself. Receiving plays `ALARM_SOUND_NOTE` the same way.
+
+Notes live on the `user_data` SPIFFS partition, mounted at `/notes`
+(formatted on first mount): `<id>.ogg` per note and `t<key>.idx` per thread,
+a checksummed record of its last 20 items. Writes go to `.tmp` and are renamed
+over, in 4 KB chunks with a yield between them, since flash writes stall
+anything running from flash. Up to 12 threads are kept besides the knobs
+online; when a note doesn't fit in ¾ of the partition, the oldest notes go
+first, anywhere. A worker task (6 KB internal stack, priority 3) does the
+flash work and the sending; it's created on demand and exits after 3 s idle.
+Mounting turns notes left "sending" into failed and sweeps orphan files.
+
 ## Not verified on hardware
 
 - How much echo the canceller removes on the knob's own speaker and mic, and
@@ -131,9 +189,9 @@ the timer volume. The worker never writes flash, and the Talk volume is saved
 
 ## Flash data
 
-Talk keeps only its volume, in NVS namespace `talk`. The `user_data` SPIFFS
-partition (0x930000, 6.8125 MiB) that held messages is no longer mounted; the
-partition table keeps it so existing devices need no re-flash.
+Talk keeps its volume in NVS namespace `talk`, and voice notes on the
+`user_data` SPIFFS partition (0x930000, 6.8125 MiB), above. The first mount on
+a knob formats the partition, which can take a while.
 
 ## Checks
 
@@ -145,8 +203,13 @@ pio run -d firmware/s3 -e s3
 
 The host checks use the production RTP and RTSP implementations with POSIX
 stand-ins for FreeRTOS, under ASan/UBSan: ringing, answer, busy, decline, the
-caller giving up, and either side hanging up. They do not cover the codec,
+caller giving up, either side hanging up, a note saved or refused and its
+played receipt, and writing, reading and validating a note's Ogg. They do not
+cover the codec,
 echo cancellation, mic capture or WiFi.
 
 The native preview has two sample knobs. Calling one answers after 2 s, then
 the call's clock and level tick; `T` rings an incoming call (or ends one).
+Sample threads show each item kind and status (Studio is away with a failed
+note); Kitchen never answers, to show the voice-note offer. Recording, playing
+and sending run on a timer; `N` delivers a note from Priya.

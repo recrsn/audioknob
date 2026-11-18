@@ -15,6 +15,7 @@ with tempfile.TemporaryDirectory(prefix='audioknob-sound-') as tmp:
         stub = out / name
         stub.parent.mkdir(parents=True, exist_ok=True)
         stub.write_text('#include "runtime.h"\n')
+    (out / 'freertos/stream_buffer.h').write_text('#include "stream_stub.h"\n')
     common = ['clang', '-std=gnu11', '-g', '-O1', '-pthread', '-fsanitize=address,undefined',
               '-fno-omit-frame-pointer', f'-I{HERE}', f'-I{out}',
               f'-I{SRC}']

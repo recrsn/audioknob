@@ -12,6 +12,9 @@
 #include "audio/alarm_sound.h"
 #include "audio/out.h"
 #include "talk/playout.h"
+#include "talk/note/audio.h"
+#include "talk/note/notes.h"
+#include "esp_mac.h"
 #include "audio/source.h"
 #include "core/device_name.h"
 #include "core/task_stats.h"
@@ -35,9 +38,9 @@
 #include "net/wifi/wifi.h"
 #include "airplay/shared/http_util.h"
 
-// mDNS TXT v: 2 is two-way Opus calls; knobs on 1 (hold-to-talk) aren't
-// listed.
-#define TALK_VERSION "2"
+// mDNS TXT v: 3 is two-way Opus calls and voice notes, with the knob's key
+// in TXT id; knobs on earlier versions aren't listed.
+#define TALK_VERSION "3"
 #define CALL_LOST_US 3000000
 #define DIAL_TIMEOUT_US ((TALK_RING_MS + 5000) * 1000LL)
 // Playout delay in frames: from 60 ms, growing by however late a packet
@@ -64,6 +67,7 @@ static int s_sock = -1;
 static struct session *s_session;
 static SemaphoreHandle_t s_lock, s_write_lock;
 static ui_talk_t s_ui = {.volume = 70};
+static char s_key[UI_TALK_KEY];
 static bool s_abort, s_network, s_renamed;
 static esp_timer_handle_t s_save_timer;
 
@@ -76,7 +80,7 @@ static bool s_accept, s_hang_up;
 static struct {
     uint32_t ip;
     uint16_t port;
-    char name[33];
+    char key[UI_TALK_KEY], name[33];
 } s_ring;
 static uint32_t s_ring_call, s_ring_ended, s_last_call;
 static talk_answer_t s_ring_answer;
@@ -85,6 +89,8 @@ static uint32_t s_answer_timestamp;
 
 typedef struct session {
     uint32_t call; // the incoming call's id, 0 for one we dialled
+    char key[UI_TALK_KEY], name[33]; // the other knob, for the call log
+    int outcome; // a ui_call_outcome_t for a call that never connected, -1 unknown
     struct sockaddr_in peer;
     uint32_t ssrc, peer_ssrc;
     uint16_t sequence;
@@ -132,6 +138,8 @@ void talk_get_state(ui_talk_t *out) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     *out = s_ui;
     xSemaphoreGive(s_lock);
+    note_audio_get(out);
+    out->notes_version = notes_version();
 }
 void talk_call(uint32_t peer) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
@@ -184,8 +192,12 @@ static bool cancelled(void) {
 // The RTSP connection task's side of an incoming call.
 // The caller's first sequence goes unused: the jitter buffer starts at the
 // first packet that arrives.
-static uint32_t ring(uint32_t ip, uint16_t port, uint16_t sequence, const char *name) {
+static uint32_t ring(uint32_t ip, uint16_t port, uint16_t sequence, const char *key, const char *name) {
     (void)sequence;
+    // A note being recorded turns calls away; one playing gives way.
+    if (note_audio_recording())
+        return 0;
+    note_audio_stop();
     xSemaphoreTake(s_lock, portMAX_DELAY);
     uint32_t call = 0;
     if (s_ui.state == UI_TALK_IDLE && !s_dial && !s_ring_call && !audio_source_suspended()) {
@@ -195,6 +207,7 @@ static uint32_t ring(uint32_t ip, uint16_t port, uint16_t sequence, const char *
         s_ring.ip = ip;
         s_ring.port = port;
         snprintf(s_ring.name, sizeof(s_ring.name), "%s", name);
+        snprintf(s_ring.key, sizeof(s_ring.key), "%s", key);
         s_ring_answer = TALK_ANSWER_PENDING;
         s_ring_ended = 0;
         s_accept = s_hang_up = false;
@@ -229,10 +242,17 @@ static bool ring_active(uint32_t call) {
     return active;
 }
 
+static void log_call(const session_t *s) {
+    if (s->in_call)
+        notes_log_call(s->key, s->name, s->call != 0, UI_CALL_ANSWERED, (uint32_t)((now_us() - s->answered) / 1000000));
+    else if (s->outcome >= 0)
+        notes_log_call(s->key, s->name, s->call != 0, (ui_call_outcome_t)s->outcome, 0);
+}
 static void finish(session_t **session, const char *message) {
     session_t *s = *session;
     if (!s)
         return;
+    log_call(s);
     if (s->in_call) {
         log_internal("at the end of the call");
         task_stats_end(s->stats, "call");
@@ -279,6 +299,7 @@ static session_t *create_session(uint32_t ip, uint16_t port, uint32_t call) {
     if (!s)
         return NULL;
     s->control = -1;
+    s->outcome = -1;
     s->peer = (struct sockaddr_in){.sin_family = AF_INET, .sin_port = htons(port), .sin_addr.s_addr = ip};
     s->call = call;
     s->started = now_us();
@@ -366,6 +387,9 @@ static session_t *answer_ringing(void) {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     uint32_t call = s_ring_call, ip = s_ring.ip;
     uint16_t port = s_ring.port;
+    char key[UI_TALK_KEY], name[33];
+    snprintf(key, sizeof(key), "%s", s_ring.key);
+    snprintf(name, sizeof(name), "%s", s_ring.name);
     xSemaphoreGive(s_lock);
     session_t *s = create_session(ip, port, call);
     if (!s) {
@@ -376,6 +400,8 @@ static session_t *answer_ringing(void) {
         set_state(UI_TALK_IDLE, NULL, "Missed call");
         return NULL;
     }
+    snprintf(s->key, sizeof(s->key), "%s", key);
+    snprintf(s->name, sizeof(s->name), "%s", name);
     // Over whatever plays, which ducks under it; the DAC is only taken on
     // answering.
     alarm_sound_start(ALARM_SOUND_CALL);
@@ -398,18 +424,23 @@ static void accept_ringing(session_t **session) {
     xSemaphoreGive(s_lock);
 }
 static session_t *dial(uint32_t ip) {
-    char name[33] = "";
+    char name[33] = "", key[UI_TALK_KEY] = "";
     xSemaphoreTake(s_lock, portMAX_DELAY);
     for (int i = 0; i < s_ui.count; i++)
-        if (s_ui.peers[i].id == ip)
+        if (s_ui.peers[i].id == ip) {
             snprintf(name, sizeof(name), "%s", s_ui.peers[i].name);
+            snprintf(key, sizeof(key), "%s", s_ui.peers[i].key);
+        }
     snprintf(s_ui.peer, sizeof(s_ui.peer), "%s", name);
     s_ui.peer_id = ip;
     xSemaphoreGive(s_lock);
     session_t *s = name[0] ? create_session(ip, 0, 0) : NULL;
     uint16_t port = 0;
-    if (s)
+    if (s) {
+        snprintf(s->key, sizeof(s->key), "%s", key);
+        snprintf(s->name, sizeof(s->name), "%s", name);
         s->control = talk_rtsp_dial(ip, s->sequence, s->timestamp, &port);
+    }
     if (!s || s->control < 0) {
         if (s)
             finish(&s, "Knob unavailable");
@@ -428,6 +459,12 @@ static void dialing(session_t **session) {
         [TALK_DIAL_NO_ANSWER] = "No answer",
         [TALK_DIAL_FAILED] = "Call failed",
     };
+    static const int k_logged[] = {
+        [TALK_DIAL_BUSY] = UI_CALL_BUSY,
+        [TALK_DIAL_DECLINED] = UI_CALL_DECLINED,
+        [TALK_DIAL_NO_ANSWER] = UI_CALL_NO_ANSWER,
+        [TALK_DIAL_FAILED] = -1,
+    };
     uint16_t first;
     talk_dial_t outcome = talk_rtsp_answer(s->control, &first);
     if (outcome == TALK_DIAL_ANSWERED) {
@@ -435,8 +472,10 @@ static void dialing(session_t **session) {
         if (failure)
             finish(session, failure);
     } else if (outcome != TALK_DIAL_RINGING) {
+        s->outcome = k_logged[outcome];
         finish(session, k_outcome[outcome]);
     } else if (now_us() - s->started > DIAL_TIMEOUT_US) {
+        s->outcome = UI_CALL_NO_ANSWER;
         finish(session, "No answer");
     }
 }
@@ -593,6 +632,9 @@ static void call_frame(int sock, session_t **session) {
 // Ends the session when either side has hung up or the call can't go on.
 static void check_ended(session_t **session, bool hang_up, uint32_t ended) {
     session_t *s = *session;
+    bool ringing = s->call && !s->in_call;
+    if (ringing)
+        s->outcome = hang_up ? UI_CALL_DECLINED : UI_CALL_MISSED;
     if (hang_up)
         finish(session, NULL);
     else if (s->call && ended == s->call)
@@ -671,16 +713,34 @@ static void step(void) {
     s_sock = sock;
     s_session = s;
 }
-static void call_passes(void) {
-    while (s_session)
+// A call or a voice note being recorded or played: frames to run.
+static bool busy(void) {
+    return s_session || note_audio_busy();
+}
+static void pass(void) {
+    if (s_session || !note_audio_busy()) {
         step();
+        return;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    bool call = s_dial || s_ring_call;
+    uint8_t volume = s_ui.volume;
+    xSemaphoreGive(s_lock);
+    // A note playing gives way to a call; recording turns calls away.
+    if (call)
+        note_audio_stop();
+    note_audio_step(volume);
+}
+static void call_passes(void) {
+    while (busy())
+        pass();
     if (s_call_stack)
         s_call_stack_used = CALL_STACK - stack_untouched(s_call_stack);
 }
 static void worker(void *arg) {
     (void)arg;
     for (;;) {
-        if (!s_session) {
+        if (!busy()) {
             step();
             continue;
         }
@@ -737,10 +797,10 @@ static void discovery(void *arg) {
         if (!advertised) {
             char name[33];
             device_name_get(name, sizeof(name));
-            mdns_txt_item_t txt[] = {{"v", TALK_VERSION}, {"name", name}};
+            mdns_txt_item_t txt[] = {{"v", TALK_VERSION}, {"name", name}, {"id", s_key}};
             // AirPlay owns mdns_init(). Retry until that task has initialized it;
             // add our service once, well after its initial probing settles.
-            if (mdns_service_add(NULL, "_audioknob", "_tcp", TALK_RTSP_PORT, txt, 2) != ESP_OK)
+            if (mdns_service_add(NULL, "_audioknob", "_tcp", TALK_RTSP_PORT, txt, 3) != ESP_OK)
                 continue;
             advertised = true;
         } else if (rename) {
@@ -757,15 +817,19 @@ static void discovery(void *arg) {
         ui_talk_peer_t peers[UI_TALK_MAX] = {0};
         int count = 0;
         for (mdns_result_t *r = results; r && count < UI_TALK_MAX; r = r->next) {
-            const char *name = r->instance_name;
+            const char *name = r->instance_name, *key = NULL;
             bool version = false;
             for (size_t i = 0; i < r->txt_count; i++) {
+                if (!r->txt[i].value)
+                    continue;
                 if (!strcmp(r->txt[i].key, "name"))
                     name = r->txt[i].value;
+                if (!strcmp(r->txt[i].key, "id"))
+                    key = r->txt[i].value;
                 if (!strcmp(r->txt[i].key, "v") && !strcmp(r->txt[i].value, TALK_VERSION))
                     version = true;
             }
-            if (!version || !name || r->port != TALK_RTSP_PORT)
+            if (!version || !name || !notes_valid_key(key) || !strcmp(key, s_key) || r->port != TALK_RTSP_PORT)
                 continue;
             for (mdns_ip_addr_t *a = r->addr; a; a = a->next) {
                 if (a->addr.type != ESP_IPADDR_TYPE_V4 || a->addr.u_addr.ip4.addr == inet_addr(own_ip))
@@ -777,6 +841,7 @@ static void discovery(void *arg) {
                         duplicate = true;
                 if (!duplicate) {
                     peers[count].id = id;
+                    snprintf(peers[count].key, sizeof(peers[count].key), "%s", key);
                     snprintf(peers[count++].name, 33, "%s", name);
                 }
                 break;
@@ -787,9 +852,15 @@ static void discovery(void *arg) {
         s_ui.count = count;
         memcpy(s_ui.peers, peers, sizeof(peers));
         xSemaphoreGive(s_lock);
+        notes_set_peers(peers, count);
     }
 }
 void talk_init(void) {
+    uint8_t mac[6];
+    ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
+    snprintf(s_key, sizeof(s_key), "%02x%02x%02x%02x%02x%02x", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    note_audio_init();
+    notes_init(s_key);
     s_lock = xSemaphoreCreateMutex();
     s_write_lock = xSemaphoreCreateMutex();
     s_stack_lock = xSemaphoreCreateMutex();
@@ -821,7 +892,13 @@ void talk_network_up(void) {
     // WiFi brings lwIP up after talk_init(). Opening a socket before then
     // asserts in tcpip_send_msg_wait_sem. Keep one listener across reconnects.
     if (first) {
-        talk_rtsp_init(&(talk_rtsp_ops_t){.ring = ring, .answer = answer, .stop = ring_stop, .active = ring_active});
+        talk_rtsp_init(&(talk_rtsp_ops_t){.ring = ring,
+                                          .answer = answer,
+                                          .stop = ring_stop,
+                                          .active = ring_active,
+                                          .note = notes_receive,
+                                          .played = notes_receipt},
+                       s_key);
         ESP_LOGI(TAG, "LAN voice ready, RTSP %d / RTP %d", TALK_RTSP_PORT, TALK_RTP_PORT);
     }
 }

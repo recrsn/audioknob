@@ -19,8 +19,10 @@ bool wifi_get_station(char *ssid, size_t slen, char *ip, size_t ilen) {
     snprintf(ip, ilen, "127.0.0.1");
     return true;
 }
-static uint32_t ring(uint32_t ip, uint16_t port, uint16_t seq, const char *name) {
+#define OUR_KEY "a1b2c3d4e5f6"
+static uint32_t ring(uint32_t ip, uint16_t port, uint16_t seq, const char *key, const char *name) {
     assert(ip == inet_addr("127.0.0.1") && port == 42425 && seq == 65000 && !strcmp(name, "Host test knob"));
+    assert(!strcmp(key, OUR_KEY));
     if (atomic_load(&ringing_call))
         return 0;
     uint32_t call = atomic_fetch_add(&next_call, 1);
@@ -58,6 +60,38 @@ static talk_dial_t wait_answer(int fd, uint16_t *seq) {
     }
     return r;
 }
+// Notes: the first is saved, any other finds the store full.
+static atomic_uint notes_saved, receipts;
+static int note(const char *key, const char *name, const char *id, const uint8_t wave[UI_NOTE_WAVE], uint8_t *ogg,
+                size_t len) {
+    assert(!strcmp(key, OUR_KEY) && !strcmp(name, "Host test knob"));
+    for (int i = 0; i < UI_NOTE_WAVE; i++)
+        assert(wave[i] == i * 4);
+    bool first = !strcmp(id, "0123456789abcdef");
+    assert(len == 5 && !memcmp(ogg, "OggS!", 5));
+    free(ogg);
+    if (!first)
+        return 507;
+    atomic_fetch_add(&notes_saved, 1);
+    return 200;
+}
+static void played(const char *key, const char *id) {
+    assert(!strcmp(key, OUR_KEY) && !strcmp(id, "0123456789abcdef"));
+    atomic_fetch_add(&receipts, 1);
+}
+static void notes(void) {
+    uint8_t wave[UI_NOTE_WAVE];
+    for (int i = 0; i < UI_NOTE_WAVE; i++)
+        wave[i] = i * 4;
+    uint32_t ip = inet_addr("127.0.0.1");
+    assert(talk_rtsp_send_note(ip, "0123456789abcdef", wave, (const uint8_t *)"OggS!", 5) == 200);
+    assert(atomic_load(&notes_saved) == 1);
+    assert(talk_rtsp_send_note(ip, "fedcba9876543210", wave, (const uint8_t *)"OggS!", 5) == 507);
+    assert(talk_rtsp_send_played(ip, "0123456789abcdef") == 200);
+    wait_for(&receipts, 1);
+    // A note with no body is refused before reaching talk.c.
+    assert(talk_rtsp_send_note(ip, "0123456789abcdef", wave, NULL, 0) == 400);
+}
 static void legacy_parser(void) {
     int fd[2];
     assert(socketpair(AF_UNIX, SOCK_STREAM, 0, fd) == 0);
@@ -75,7 +109,7 @@ static void legacy_parser(void) {
 }
 int main(void) {
     legacy_parser();
-    talk_rtsp_init(&(talk_rtsp_ops_t){ring, answer, stop, is_active});
+    talk_rtsp_init(&(talk_rtsp_ops_t){ring, answer, stop, is_active, note, played}, OUR_KEY);
     usleep(200000);
     uint16_t port = 0, seq = 0;
 
@@ -124,5 +158,6 @@ int main(void) {
         usleep(10000);
     assert(!talk_rtsp_alive(fd));
     talk_rtsp_end(fd);
-    puts("Shared AirPlay parser and RTSP call ring/answer/busy/decline/hang-up passed");
+    notes();
+    puts("Shared AirPlay parser, RTSP call ring/answer/busy/decline/hang-up and notes passed");
 }

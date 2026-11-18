@@ -1,6 +1,7 @@
 #pragma once
 
-// The clock's top band: Talk while a call is on, a tap away from its page. The now-playing pill gives way to the
+// The clock's top band: Talk while a call is on, else an unheard voice note or
+// missed call, a tap away from its page. The now-playing pill gives way to the
 // same item.
 
 #include "ui/internal.h"

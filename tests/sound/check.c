@@ -183,6 +183,23 @@ int main(void) {
     assert(atomic_load(&held) && !retired());
     atomic_store(&block_topup, false);
     stop(); idle();
+    // A voice note's clip: held and ducked while it plays, retired once
+    // drained, and stopping one mid-way discards what's queued.
+    int16_t clip[320] = {0};
+    assert(alarm_sound_clip_start());
+    for (int i = 0; i < 10; i++) assert(alarm_sound_clip_write(clip, 320, 200) == 320);
+    alarm_sound_clip_finish();
+    WAIT_FOR(atomic_load(&held));
+    WAIT_FOR(!alarm_sound_clip_playing());
+    alarm_sound_clip_stop();
+    idle();
+    assert(alarm_sound_clip_start());
+    alarm_sound_clip_write(clip, 320, 0);
+    alarm_sound_clip_stop();
+    assert(!alarm_sound_clip_write(clip, 320, 0));
+    idle();
+    alarm_sound_notify(ALARM_SOUND_NOTE);
+    idle();
 #endif
     // Pause after handle retirement but before actual task deletion. A new
     // request must get a successor and the old task must not touch its state.

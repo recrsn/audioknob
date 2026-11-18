@@ -123,6 +123,9 @@ int ui_tools_app_of(lv_obj_t *screen);
 // What's in progress on `app` -- a countdown's time left, a stopwatch's
 // time -- for the clock's chips and the launcher; false when nothing is.
 bool ui_tools_status(ui_app_t app, char *buf, size_t len);
+// Something on `app` waiting to be seen (an unheard voice note); false when
+// nothing is.
+bool ui_tools_notice(ui_app_t app, char *buf, size_t len);
 
 // Current conditions for the clock face's weather complication, in the
 // configured unit. False until weather has arrived.
@@ -184,4 +187,5 @@ const pairing_status_t *ui_pairing_status(void);
 void ui_settings_refresh(void);
 
 void ui_talk_page_update(const ui_talk_t *talk);
+void ui_talk_notes_update(const ui_notes_t *notes);
 

@@ -77,6 +77,10 @@ typedef struct {
     // Optional, for progress that isn't a countdown (a stopwatch): writes it
     // and returns true, or returns false when there's none.
     bool (*status)(char *buf, size_t len);
+    // Optional, for something waiting to be seen rather than in progress (a
+    // voice note): the clock's band and the launcher show it, but it neither
+    // takes a chip nor keeps the page from going home.
+    bool (*notice)(char *buf, size_t len);
 } tool_page_desc_t;
 
 void tool_page_register(lv_obj_t *screen, const tool_page_desc_t *desc);
